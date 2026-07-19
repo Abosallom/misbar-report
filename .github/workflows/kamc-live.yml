@@ -1,0 +1,38 @@
+name: KAMC live snapshot
+on:
+  schedule:
+    # every 30 min, 02:00-16:59 UTC = 05:00-19:59 Riyadh (working window)
+    - cron: '*/30 2-16 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: kamc-live
+  cancel-in-progress: false
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Fetch, strip, encrypt
+        env:
+          GRAFANA_TOKEN: ${{ secrets.GRAFANA_TOKEN }}
+          DATA_KEY: ${{ secrets.DATA_KEY }}
+        run: node scripts/fetch-kamc.mjs
+      - name: Commit snapshot if changed
+        run: |
+          if git status --porcelain data/ | grep -q .; then
+            git config user.name "kamc-live-bot"
+            git config user.email "actions@users.noreply.github.com"
+            git add data/
+            git commit -m "chore: refresh encrypted KAMC snapshot"
+            git push
+          else
+            echo "no changes"
+          fi
