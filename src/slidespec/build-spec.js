@@ -12,7 +12,14 @@ const CHART_BLUE = '#4472C4';   // chart1 series "الطلبات" (accent1)
 const CHART_GRAY = '#A5A5A5';   // chart1 series "النتائج غير المكتملة" (accent3)
 const CARD_TITLE = '#DCE6F1';   // overall-average card sub-title
 
-const AR_MONTHS = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو'];
+// Gregorian month-name lookup ('01'..'12' -> Arabic). Drives the monthly table
+// headers and BOTH slide-3 chart category lists off m.kpi.monthly, so labels track
+// the data instead of being pinned to Jan–Jul.
+const MONTH_NAMES_AR = {
+  '01': 'يناير', '02': 'فبراير', '03': 'مارس',   '04': 'أبريل',  '05': 'مايو',   '06': 'يونيو',
+  '07': 'يوليو', '08': 'أغسطس',  '09': 'سبتمبر', '10': 'أكتوبر', '11': 'نوفمبر', '12': 'ديسمبر',
+};
+const arMonthLabel = (key) => MONTH_NAMES_AR[String(key).split('-')[1]] || String(key);
 
 // ---- tiny element factories -------------------------------------------------
 const rect = (x, y, w, h, fill, extra = {}) => ({ t: 'rect', x, y, w, h, fill, ...extra });
@@ -145,25 +152,43 @@ function buildExecFunnel(m) {
 // ============================================================================
 function buildMonthly(m) {
   const mo = m.kpi.monthly;
-  const oTot = 618, rTot = 437, iTot = 181, cTot = '70.7%';
   const bg = C.bgLight;
-  // logical (deck) order: [label, jan..jul, total]; reverse -> visual L->R
-  const header = rev(['المؤشر', ...AR_MONTHS, { text: 'الإجمالي', fill: C.navyDark }]);
+  // Month list derived from the data — drives the table headers AND both chart
+  // category lists so labels/series follow m.kpi.monthly, not a fixed Jan–Jul.
+  const monthKeys = mo.map((x) => x.month);
+  const monthLabels = monthKeys.map(arMonthLabel);
+  // Totals column computed from the rows (guard divide-by-zero on completion).
+  const oTot = mo.reduce((s, x) => s + x.orders, 0);
+  const rTot = mo.reduce((s, x) => s + x.results, 0);
+  const iTot = mo.reduce((s, x) => s + x.incomplete, 0);
+  const cPct = oTot > 0 ? Math.round((rTot / oTot) * 1000) / 10 : null; // round1(results/orders*100)
+  const cTot = pctMonthly(cPct);
+  // logical (deck) order: [label, months…, total]; reverse -> visual L->R
+  const header = rev(['المؤشر', ...monthLabels, { text: 'الإجمالي', fill: C.navyDark }]);
   const rowOrders = rev([{ text: 'الطلبات', align: 'right' }, ...mo.map((x) => String(x.orders)), { text: String(oTot), fill: bg, bold: true }]);
   const rowResults = rev([{ text: 'النتائج المستلمة', align: 'right' }, ...mo.map((x) => String(x.results)), { text: String(rTot), fill: bg, bold: true }]);
   const rowIncomplete = rev([{ text: 'النتائج غير المكتملة', align: 'right' }, ...mo.map((x) => String(x.incomplete)), { text: String(iTot), fill: bg, bold: true }]);
   const rowCompletion = rev([{ text: 'نسبة الاكتمال', align: 'right' }, ...mo.map((x) => pctMonthly(x.completionPct)), { text: cTot, fill: bg, bold: true }]);
 
+  // Column widths: label + N month cols + total over the fixed table width. The
+  // canonical 7-month deck keeps its original per-column widths verbatim
+  // (pixel-identical); any other count spreads the middle span evenly.
+  const MONTH_COLW = [0.623, 0.623, 0.623, 0.561, 0.686, 0.679, 0.679]; // deck OOXML, 7 months
+  const LABEL_COLW = 1.312, TOTAL_COLW = 0.874, TABLE_W = 6.661;
+  const monthColW = mo.length === MONTH_COLW.length
+    ? MONTH_COLW
+    : Array(mo.length).fill(Math.round(((TABLE_W - LABEL_COLW - TOTAL_COLW) / mo.length) * 1000) / 1000);
+
   const table = {
-    t: 'table', x: 6.604, y: 1.069, w: 6.661, rtl: true, rowH: 0.456,
+    t: 'table', x: 6.604, y: 1.069, w: TABLE_W, rtl: true, rowH: 0.456,
     header: { fill: C.navy, color: C.white, bold: true },
-    colW: rev([1.312, 0.623, 0.623, 0.623, 0.561, 0.686, 0.679, 0.679, 0.874]),
+    colW: rev([LABEL_COLW, ...monthColW, TOTAL_COLW]),
     rows: [header, rowOrders, rowResults, rowIncomplete, rowCompletion],
   };
 
   const monthlyChart = {
     t: 'chart', kind: 'colClustered', x: 0.5, y: 1.07, w: 6.0, h: 3.4,
-    categories: AR_MONTHS,
+    categories: monthLabels,
     series: [
       { name: 'الطلبات', values: mo.map((x) => x.orders), color: CHART_BLUE },
       { name: 'النتائج المستلمة', values: mo.map((x) => x.results), color: C.greenBright },
@@ -173,18 +198,21 @@ function buildMonthly(m) {
   };
 
   const t = m.kpi.turnaround;
+  // Key both series by month over the SAME derived month list as the categories,
+  // so a month absent from perMonth becomes a null gap in place (rather than
+  // shifting the later months' points left and misaligning the line).
   const turnaroundChart = {
     t: 'chart', kind: 'line', x: 4.139, y: 4.583, w: 9.139, h: 2.389,
-    categories: AR_MONTHS,
+    categories: monthLabels,
     series: [
-      { name: 'الفعلي', values: t.perMonth.map((p) => p.actual), color: C.navyChart, marker: 'circle' },
-      { name: 'المتوقع', values: t.perMonth.map((p) => p.expected), color: C.orangeSeries, dash: true, marker: 'diamond' },
+      { name: 'الفعلي', values: monthKeys.map((k) => t.perMonth.find((p) => p.month === k)?.actual ?? null), color: C.navyChart, marker: 'circle' },
+      { name: 'المتوقع', values: monthKeys.map((k) => t.perMonth.find((p) => p.month === k)?.expected ?? null), color: C.orangeSeries, dash: true, marker: 'diamond' },
     ],
     opts: { legend: 'bottom', title: 'الأيام', valMin: 0 },
   };
 
   const els = [
-    ...chrome('الطلبات والنتائج الشهرية', 3),
+    ...chrome('الطلبات والنتائج الشهرية', 2),
     table,
     monthlyChart,
     turnaroundChart,
@@ -235,7 +263,7 @@ function buildCompliance(m) {
   };
 
   const els = [
-    ...chrome('مقياس الالتزام', 4),
+    ...chrome('مقياس الالتزام', 3),
     labTable,
     rect(0.6, 4.12, 12.3, 0.012, C.border),
     text(0.6, 4.16, 12.3, 0.4, 'تفاصيل الطلبات المتأخرة', 14, { bold: true, color: C.navy, align: 'center', valign: 'middle', rtl: true }),
@@ -281,24 +309,44 @@ function tasksSubhead(title, y = 1.217) {
   ];
 }
 
+// Challenges/risks share a fixed slot: header + up to 3 body rows at rowH 0.28 from
+// y=5.88 -> bottom 7.00, clear of the footer border at 7.10. Beyond 3 rows we keep
+// 2 data rows and spend the 3rd slot on a '+ N أخرى' note (a separate italic text
+// element — grammar cells can't be italic/spanned), so the block bottom stays 7.00.
+const CR_CAP = 3;
+const CR_TABLE_Y = 5.88, CR_ROW_H = 0.28;
+const capCrRows = (rows) => (rows.length <= CR_CAP
+  ? { rows, hidden: 0 }
+  : { rows: rows.slice(0, CR_CAP - 1), hidden: rows.length - (CR_CAP - 1) });
+const crNote = (x, hidden) => text(
+  x, CR_TABLE_Y + CR_CAP * CR_ROW_H, 6.0, CR_ROW_H, `+ ${hidden} أخرى`, 8.5,
+  { italic: true, color: C.slate600, align: 'center', valign: 'middle', rtl: true },
+);
+
 function buildAction(m, variant) {
   // Block 1 — tasks table. nupco = current only; internal appends the internal rows.
   const taskRows = variant === 'nupco' ? m.tasksCurrent : [...m.tasksCurrent, ...m.tasksInternal];
   const n = taskRows.length;
   const CAP = 15;
   const shown = Math.min(n, CAP);
-  const AREA = 3.35;
+  const hasNote = n > CAP;
+  // Reserve the overflow note's slot (0.26") out of AREA up front, so the table rows
+  // shrink to fit and the note lands ABOVE the support band (starts 4.62). Without
+  // this the fixed-height table pushed the note to y=4.50 (bottom 4.74), overlapping
+  // the band. With it, noteY + 0.24 ≤ 4.60. AREA is untouched when there is no note,
+  // so the n≤15 layout is unchanged.
+  const AREA = hasNote ? 3.35 - 0.26 : 3.35;
   const rowH = Math.max(0.18, Math.min(0.30, AREA / (shown + 1)));
   const bodySize = rowH >= 0.26 ? 9.5 : rowH >= 0.21 ? 9 : 8;
   const headerSize = bodySize;
   const table = taskTable(taskRows.slice(0, shown), { y: 1.15, rowH, bodySize, headerSize });
 
   const els = [
-    ...chrome('المهام والتحديات والمخاطر', 5),
+    ...chrome('المهام والتحديات والمخاطر', 4),
     ...tasksSubhead('المهام الحالية', 0.84),
     table,
   ];
-  if (n > CAP) {
+  if (hasNote) {
     const noteY = 1.15 + (shown + 1) * rowH;
     els.push(text(0.641, noteY, 12.259, 0.24, `+ ${n - CAP} مهمة أخرى`, bodySize, { italic: true, color: C.slate600, align: 'center', valign: 'middle', rtl: true }));
   }
@@ -321,11 +369,12 @@ function buildAction(m, variant) {
     { text: c.desc, align: 'right' },
     String(i + 1),
   ]);
+  const chCap = capCrRows(chRows);
   const chTable = {
-    t: 'table', x: 6.80, y: 5.88, w: 6.0, rtl: true, rowH: 0.28, bodySize: 8.5, headerSize: 9,
+    t: 'table', x: 6.80, y: CR_TABLE_Y, w: 6.0, rtl: true, rowH: CR_ROW_H, bodySize: 8.5, headerSize: 9,
     header: { fill: C.navy, color: C.white, bold: true },
     colW: [1.832, 0.406, 1.245, 2.281, 0.235],
-    rows: [chHeader, ...chRows],
+    rows: [chHeader, ...chCap.rows],
   };
 
   const rkHeader = ['التأثير', 'إحتمالية', 'المسؤول', 'الخطر', '#'];
@@ -336,11 +385,12 @@ function buildAction(m, variant) {
     { text: r.desc, align: 'right' },
     String(i + 1),
   ]);
+  const rkCap = capCrRows(rkRows);
   const rkTable = {
-    t: 'table', x: 0.5, y: 5.88, w: 6.0, rtl: true, rowH: 0.28, bodySize: 8.5, headerSize: 9,
+    t: 'table', x: 0.5, y: CR_TABLE_Y, w: 6.0, rtl: true, rowH: CR_ROW_H, bodySize: 8.5, headerSize: 9,
     header: { fill: C.navy, color: C.white, bold: true },
     colW: [0.683, 0.580, 1.127, 3.415, 0.195],
-    rows: [rkHeader, ...rkRows],
+    rows: [rkHeader, ...rkCap.rows],
   };
 
   els.push(
@@ -355,6 +405,9 @@ function buildAction(m, variant) {
     text(0.5, 5.60, 5.60, 0.24, 'المخاطر', 14, { bold: true, color: C.navy, align: 'right', valign: 'middle', rtl: true }),
     rkTable,
   );
+  // Overflow notes occupy the 3rd body-row slot (bottom 7.00, ≤ 7.05).
+  if (chCap.hidden > 0) els.push(crNote(6.80, chCap.hidden));
+  if (rkCap.hidden > 0) els.push(crNote(0.5, rkCap.hidden));
 
   return { id: 'action', bg: C.white, elements: els };
 }

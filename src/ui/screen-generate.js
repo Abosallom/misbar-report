@@ -50,12 +50,16 @@ function installFastTimers() {
 function fallbackModel(state, store) {
   const kpi = state.engineOutput || buildMockEngineOutput(store.settings);
   const tracker = state.parsed.tracker || buildMockTracker();
+  // Mirror the drafts/review split so NUPCO files never leak internal or closed
+  // tasks: drop مغلق (closed) rows, then partition by فئة (internal = داخلي).
+  const isInternal = (t) => /داخل/.test((t && t.category) || '');
+  const visible = (tracker.tasks || []).filter((t) => !t.hidden && t.status !== 'مغلق');
   return {
     reportDate: state.reportDate || todayISO(),
     kpi,
     panels: { supportRequired: [], completedTasks: [], plannedTasks: [] },
-    tasksCurrent: (tracker.tasks || []).filter((t) => !t.hidden),
-    tasksInternal: [],
+    tasksCurrent: visible.filter((t) => !isInternal(t)),
+    tasksInternal: visible.filter((t) => isInternal(t)),
     challenges: tracker.challenges || [],
     risks: tracker.risks || [],
     scorecard: (store.settings && store.settings.scorecard) || [],

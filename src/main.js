@@ -62,10 +62,12 @@ function readLocalSettings() {
       tatLookup: { ...seed.tatLookup, ...(s.tatLookup || {}) },
       displayNames: { ...seed.displayNames, ...(s.displayNames || {}) },
       historicalConstants: {
-        cancelledByMonth: {
-          ...seed.historicalConstants.cancelledByMonth,
-          ...((s.historicalConstants || {}).cancelledByMonth || {}),
-        },
+        // Additive (v2) semantics: stored maps are MANUAL-only. A pre-v2 doc may
+        // still carry max-era data-derived values (e.g. 2026-05:6) which would
+        // double-count — replace with the seed manual map for those docs.
+        cancelledByMonth: s.schemaVersion === 2
+          ? { ...seed.historicalConstants.cancelledByMonth, ...((s.historicalConstants || {}).cancelledByMonth || {}) }
+          : { ...seed.historicalConstants.cancelledByMonth },
       },
       snapshot: migrateLocalSnapshot(s.snapshot, seed.snapshot),
       grafana: { ...seed.grafana, ...(s.grafana || {}) },
@@ -83,7 +85,7 @@ function createLocalStore(persistent) {
   const read = () => { cached = readLocalSettings(); return clone(cached); };
   const write = (s) => {
     s = clone(s);
-    s.schemaVersion = s.schemaVersion || 1;
+    s.schemaVersion = 2; // keep the fallback aligned with store.js SCHEMA_VERSION
     s.updatedAt = new Date().toISOString();
     cached = s;
     if (persistent) { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch { /* ignore */ } }

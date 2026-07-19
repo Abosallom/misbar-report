@@ -168,6 +168,66 @@ test('corrupt JSON resets to seeds', () => {
   }
 });
 
+// ---- v1 → v2 migration ------------------------------------------------------
+const MANUAL_SEED = { '2026-01': 8, '2026-02': 1, '2026-03': 30, '2026-04': 4 }; // sum 43
+
+test('v1 stored doc migrates to v2: cancelledByMonth reset to the manual seed, other fields preserved', () => {
+  const mock = fresh();
+  mock.setItem(
+    SETTINGS_KEY,
+    JSON.stringify({
+      schemaVersion: 1,
+      tatLookup: { 'CUSTOM EDIT': 7 },
+      displayNames: { 'Long Name': 'LN' },
+      scorecard: [{ lab: 'L1', target: 5 }],
+      historicalConstants: {
+        // v1 max-era values: manual months PLUS data-derived 2026-05/06 that
+        // would double-count under v2's additive engine.
+        cancelledByMonth: { '2026-01': 8, '2026-02': 1, '2026-03': 30, '2026-04': 4, '2026-05': 6, '2026-06': 4 },
+      },
+      snapshot: { asOf: '2026-06-01', numbers: { completed: 400 } },
+      grafana: { baseUrl: 'https://g/h', accessToken: 'tk', panelId: 12, enabled: true },
+      cachedTracker: { model: { tasks: [{ task: 'x' }] }, updatedAt: '2026-05-01T00:00:00.000Z' },
+    }),
+  );
+
+  const s = store.loadSettings();
+  assert.equal(s.schemaVersion, 2); // bumped
+  // cancelledByMonth reset to manual-only seed (data-derived months dropped).
+  assert.deepEqual(s.historicalConstants.cancelledByMonth, MANUAL_SEED);
+  const sum = Object.values(s.historicalConstants.cancelledByMonth).reduce((a, b) => a + b, 0);
+  assert.equal(sum, 43);
+  // Every other field preserved.
+  assert.equal(s.tatLookup['CUSTOM EDIT'], 7);
+  assert.equal(s.displayNames['Long Name'], 'LN');
+  assert.equal(s.scorecard[0].lab, 'L1');
+  assert.equal(s.snapshot.numbers.completed, 400);
+  assert.equal(s.snapshot.asOf, '2026-06-01');
+  assert.equal(s.grafana.baseUrl, 'https://g/h');
+  assert.equal(s.grafana.panelId, 12);
+  assert.equal(s.cachedTracker.model.tasks.length, 1);
+  // Persisted with the bump so the migration runs only once.
+  const stored = JSON.parse(mock.getItem(SETTINGS_KEY));
+  assert.equal(stored.schemaVersion, 2);
+  assert.deepEqual(stored.historicalConstants.cancelledByMonth, MANUAL_SEED);
+});
+
+test('v2 stored doc round-trips without migration', () => {
+  fresh();
+  const s = store.loadSettings();
+  assert.equal(s.schemaVersion, 2);
+  s.tatLookup['RT TEST'] = 5;
+  s.historicalConstants.cancelledByMonth['2026-01'] = 21; // user edit survives
+  store.saveSettings(s);
+
+  store.__resetForTests();
+  const reloaded = store.loadSettings();
+  assert.equal(reloaded.schemaVersion, 2);
+  assert.equal(reloaded.tatLookup['RT TEST'], 5);
+  // No reset on a v2 reload — the user edit stays.
+  assert.equal(reloaded.historicalConstants.cancelledByMonth['2026-01'], 21);
+});
+
 // ---- updateSnapshot ---------------------------------------------------------
 test('updateSnapshot merges partial numbers over existing and updates asOf', () => {
   fresh();
@@ -203,9 +263,10 @@ test('exportSettings returns dated filename and a blob of the doc', async () => 
 test('importSettings rejects a bad schemaVersion', () => {
   fresh();
   store.loadSettings();
+  // v1 and v2 are both accepted now; only other versions are rejected.
   assert.throws(
-    () => store.importSettings(JSON.stringify({ schemaVersion: 2, tatLookup: {} })),
-    /إصدار المخطط غير مدعوم|schemaVersion|2/,
+    () => store.importSettings(JSON.stringify({ schemaVersion: 99, tatLookup: {} })),
+    /إصدار المخطط غير مدعوم|schemaVersion|99/,
   );
 });
 
@@ -244,7 +305,9 @@ test('importSettings deep-merges import-wins and returns correct counts', () => 
   const existingVal = base.tatLookup[existingName];
 
   const incoming = {
-    schemaVersion: 1,
+    // v2 import: cancelledByMonth merges (import wins) rather than being reset —
+    // the v1 reset transform is exercised separately below.
+    schemaVersion: 2,
     tatLookup: {
       'BRAND NEW TEST A': 11, // added
       'BRAND NEW TEST B': 12, // added
@@ -307,6 +370,61 @@ test('importSettings can replace the scorecard array wholesale', () => {
   assert.equal(after.scorecard[0].lab, 'Only Lab');
 });
 
+// ---- import: v1 backups + v2 merge ------------------------------------------
+test('importSettings accepts a v1 backup and resets cancelledByMonth to the manual seed', () => {
+  fresh();
+  store.loadSettings();
+
+  const summary = store.importSettings(
+    JSON.stringify({
+      schemaVersion: 1,
+      tatLookup: { 'IMPORTED TAT': 3 },
+      // v1 max-era map with data-derived months — must be discarded on import.
+      historicalConstants: { cancelledByMonth: { '2026-01': 99, '2026-05': 6, '2026-06': 4 } },
+    }),
+  );
+  assert.ok(summary); // imported without throwing
+
+  const after = store.loadSettings();
+  assert.equal(after.schemaVersion, 2);
+  // v1 cancelledByMonth dropped in favor of the manual seed.
+  assert.deepEqual(after.historicalConstants.cancelledByMonth, MANUAL_SEED);
+  // Other imported fields still land.
+  assert.equal(after.tatLookup['IMPORTED TAT'], 3);
+});
+
+test('importSettings v2 backup merges cancelledByMonth (import wins) without resetting', () => {
+  fresh();
+  store.loadSettings();
+
+  store.importSettings(
+    JSON.stringify({
+      schemaVersion: 2,
+      historicalConstants: { cancelledByMonth: { '2026-01': 15, '2026-07': 2 } },
+    }),
+  );
+
+  const after = store.loadSettings();
+  assert.equal(after.historicalConstants.cancelledByMonth['2026-01'], 15); // import won
+  assert.equal(after.historicalConstants.cancelledByMonth['2026-07'], 2); // added
+  assert.equal(after.historicalConstants.cancelledByMonth['2026-03'], 30); // seed preserved
+});
+
+test('importSettings folds a finite legacy prevCompleted but drops a non-finite one', () => {
+  fresh();
+  store.loadSettings();
+
+  // Finite → folds into numbers.completed.
+  store.importSettings(JSON.stringify({ schemaVersion: 2, snapshot: { asOf: '2026-08-01', prevCompleted: 321 } }));
+  assert.equal(store.loadSettings().snapshot.numbers.completed, 321);
+
+  // Non-finite → dropped; the previous value survives the merge.
+  store.importSettings(JSON.stringify({ schemaVersion: 2, snapshot: { asOf: '2026-08-02', prevCompleted: 'oops' } }));
+  const after = store.loadSettings();
+  assert.equal(after.snapshot.numbers.completed, 321); // unchanged, not NaN
+  assert.equal(after.snapshot.asOf, '2026-08-02');
+});
+
 // ---- ephemeral fallback -----------------------------------------------------
 test('ephemeral fallback when localStorage write throws', () => {
   fresh(makeThrowingWriteMock());
@@ -346,7 +464,7 @@ test('first run seeds grafana defaults (enabled false, panelId 49) and null cach
 });
 
 // ---- load-time softening backfills the new keys -----------------------------
-test('load adds missing grafana/cachedTracker to an old stored doc (no schema bump)', () => {
+test('load backfills missing grafana/cachedTracker on an old (v1) stored doc during migration', () => {
   const mock = fresh();
   mock.setItem(
     SETTINGS_KEY,
@@ -358,7 +476,7 @@ test('load adds missing grafana/cachedTracker to an old stored doc (no schema bu
   );
 
   const s = store.loadSettings();
-  assert.equal(s.schemaVersion, 1); // no bump
+  assert.equal(s.schemaVersion, 2); // v1 → v2 migration stamps the bump
   assert.deepEqual(s.grafana, { baseUrl: '', accessToken: '', panelId: 49, enabled: false });
   assert.equal(s.cachedTracker, null);
   // Existing fields untouched.

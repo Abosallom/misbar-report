@@ -691,8 +691,12 @@ export function render(container, ctx) {
       });
       input.addEventListener('change', () => {
         const v = toInt(input.value);
-        s.numbers[key] = v != null && v >= 0 ? v : 0;
-        input.value = String(s.numbers[key]);
+        // Read the LIVE snapshot each time: autosave() reloads S.doc, so the `s`
+        // captured at render goes stale after the first edit. Without this,
+        // every edit past the first would mutate the orphaned object and be lost.
+        const cur = snap();
+        cur.numbers[key] = v != null && v >= 0 ? v : 0;
+        input.value = String(cur.numbers[key]);
         autosave();
       });
       inputs[key] = input;

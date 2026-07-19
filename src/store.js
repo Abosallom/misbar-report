@@ -16,7 +16,7 @@ import { TAT_LOOKUP } from './seeds/tat-lookup.js';
 import { SCORECARD_SEED } from './seeds/scorecard.js';
 import { HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED, GRAFANA_SEED } from './seeds/defaults.js';
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 // ---- module state -----------------------------------------------------------
 // _ephemeral: true once any localStorage op has thrown; drives isEphemeral().
@@ -124,13 +124,33 @@ function migrateSnapshotShape(doc) {
   return doc;
 }
 
-/** Version-check + migrate/reset. v1 is the first schema, so any mismatch resets. */
+/**
+ * v1 → v2 forward migration. Under v1 the engine computed cancelled(m) with a
+ * MAX, so cancelledByMonth was allowed to hold data-derived months (2026-05: 6,
+ * 2026-06: 4) alongside the manual ones. v2's engine is ADDITIVE — it adds
+ * cancelledByMonth to the count it derives from the CSV — so keeping those
+ * data-derived values would double-count (note "63" instead of "53"). Reset
+ * cancelledByMonth to the manual-only seed and preserve every other field
+ * (tatLookup edits, scorecard, snapshot, grafana, cachedTracker). The existing
+ * snapshot/grafana/cachedTracker shape softening runs too, then we stamp v2.
+ */
+function migrateV1toV2(doc) {
+  doc.historicalConstants = {
+    cancelledByMonth: { ...HISTORICAL_CONSTANTS_SEED.cancelledByMonth },
+  };
+  migrateSnapshotShape(doc); // widen legacy snapshot + backfill grafana/cachedTracker
+  doc.schemaVersion = 2;
+  return doc;
+}
+
+/** Version-check + migrate/reset. Unknown versions reset to seeds. */
 function migrate(doc) {
   if (!isPlainObject(doc)) {
     console.warn('[misbar/store] settings root is not an object — resetting to seeds.');
     return persist(buildSeedDoc());
   }
   if (doc.schemaVersion === SCHEMA_VERSION) return migrateSnapshotShape(doc);
+  if (doc.schemaVersion === 1) return persist(migrateV1toV2(doc));
   // Future schema bumps add forward-migration cases above this line.
   console.warn(
     `[misbar/store] unsupported schemaVersion ${doc.schemaVersion} ` +
@@ -255,7 +275,8 @@ function validateImport(doc) {
   if (!isPlainObject(doc)) {
     throw new Error('ملف الإعدادات غير صالح: الجذر ليس كائناً.');
   }
-  if (doc.schemaVersion !== SCHEMA_VERSION) {
+  // Accept v1 (transformed on import) or the current v2. Anything else is rejected.
+  if (doc.schemaVersion !== 1 && doc.schemaVersion !== SCHEMA_VERSION) {
     throw new Error(
       `إصدار المخطط غير مدعوم: ${doc.schemaVersion == null ? 'مفقود' : doc.schemaVersion}` +
         ` (المتوقع ${SCHEMA_VERSION}).`,
@@ -371,8 +392,9 @@ function pickImportKeys(doc) {
         if (typeof v === 'number' && Number.isFinite(v)) nums[k] = v;
       }
       picked.numbers = nums;
-    } else if (snap.prevCompleted != null) {
+    } else if (snap.prevCompleted != null && Number.isFinite(Number(snap.prevCompleted))) {
       // legacy import shape → fold into the new numbers.completed baseline
+      // (only when it parses to a finite number; otherwise drop the key)
       picked.numbers = { completed: Number(snap.prevCompleted) };
     }
     out.snapshot = picked;
@@ -443,7 +465,16 @@ export function importSettings(jsonText) {
     throw new Error('ملف غير صالح: تعذّر قراءة JSON.');
   }
   validateImport(incoming);
+  const wasV1 = incoming.schemaVersion === 1;
   incoming = pickImportKeys(incoming); // discard unknown keys — nothing but config may persist
+  if (wasV1) {
+    // A v1 backup's cancelledByMonth carries max-era (data-derived) months that
+    // would double-count under v2's additive engine. Replace it with the
+    // manual-only seed — the same transform the v1→v2 stored-doc migration runs.
+    incoming.historicalConstants = {
+      cancelledByMonth: { ...HISTORICAL_CONSTANTS_SEED.cancelledByMonth },
+    };
+  }
 
   const current = clone(loadSettings());
   const merged = deepMergeImportWins(current, incoming);
