@@ -131,6 +131,7 @@ export async function render(container, ctx) {
   const head = el('div', { class: 'screen__head' }, [
     el('h1', { text: STR.generate.title }),
     el('p', { text: STR.generate.subtitle }),
+    el('p', { class: 'small muted', text: '⏳ ' + STR.generate.keepOpen }),
   ]);
 
   container.appendChild(el('div', { class: 'screen' }, [
@@ -167,7 +168,9 @@ export async function render(container, ctx) {
             const frac = tot ? done / tot : 0;
             bar.set(base + frac * (100 / total), `${f.label} — ${STR.generate.capturing} ${done}/${tot || '?'}`);
           });
-        blob = await withTimeout(job, f.kind === 'pptx' ? 60000 : 120000, f.id);
+        // Generous ceilings: background-tab setTimeout throttling can stretch
+        // JSZip/canvas work from seconds to minutes; only a true hang should trip this.
+        blob = await withTimeout(job, 300000, f.id);
       } catch (e) {
         console.error('[generate] file failed', f.id, e);
       }

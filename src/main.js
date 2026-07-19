@@ -235,6 +235,27 @@ async function boot() {
   const store = await resolveStore();
   state.settings = store.settings;
 
+  // TAT-lookup Excel merge hook consumed by the settings screen (Track C).
+  state.onTatFileMerge = async (file) => {
+    const [{ getXLSX }, { parseTatLookupXlsx }] = await Promise.all([
+      import('./vendor-loader.js'),
+      import('./ingest/xlsx.js'),
+    ]);
+    const XLSX = await getXLSX();
+    const { tests } = parseTatLookupXlsx(await file.arrayBuffer(), XLSX);
+    const doc = store.loadSettings();
+    doc.tatLookup = doc.tatLookup || {};
+    let added = 0, updated = 0;
+    for (const [name, days] of Object.entries(tests || {})) {
+      if (!(name in doc.tatLookup)) added++;
+      else if (doc.tatLookup[name] !== days) updated++;
+      doc.tatLookup[name] = days;
+    }
+    store.saveSettings(doc);
+    state.settings = store.settings;
+    return { added, updated };
+  };
+
   ctx = { state, store, navigate, rerender };
 
   buildShell(store);

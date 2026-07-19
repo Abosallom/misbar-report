@@ -73,10 +73,15 @@
  *  rect  {t:'rect', x,y,w,h, fill, radius?, line?:{color,w}}
  *  text  {t:'text', x,y,w,h, text, size, bold?, italic?, color, align?, valign?, rtl?, font?, lineSpacing?}
  *  table {t:'table', x,y,w, colW:number[], rowH?:number, header?:{fill,color,bold},
+ *         headerSize?:number, bodySize?:number,      // font pt (defaults 10)
  *         rows:Cell[][], rtl?:boolean}   Cell = string | {text, fill?, color?, bold?, align?}
+ *         NOTE: rows/colW are in VISUAL left-to-right order (renderers never flip);
+ *         when header is present, rows[0] is the header row.
  *  chart {t:'chart', kind:'colClustered'|'line'|'barH', x,y,w,h, categories:string[],
- *         series:{name:string, values:(number|null)[], color:string, dash?:boolean}[],
- *         opts?:{dataLabels?:boolean, legend?:'bottom'|'none', valMax?:number, title?:string}}
+ *         series:{name:string, values:(number|null)[], color:string, dash?:boolean,
+ *                 marker?:'circle'|'diamond'}[],
+ *         opts?:{dataLabels?:boolean, legend?:'bottom'|'none', valMax?:number,
+ *                valMin?:number, title?:string}}
  *  group {t:'group', children:Element[]}  (children coords are ABSOLUTE)
  * @typedef {{id:string, bg:string, internalOnly?:boolean, elements:Object[]}} SlideDef
  * @typedef {SlideDef[]} SlideSpec
