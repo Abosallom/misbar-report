@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1E3A8A">
+  <meta name="color-scheme" content="light">
+  <title>مولد تقرير مسبار اليومي</title>
+
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/svg+xml" href="assets/icon.svg">
+  <link rel="apple-touch-icon" href="assets/icon.svg">
+
+  <!-- Preload the two primary font subsets (400 weight covers 400-700 range). -->
+  <link rel="preload" href="assets/fonts/Cairo-400-arabic.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="assets/fonts/Cairo-400-latin.woff2" as="font" type="font/woff2" crossorigin>
+
+  <!-- Stylesheets: fonts + app chrome (Track E) then settings + slide (other tracks). -->
+  <link rel="stylesheet" href="styles/fonts.css">
+  <link rel="stylesheet" href="styles/app.css">
+  <link rel="stylesheet" href="styles/settings.css">
+  <link rel="stylesheet" href="styles/slide.css">
+
+  <!-- PapaParse eager (UMD -> window.Papa). -->
+  <script src="vendor/papaparse.min.js"></script>
+</head>
+<body>
+  <div id="app-shell"></div>
+  <noscript>هذا التطبيق يتطلب تفعيل JavaScript.</noscript>
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
