@@ -9,6 +9,12 @@ import { runGoldenAssertions, goldenOpts } from './assertions.js';
 import { GOLDEN_ORDERS } from './fixtures/golden-orders.js';
 import { TAT_LOOKUP } from '../src/seeds/tat-lookup.js';
 import { GOLDEN_EXPECTED } from './fixtures/golden-expected.js';
+import { SNAPSHOT_SEED } from '../src/seeds/defaults.js';
+
+const ZERO_DELTAS = {
+  total: 0, collected: 0, dispatched: 0, received: 0, completed: 0,
+  awaitingDispatch: 0, shippedNotReceived: 0, awaitingResults: 0, lateNoResult: 0,
+};
 
 test('WORKDAY matches Excel (excl. start, skip weekends)', () => {
   // Thu 2026-04-30 + 3 business days -> Tue 2026-05-05
@@ -103,4 +109,46 @@ test('dedupe is a no-op on the clean golden data', () => {
   const b = compute(GOLDEN_ORDERS, TAT_LOOKUP, { ...goldenOpts(), dedupe: true });
   assert.deepEqual(b.totals, a.totals);
   assert.deepEqual(b.byTest, a.byTest);
+});
+
+// ---- deltas (E6: full 9-key set, increase-only) -----------------------------
+test('deltas: full snapshot.numbers baseline → only completed rises (+47)', () => {
+  // prev = the seed set except completed=390; every other current value equals
+  // its prev, so only completed produces a positive delta (437 − 390 = 47).
+  const prevNumbers = { ...SNAPSHOT_SEED.numbers, completed: 390 };
+  const out = compute(GOLDEN_ORDERS, TAT_LOOKUP, {
+    asOf: goldenOpts().asOf,
+    cancelledByMonth: goldenOpts().cancelledByMonth,
+    snapshot: { asOf: '2026-07-01', numbers: prevNumbers },
+  });
+  assert.deepEqual(out.deltas, { ...ZERO_DELTAS, completed: 47 });
+});
+
+test('deltas: no snapshot → every delta is 0', () => {
+  const opts = goldenOpts();
+  delete opts.prevCompleted; // no baseline of any kind
+  const out = compute(GOLDEN_ORDERS, TAT_LOOKUP, opts);
+  assert.deepEqual(out.deltas, ZERO_DELTAS);
+});
+
+test('deltas: a lower current value never goes negative (clamped at 0)', () => {
+  // prev completed above current → delta clamps to 0, not −N.
+  const out = compute(GOLDEN_ORDERS, TAT_LOOKUP, {
+    asOf: goldenOpts().asOf,
+    cancelledByMonth: goldenOpts().cancelledByMonth,
+    snapshot: { asOf: '2026-07-01', numbers: { ...SNAPSHOT_SEED.numbers, completed: 999 } },
+  });
+  assert.equal(out.deltas.completed, 0);
+});
+
+// ---- additive cancelled (C6) ------------------------------------------------
+test('manual-only cancelled month surfaces (orders 0, cancelled = manual)', () => {
+  // 2026-01 has no orders and no in-data cancels; it appears solely from the
+  // manual constant (8), with orders 0.
+  const out = compute(GOLDEN_ORDERS, TAT_LOOKUP, goldenOpts());
+  const jan = out.monthly.find((m) => m.month === '2026-01');
+  assert.ok(jan, '2026-01 present in monthly');
+  assert.equal(jan.cancelled, 8);
+  assert.equal(jan.orders, 0);
+  assert.equal(jan.results, 0);
 });

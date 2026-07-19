@@ -52,7 +52,10 @@ export function buildMockTracker() {
 
 /** EngineOutput mock seeded from test/fixtures numbers; deltas computed vs settings. */
 export function buildMockEngineOutput(settings) {
-  const prev = (settings && settings.snapshot && settings.snapshot.prevCompleted) || 437;
+  const snap = (settings && settings.snapshot) || {};
+  const prev = (snap.numbers && snap.numbers.completed) != null
+    ? snap.numbers.completed
+    : (snap.prevCompleted != null ? snap.prevCompleted : 437); // legacy shape tolerance
   return {
     totals: { lines: 628, cancelledInData: 10, total: 618 },
     funnel: { created: 618, collected: 612, dispatched: 608, received: 596, resulted: 437 },
@@ -103,7 +106,11 @@ export function buildMockEngineOutput(settings) {
       { testName: 'Kappa/Lambda Free Light Chains [Serum]', late: 15 },
     ],
     unmatchedTests: [],
-    deltas: { completed: 437 - prev },
+    deltas: {
+      total: 0, collected: 0, dispatched: 0, received: 0,
+      completed: Math.max(0, 437 - prev),
+      awaitingDispatch: 0, shippedNotReceived: 0, awaitingResults: 0, lateNoResult: 0,
+    },
   };
 }
 
@@ -442,7 +449,7 @@ export async function render(container, ctx) {
         out = compute(state.parsed.orders, s.tatLookup, {
           asOf: state.reportDate,
           cancelledByMonth: (s.historicalConstants || {}).cancelledByMonth || {},
-          prevCompleted: (s.snapshot || {}).prevCompleted,
+          snapshot: s.snapshot,
         });
         if (out && typeof out.then === 'function') out = await out;
       }

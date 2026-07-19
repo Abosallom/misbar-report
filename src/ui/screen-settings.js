@@ -15,6 +15,20 @@ const TABS = [
   { id: 'backup', label: 'نسخ احتياطي' },
 ];
 
+// Editable snapshot numbers (E6): the full previous-report figure set, in the
+// order EngineOutput.deltas exposes them. Labels are Arabic, RTL-friendly.
+const SNAPSHOT_FIELDS = [
+  { key: 'total', label: 'إجمالي الطلبات' },
+  { key: 'collected', label: 'تم السحب' },
+  { key: 'dispatched', label: 'تم الإرسال' },
+  { key: 'received', label: 'تم الاستلام' },
+  { key: 'completed', label: 'نتائج مكتملة' },
+  { key: 'awaitingDispatch', label: 'بانتظار الإرسال' },
+  { key: 'shippedNotReceived', label: 'أُرسلت ولم تُستلم' },
+  { key: 'awaitingResults', label: 'بانتظار النتائج' },
+  { key: 'lateNoResult', label: 'متأخرة بدون نتيجة' },
+];
+
 // Tiny hyperscript helper — keeps the DOM construction terse and readable.
 function h(tag, attrs, children) {
   const node = document.createElement(tag);
@@ -517,7 +531,7 @@ export function render(container, ctx) {
 
     function updateTotal() {
       const sum = Object.values(hc()).reduce((a, b) => a + (Number(b) || 0), 0);
-      totalEl.textContent = `الإجمالي: ${sum} طلب ملغي`;
+      totalEl.textContent = `إجمالي الإضافات اليدوية: ${sum} طلب ملغي`;
     }
 
     function paint() {
@@ -605,7 +619,7 @@ export function render(container, ctx) {
 
     root.appendChild(
       h('div', { class: 'st-section' }, [
-        h('p', { class: 'st-help', text: 'ذاكرة ثابتة للطلبات الملغاة شهرياً؛ يدمجها المحرّك بأخذ الأكبر بين المخزّن والمحسوب.' }),
+        h('p', { class: 'st-help', text: 'إضافات يدوية للطلبات الملغاة لكل شهر، تُضاف فوق العدد المحسوب من الملف (وليست بديلاً عنه). استخدمها للأشهر التاريخية غير الموجودة في ملف البيانات.' }),
         h('div', { class: 'st-toolbar' }, [totalEl]),
         h('div', { class: 'st-addbar' }, [
           addMonth,
@@ -625,34 +639,56 @@ export function render(container, ctx) {
   }
 
   // ===========================================================================
-  // (d) لقطة التقرير السابق — snapshot
+  // (d) لقطة التقرير السابق — snapshot (full 9-number set + asOf)
   // ===========================================================================
   function renderSnapshot(root) {
+    // Ensure the working doc carries the widened {asOf, numbers} shape; migrate a
+    // legacy {prevCompleted, asOf} snapshot in-place on first paint.
     function snap() {
-      if (!S.doc.snapshot) S.doc.snapshot = { prevCompleted: 0, asOf: '' };
-      return S.doc.snapshot;
+      if (!S.doc.snapshot || typeof S.doc.snapshot !== 'object') {
+        S.doc.snapshot = { asOf: '', numbers: {} };
+      }
+      const s = S.doc.snapshot;
+      if (!s.numbers || typeof s.numbers !== 'object') {
+        s.numbers = {
+          ...SNAPSHOT_SEED.numbers,
+          ...(s.prevCompleted != null ? { completed: Number(s.prevCompleted) } : {}),
+        };
+        delete s.prevCompleted;
+      }
+      return s;
     }
 
-    const prevInput = h('input', {
-      class: 'st-input st-num',
-      type: 'number',
-      min: '0',
-      step: '1',
-      value: String(snap().prevCompleted ?? 0),
-      inputmode: 'numeric',
-      'aria-label': 'المكتمل سابقاً',
-    });
-    prevInput.addEventListener('change', () => {
-      const v = toInt(prevInput.value);
-      snap().prevCompleted = v != null && v >= 0 ? v : 0;
-      prevInput.value = String(snap().prevCompleted);
-      autosave();
+    const s = snap();
+    const inputs = {};
+
+    const numberFields = SNAPSHOT_FIELDS.map(({ key, label }) => {
+      const input = h('input', {
+        class: 'st-input st-num',
+        type: 'number',
+        min: '0',
+        step: '1',
+        value: String(s.numbers[key] ?? 0),
+        inputmode: 'numeric',
+        'aria-label': label,
+      });
+      input.addEventListener('change', () => {
+        const v = toInt(input.value);
+        s.numbers[key] = v != null && v >= 0 ? v : 0;
+        input.value = String(s.numbers[key]);
+        autosave();
+      });
+      inputs[key] = input;
+      return h('div', { class: 'st-field' }, [
+        h('label', { class: 'st-label', text: label }),
+        input,
+      ]);
     });
 
     const asOfInput = h('input', {
       class: 'st-input',
       type: 'date',
-      value: snap().asOf || '',
+      value: s.asOf || '',
       'aria-label': 'حتى تاريخ',
     });
     asOfInput.addEventListener('change', () => {
@@ -662,26 +698,29 @@ export function render(container, ctx) {
 
     root.appendChild(
       h('div', { class: 'st-section' }, [
-        h('p', { class: 'st-help', text: 'قيم آخر تقرير، تُستخدم لحساب فرق «+N» في التقرير القادم.' }),
-        h('div', { class: 'st-field' }, [
-          h('label', { class: 'st-label', text: 'عدد المكتمل في التقرير السابق' }),
-          prevInput,
-        ]),
+        h('p', {
+          class: 'st-help',
+          text: 'أرقام آخر تقرير منشور؛ يقارنها المحرّك بأرقام التقرير القادم ليُظهر شارات «+N» للزيادة فقط.',
+        }),
         h('div', { class: 'st-field' }, [
           h('label', { class: 'st-label', text: 'حتى تاريخ' }),
           asOfInput,
         ]),
+        ...numberFields,
         h('div', { class: 'st-addbar' }, [
           h('button', {
             class: 'st-btn',
             type: 'button',
-            text: 'إعادة تعيين',
+            text: 'إعادة تعيين إلى الافتراضي',
             onClick: () => {
               if (!confirm('إعادة اللقطة إلى القيم الافتراضية؟')) return;
-              S.doc.snapshot = { ...SNAPSHOT_SEED };
+              S.doc.snapshot = { asOf: SNAPSHOT_SEED.asOf, numbers: { ...SNAPSHOT_SEED.numbers } };
               autosave();
-              prevInput.value = String(SNAPSHOT_SEED.prevCompleted);
-              asOfInput.value = SNAPSHOT_SEED.asOf;
+              const reset = snap();
+              for (const { key } of SNAPSHOT_FIELDS) {
+                if (inputs[key]) inputs[key].value = String(reset.numbers[key] ?? 0);
+              }
+              asOfInput.value = reset.asOf || '';
             },
           }),
         ]),

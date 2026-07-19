@@ -112,7 +112,8 @@ export const MOCK_REPORT_MODEL = {
     byLab: BY_LAB,
     byTest: BY_TEST,
     unmatchedTests: [],
-    deltas: { completed: 47 },     // +47 vs previous snapshot
+    // Full delta set (matches the published 09-07 deck): only completed moved +47.
+    deltas: { total: 0, collected: 0, dispatched: 0, received: 0, completed: 47, awaitingDispatch: 0, shippedNotReceived: 0, awaitingResults: 0, lateNoResult: 0 },
   },
   panels: { // PLACEHOLDER bullets (public repo) — real content is auto-drafted from the Tracker
     completedTasks: [

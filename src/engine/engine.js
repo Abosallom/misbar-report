@@ -111,7 +111,10 @@ function buildBuckets(nonCancelled, rejectedAll) {
 
 /**
  * Slide-4 monthly breakdown (order-month, excl. cancelled) merged with the
- * sticky historical cancelledByMonth constants via max(stored, computed).
+ * manual historical cancelledByMonth constants ADDITIVELY (workbook C6 prompt):
+ *   cancelled(m) = countedFromCsv(m) + manualConstants[m]
+ * Months present only in the manual map still surface (orders 0, cancelled =
+ * manual). This replaces the earlier max(stored, computed) merge.
  * @returns {{monthly: object[], cancelledNote: number}}
  */
 function buildMonthly(nonCancelled, rejectedAll, cancelledEnriched, cancelledByMonth) {
@@ -131,9 +134,10 @@ function buildMonthly(nonCancelled, rejectedAll, cancelledEnriched, cancelledByM
 
   const merged = new Map();
   for (const m of sorted) {
-    merged.set(m, Math.max(Number(cancelledByMonth?.[m] || 0), dataCancel.get(m) || 0));
+    // ADDITIVE (C6): computed-from-CSV + manual constant for the same month.
+    merged.set(m, (dataCancel.get(m) || 0) + Number(cancelledByMonth?.[m] || 0));
   }
-  // cancelledNote sums the merged value over every merged month (== D-column total)
+  // cancelledNote sums the additive value over every month (the "* N طلب ملغي" note)
   let cancelledNote = 0;
   for (const v of merged.values()) cancelledNote += v;
 
@@ -239,10 +243,14 @@ function buildByTest(nonCancelled, chartTests) {
  * @param {Object<string, number>} tatLookup  test name → business days
  * @param {Object} [opts]
  * @param {string}  opts.asOf                'YYYY-MM-DD' — the report/TODAY date
- * @param {Object<string,number>} [opts.cancelledByMonth] sticky historical cancels
+ * @param {Object<string,number>} [opts.cancelledByMonth] manual additive cancels (C6)
  * @param {boolean} [opts.tatFallbackFromCsv=true]  use CSV "TAT - Days" on lookup miss
  * @param {string[]} [opts.chartTests]        override the by-test chart catalog
- * @param {number}  [opts.prevCompleted]      baseline for deltas.completed
+ * @param {{asOf?:string, numbers?:Object<string,number>}} [opts.snapshot]
+ *   previous report's published numbers, baseline for the full deltas set (E6).
+ *   Legacy {prevCompleted} is tolerated via opts.prevCompleted below.
+ * @param {number}  [opts.prevCompleted]      LEGACY baseline for deltas.completed
+ *   (used only when opts.snapshot.numbers is absent)
  * @param {boolean} [opts.dedupe=false]       collapse duplicate order-lines first
  * @returns {import('../contracts.js').EngineOutput}
  */
@@ -287,10 +295,33 @@ export function compute(rows, tatLookup, opts = {}) {
   for (const e of enriched) if (!tatIndex.has(normTest(e.testName))) unmatchedSet.add(e.testName);
   const unmatchedTests = [...unmatchedSet].sort();
 
-  const completed = buckets.completed;
-  const deltas = {
-    completed: opts.prevCompleted != null ? completed - opts.prevCompleted : 0,
+  // Full deltas set (E6): INCREASE of each published number vs the previous
+  // report's snapshot. max(0, current − prev) when prev is a number, else 0.
+  // Resolve prev numbers from opts.snapshot.numbers, tolerating legacy shapes:
+  // a bare opts.prevCompleted (or a legacy {prevCompleted} snapshot forwarded as
+  // opts.prevCompleted) seeds only the completed baseline.
+  const prevNumbers =
+    opts.snapshot && opts.snapshot.numbers && typeof opts.snapshot.numbers === 'object'
+      ? opts.snapshot.numbers
+      : opts.prevCompleted != null
+        ? { completed: opts.prevCompleted }
+        : null;
+  const currentNumbers = {
+    total: totals.total,
+    collected: funnel.collected,
+    dispatched: funnel.dispatched,
+    received: funnel.received,
+    completed: buckets.completed,
+    awaitingDispatch: buckets.awaitingDispatch,
+    shippedNotReceived: buckets.shippedNotReceived,
+    awaitingResults: buckets.awaitingResults,
+    lateNoResult: buckets.lateNoResult,
   };
+  const deltas = {};
+  for (const key of Object.keys(currentNumbers)) {
+    const prev = prevNumbers ? prevNumbers[key] : undefined;
+    deltas[key] = typeof prev === 'number' ? Math.max(0, currentNumbers[key] - prev) : 0;
+  }
 
   return {
     totals, funnel, buckets, monthly, cancelledNote, turnaround,

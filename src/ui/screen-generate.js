@@ -63,12 +63,13 @@ function fallbackModel(state, store) {
   };
 }
 
-// Build the SlideSpec ONCE (variant is applied at render time by each renderer).
-async function buildSpecOnce(model) {
+// Build the SlideSpec per VARIANT — the variant changes slide-5 content
+// (task rows), so one shared spec would leak internal tasks into NUPCO files.
+async function buildVariantSpec(model, variant) {
   const mod = await tryImport('../slidespec/build-spec.js');
   const fn = pickFn(mod, ['buildSpec', 'build', 'makeSpec', 'toSpec']);
   if (!fn) return null;
-  let spec = fn(model);
+  let spec = fn(model, { variant });
   if (spec && spec.then) spec = await spec;
   if (spec && !Array.isArray(spec) && spec.slides) spec = spec.slides;
   return Array.isArray(spec) ? spec : null;
@@ -174,11 +175,15 @@ export async function render(container, ctx) {
   try {
     const libs = await getGenLibs();
     bar.set(6, STR.generate.buildingSpec);
-    const spec = await buildSpecOnce(model);
+    const specs = {
+      internal: await buildVariantSpec(model, 'internal'),
+      nupco: await buildVariantSpec(model, 'nupco'),
+    };
     const total = fileDefs.length;
 
     for (let i = 0; i < fileDefs.length; i++) {
       const f = fileDefs[i];
+      const spec = specs[f.variant];
       const base = (i / total) * 100;
       rowEls[f.id].status.textContent = f.kind === 'pptx' ? STR.generate.buildingPptx : STR.generate.renderingSlides;
       bar.set(base + 4, `${f.label} — ${f.kind === 'pptx' ? STR.generate.buildingPptx : STR.generate.buildingPdf}`);
@@ -226,11 +231,23 @@ export async function render(container, ctx) {
     ]));
   } else {
     bar.set(100, STR.generate.done);
-    // Persist snapshot (prevCompleted <- completed) for next run's "+N".
+    // Persist the FULL number snapshot — next run's "+N" chips (E6 rule) compare
+    // every exec/journey number against these.
     try {
-      const completed = model.kpi && model.kpi.buckets && model.kpi.buckets.completed;
-      if (completed != null && typeof store.updateSnapshot === 'function') {
-        store.updateSnapshot({ prevCompleted: completed, asOf: date });
+      const k = model.kpi || {};
+      const numbers = {
+        total: k.totals && k.totals.total,
+        collected: k.funnel && k.funnel.collected,
+        dispatched: k.funnel && k.funnel.dispatched,
+        received: k.funnel && k.funnel.received,
+        completed: k.buckets && k.buckets.completed,
+        awaitingDispatch: k.buckets && k.buckets.awaitingDispatch,
+        shippedNotReceived: k.buckets && k.buckets.shippedNotReceived,
+        awaitingResults: k.buckets && k.buckets.awaitingResults,
+        lateNoResult: k.buckets && k.buckets.lateNoResult,
+      };
+      if (numbers.completed != null && typeof store.updateSnapshot === 'function') {
+        store.updateSnapshot({ asOf: date, numbers });
         state.settings = store.settings;
       }
     } catch (e) { console.warn('[generate] snapshot update failed', e); }

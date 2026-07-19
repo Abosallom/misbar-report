@@ -65,8 +65,6 @@
 
   const stage = document.getElementById('stage');
   const statusEl = document.getElementById('status');
-  const spec = buildSpec(MOCK_REPORT_MODEL);
-  window.__spec = spec; // debugging convenience
 
   function currentVariant() {
     return document.querySelector('input[name="variant"]:checked').value;
@@ -77,6 +75,8 @@
   function render() {
     const variant = currentVariant();
     stage.textContent = '';
+    const spec = buildSpec(MOCK_REPORT_MODEL, { variant });
+    window.__spec = spec; // debugging convenience
     const frag = renderSlides(spec, { variant });
     let children = Array.from(frag.children);
     if (onlyParam != null) {
@@ -116,6 +116,7 @@
   document.getElementById('btn-pptx').addEventListener('click', async () => {
     try {
       statusEl.textContent = 'جارٍ إنشاء PPTX…';
+      const spec = buildSpec(MOCK_REPORT_MODEL, { variant: currentVariant() });
       const blob = await renderPptx(spec, { variant: currentVariant(), PptxGenJS: window.PptxGenJS });
       console.log('PPTX blob size', blob.size);
       download(blob, `misbar-${currentVariant()}.pptx`);

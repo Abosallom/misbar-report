@@ -7,14 +7,18 @@
 //
 // Report configuration for the golden run (matches the workbook + first-run seeds):
 //   asOf = 2026-07-09  (the sheet's TODAY(); reproduces all 596 cached Delays)
-//   cancelledByMonth   = HISTORICAL_CONSTANTS_SEED.cancelledByMonth
-//   tatFallbackFromCsv = true ; prevCompleted = SNAPSHOT_SEED.prevCompleted (437)
+//   cancelledByMonth   = MANUAL additive constants only (Jan–Apr); May/June come
+//                        from the CSV data (6 + 4). Additive per C6:
+//                        cancelled(m) = countedFromCsv(m) + manual[m].
+//   tatFallbackFromCsv = true ; prevCompleted = 437 (legacy baseline; the engine
+//                        folds it into deltas.completed when no snapshot.numbers).
 
 export const GOLDEN_ASOF = '2026-07-09';
 
+// Manual additive map ONLY (May/June removed — the 10 in-data cancels supply
+// them). Aggregate monthly cancelled stays 8/1/30/4/6/4, note 53.
 export const GOLDEN_CANCELLED_BY_MONTH = {
-  '2026-01': 8, '2026-02': 1, '2026-03': 30,
-  '2026-04': 4, '2026-05': 6, '2026-06': 4,
+  '2026-01': 8, '2026-02': 1, '2026-03': 30, '2026-04': 4,
 };
 
 export const GOLDEN_PREV_COMPLETED = 437;
@@ -92,7 +96,21 @@ export const GOLDEN_EXPECTED = {
   byTestSum: 56,
 
   unmatchedTests: [], // every test in the data resolves in the TAT lookup
-  deltas: { completed: 0 }, // completed (437) − prevCompleted (437)
+
+  // Full deltas set (E6). The golden run's baseline is the legacy prevCompleted
+  // (437 == current completed) folded into numbers.completed; every key resolves
+  // to a non-increase, so all nine deltas are 0.
+  deltas: {
+    total: 0,
+    collected: 0,
+    dispatched: 0,
+    received: 0,
+    completed: 0,
+    awaitingDispatch: 0,
+    shippedNotReceived: 0,
+    awaitingResults: 0,
+    lateNoResult: 0,
+  },
 };
 
 export default GOLDEN_EXPECTED;

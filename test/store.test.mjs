@@ -66,22 +66,22 @@ test('first run seeds from the frozen seeds and persists', () => {
   assert.equal(s.scorecard.length, 13);
   assert.equal(s.scorecard.length, SCORECARD_SEED.length);
 
-  // cancelled sum 53.
+  // manual cancelled additions sum 43 (Jan–Apr only; May/June come from data).
   const cancelledSum = Object.values(s.historicalConstants.cancelledByMonth).reduce(
     (a, b) => a + b,
     0,
   );
-  assert.equal(cancelledSum, 53);
+  assert.equal(cancelledSum, 43);
 
-  // snapshot 437.
-  assert.equal(s.snapshot.prevCompleted, 437);
+  // snapshot full number set: completed 437.
+  assert.equal(s.snapshot.numbers.completed, 437);
   assert.equal(s.snapshot.asOf, SNAPSHOT_SEED.asOf);
 
   assert.equal(store.isEphemeral(), false);
   // Actually persisted to storage.
   assert.ok(mock.getItem(SETTINGS_KEY) != null, 'seed doc persisted');
   const stored = JSON.parse(mock.getItem(SETTINGS_KEY));
-  assert.equal(stored.snapshot.prevCompleted, 437);
+  assert.equal(stored.snapshot.numbers.completed, 437);
 });
 
 test('displayNames seeds empty and historicalConstants matches seed', () => {
@@ -100,7 +100,7 @@ test('save/load roundtrip persists edits and restamps updatedAt', () => {
   const s = store.loadSettings();
   const before = s.updatedAt;
   s.tatLookup['NEW TEST'] = 9;
-  s.snapshot.prevCompleted = 500;
+  s.snapshot.numbers.completed = 500;
 
   const saved = store.saveSettings(s);
   assert.equal(saved.tatLookup['NEW TEST'], 9);
@@ -110,7 +110,28 @@ test('save/load roundtrip persists edits and restamps updatedAt', () => {
   store.__resetForTests();
   const reloaded = store.loadSettings();
   assert.equal(reloaded.tatLookup['NEW TEST'], 9);
-  assert.equal(reloaded.snapshot.prevCompleted, 500);
+  assert.equal(reloaded.snapshot.numbers.completed, 500);
+});
+
+// ---- snapshot migration (legacy {prevCompleted} → {numbers}) -----------------
+test('legacy snapshot {prevCompleted} migrates in-place to {numbers.completed}', () => {
+  const mock = fresh();
+  mock.setItem(
+    SETTINGS_KEY,
+    JSON.stringify({
+      schemaVersion: 1,
+      tatLookup: { X: 1 },
+      snapshot: { prevCompleted: 400, asOf: '2026-06-01' },
+    }),
+  );
+
+  const s = store.loadSettings();
+  assert.equal(s.snapshot.numbers.completed, 400);
+  assert.equal(s.snapshot.asOf, '2026-06-01');
+  // Remaining numbers backfilled from the seed.
+  assert.equal(s.snapshot.numbers.total, SNAPSHOT_SEED.numbers.total);
+  // No stray legacy key left behind.
+  assert.equal(s.snapshot.prevCompleted, undefined);
 });
 
 // ---- schema mismatch --------------------------------------------------------
@@ -148,16 +169,20 @@ test('corrupt JSON resets to seeds', () => {
 });
 
 // ---- updateSnapshot ---------------------------------------------------------
-test('updateSnapshot writes prevCompleted/asOf', () => {
+test('updateSnapshot merges partial numbers over existing and updates asOf', () => {
   fresh();
   store.loadSettings();
-  const out = store.updateSnapshot({ prevCompleted: 612, asOf: '2026-08-01' });
-  assert.equal(out.snapshot.prevCompleted, 612);
+  // Only completed + total provided; the rest of the seeded numbers must survive.
+  const out = store.updateSnapshot({ asOf: '2026-08-01', numbers: { completed: 612, total: 700 } });
+  assert.equal(out.snapshot.numbers.completed, 612);
+  assert.equal(out.snapshot.numbers.total, 700);
+  assert.equal(out.snapshot.numbers.awaitingResults, SNAPSHOT_SEED.numbers.awaitingResults);
   assert.equal(out.snapshot.asOf, '2026-08-01');
 
   store.__resetForTests();
   const reloaded = store.loadSettings();
-  assert.equal(reloaded.snapshot.prevCompleted, 612);
+  assert.equal(reloaded.snapshot.numbers.completed, 612);
+  assert.equal(reloaded.snapshot.numbers.total, 700);
   assert.equal(reloaded.snapshot.asOf, '2026-08-01');
 });
 
@@ -197,6 +222,19 @@ test('importSettings rejects malformed root and bad field shapes', () => {
     () => store.importSettings(JSON.stringify({ schemaVersion: 1, scorecard: {} })),
     /scorecard/,
   );
+  // New snapshot shape: snapshot must be an object; numbers an object of finite numbers.
+  assert.throws(
+    () => store.importSettings(JSON.stringify({ schemaVersion: 1, snapshot: [] })),
+    /snapshot/,
+  );
+  assert.throws(
+    () => store.importSettings(JSON.stringify({ schemaVersion: 1, snapshot: { numbers: 5 } })),
+    /snapshot/,
+  );
+  assert.throws(
+    () => store.importSettings(JSON.stringify({ schemaVersion: 1, snapshot: { numbers: { completed: 'x' } } })),
+    /snapshot\.numbers/,
+  );
 });
 
 test('importSettings deep-merges import-wins and returns correct counts', () => {
@@ -219,7 +257,7 @@ test('importSettings deep-merges import-wins and returns correct counts', () => 
         '2026-12': 3, // added
       },
     },
-    snapshot: { prevCompleted: 700, asOf: '2026-09-09' },
+    snapshot: { asOf: '2026-09-09', numbers: { completed: 700, total: 800 } },
   };
 
   const summary = store.importSettings(JSON.stringify(incoming));
@@ -240,7 +278,11 @@ test('importSettings deep-merges import-wins and returns correct counts', () => 
   assert.equal(after.tatLookup[existingName], existingVal + 5);
   assert.equal(after.historicalConstants.cancelledByMonth['2026-01'], 999);
   assert.equal(after.historicalConstants.cancelledByMonth['2026-12'], 3);
-  assert.equal(after.snapshot.prevCompleted, 700);
+  // Snapshot numbers: imported leaves win, unspecified seed leaves survive the merge.
+  assert.equal(after.snapshot.numbers.completed, 700);
+  assert.equal(after.snapshot.numbers.total, 800);
+  assert.equal(after.snapshot.numbers.awaitingResults, SNAPSHOT_SEED.numbers.awaitingResults);
+  assert.equal(after.snapshot.asOf, '2026-09-09');
   // Untouched seed months preserved.
   assert.equal(after.historicalConstants.cancelledByMonth['2026-03'], 30);
   // Scorecard preserved.
@@ -286,7 +328,7 @@ test('ephemeral fallback when localStorage is fully denied', () => {
   assert.equal(Object.keys(s.tatLookup).length, 59);
   assert.equal(store.isEphemeral(), true);
 
-  s.snapshot.prevCompleted = 111;
+  s.snapshot.numbers.completed = 111;
   store.saveSettings(s);
-  assert.equal(store.loadSettings().snapshot.prevCompleted, 111);
+  assert.equal(store.loadSettings().snapshot.numbers.completed, 111);
 });

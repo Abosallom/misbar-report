@@ -21,7 +21,22 @@ function seedSettings() {
     displayNames: {},
     scorecard: SCORECARD_SEED.map((x) => ({ ...x })),
     historicalConstants: { cancelledByMonth: { ...HISTORICAL_CONSTANTS_SEED.cancelledByMonth } },
-    snapshot: { ...SNAPSHOT_SEED },
+    snapshot: JSON.parse(JSON.stringify(SNAPSHOT_SEED)), // nested {asOf, numbers}
+  };
+}
+
+// Widen a legacy {prevCompleted, asOf} snapshot to the {asOf, numbers} shape.
+function migrateLocalSnapshot(s, seedSnap) {
+  if (!s || typeof s !== 'object') return JSON.parse(JSON.stringify(seedSnap));
+  if (s.numbers && typeof s.numbers === 'object') {
+    return { asOf: s.asOf ?? seedSnap.asOf, numbers: { ...seedSnap.numbers, ...s.numbers } };
+  }
+  return {
+    asOf: s.asOf ?? seedSnap.asOf,
+    numbers: {
+      ...seedSnap.numbers,
+      ...(s.prevCompleted != null ? { completed: Number(s.prevCompleted) } : {}),
+    },
   };
 }
 
@@ -50,7 +65,7 @@ function readLocalSettings() {
           ...((s.historicalConstants || {}).cancelledByMonth || {}),
         },
       },
-      snapshot: { ...seed.snapshot, ...(s.snapshot || {}) },
+      snapshot: migrateLocalSnapshot(s.snapshot, seed.snapshot),
       scorecard: Array.isArray(s.scorecard) && s.scorecard.length ? s.scorecard : seed.scorecard,
     };
   } catch { return seed; }
@@ -73,13 +88,16 @@ function createLocalStore(persistent) {
   return {
     loadSettings: () => (cached ? clone(cached) : read()),
     saveSettings: (s) => write(s),
-    updateSnapshot: ({ prevCompleted, asOf } = {}) => {
+    updateSnapshot: ({ asOf, numbers } = {}) => {
       const d = cached ? clone(cached) : read();
-      d.snapshot = {
-        ...(d.snapshot || {}),
-        ...(prevCompleted != null ? { prevCompleted } : {}),
-        ...(asOf != null ? { asOf } : {}),
-      };
+      const cur = migrateLocalSnapshot(d.snapshot, seedSettings().snapshot);
+      const merged = { ...cur.numbers };
+      if (numbers && typeof numbers === 'object') {
+        for (const [k, v] of Object.entries(numbers)) {
+          if (typeof v === 'number' && Number.isFinite(v)) merged[k] = v;
+        }
+      }
+      d.snapshot = { asOf: asOf != null ? String(asOf) : cur.asOf, numbers: merged };
       return write(d);
     },
     isEphemeral: () => !persistent,

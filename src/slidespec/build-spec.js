@@ -1,9 +1,10 @@
 // src/slidespec/build-spec.js
-// buildSpec(reportModel) -> SlideSpec (see src/contracts.js).
+// buildSpec(reportModel, { variant }) -> SlideSpec (see src/contracts.js).
 // One builder per slide. ALL geometry is in inches, derived by converting EMU->inches
-// (÷914400) from the original deck OOXML (تقرير مسبار 09072026.pptx, slides 1-9 + 12).
-// Deck order kept: cover, summary, journey, monthly, compliance, scorecard, tasks,
-// tasksInternal(internalOnly), challenges, thanks. Slides 10 & 11 are hidden -> skipped.
+// (÷914400) from the original deck OOXML (تقرير مسبار 09072026.pptx).
+// SIX-slide deck (both variants): cover · execFunnel · monthly · compliance · action · thanks.
+// The variant no longer changes slide PRESENCE — it changes slide-5 (action) task ROWS:
+// nupco shows tasksCurrent only; internal appends tasksInternal. No slide is internalOnly.
 import { COLORS as C, GEOM } from '../theme.js';
 
 // Colors present in the deck charts/cards but not in theme.js:
@@ -20,7 +21,7 @@ const rev = (a) => a.slice().reverse();
 
 // ---- formatting -------------------------------------------------------------
 const fmtDate = (iso) => { const [y, m, d] = iso.split('-'); return `${d} / ${m} / ${y}`; };
-const pctLab = (n) => (n === 0 ? '0%' : n.toFixed(1) + '%');           // slide 5 late-%
+const pctLab = (n) => (n === 0 ? '0%' : n.toFixed(1) + '%');           // late-%
 const pctMonthly = (n) => (n == null ? '-' : n === 100 ? '100%' : n.toFixed(1) + '%');
 const bullets = (items) => items.map((s) => '•  ' + s).join('\n');
 
@@ -55,8 +56,9 @@ function buildCover(m) {
 }
 
 // ============================================================================
-// Slide 2 — Executive summary / KPIs
+// Slide 2 — Executive summary + order-journey funnel (merged)
 // ============================================================================
+// KPI card factory (reused verbatim from the old buildSummary).
 function kpiCard({ x, v, vc, lab, sub, ac, delta }) {
   const y = 0.93, w = 1.903, h = 1.6;
   const els = [
@@ -70,71 +72,54 @@ function kpiCard({ x, v, vc, lab, sub, ac, delta }) {
   return els;
 }
 
-function buildSummary(m) {
-  const b = m.kpi.buckets;
-  const cards = [
-    { x: 10.917, v: String(m.kpi.totals.total), vc: C.blue, lab: 'إجمالي الطلبات', sub: 'يناير – يوليو', ac: C.blue },
-    { x: 8.833, v: String(b.awaitingDispatch), vc: C.greenSoft, lab: 'في انتظار شحن العينة (المستشفى)', sub: 'قبل الـ Dispatch', ac: C.greenSoft },
-    { x: 6.75, v: String(b.shippedNotReceived), vc: C.redSoft, lab: 'شُحنت ولم تُستلم', sub: '', ac: C.redSoft },
-    { x: 4.667, v: String(b.awaitingResults), vc: C.amber, lab: 'في انتظار نتائج العينة (المختبر)', sub: 'بعد الـ Dispatch', ac: C.amber },
-    { x: 2.583, v: String(b.completed), vc: C.green, lab: 'نتائج مكتملة', sub: '', ac: C.green, delta: '+' + m.kpi.deltas.completed },
-    { x: 0.5, v: String(b.lateNoResult), vc: C.redPure, lab: 'الطلبات المتأخرة', sub: `تمثل ${b.latePct}% من الطلبات`, ac: C.redPure },
-  ];
-  const els = [
-    ...chrome('الملخص التنفيذي  •  المؤشرات الرئيسية', 1),
-    ...cards.flatMap(kpiCard),
-    text(10.542, 2.687, 2.271, 0.361, `* ${m.kpi.cancelledNote} طلب ملغي`, 12, { bold: true, color: C.slate600, align: 'right', valign: 'middle', rtl: true }),
-    // Completed-tasks panel (right)
-    rect(6.667, 3.243, 6.133, 2.156, C.bgLight, { radius: 0.06 }),
-    text(6.961, 3.343, 5.639, 0.45, 'المهام المنجزة', 14, { bold: true, color: C.navy, align: 'right', valign: 'middle', rtl: true }),
-    text(7.095, 3.85, 5.505, 1.45, bullets(m.panels.completedTasks), 12, { color: C.slate900, align: 'right', valign: 'top', rtl: true, lineSpacing: 1.25 }),
-    // Planned-tasks panel (left)
-    rect(0.4, 3.243, 6.133, 2.156, C.bgLight, { radius: 0.06 }),
-    text(1.085, 3.349, 5.265, 0.526, 'المهام المخطط له:', 14, { bold: true, color: C.navy, align: 'right', valign: 'middle', rtl: true }),
-    text(0.828, 3.85, 5.505, 1.45, bullets(m.panels.plannedTasks), 12, { color: C.slate900, align: 'right', valign: 'top', rtl: true, lineSpacing: 1.25 }),
-    // Support-required panel (red)
-    rect(0.5, 5.662, 12.3, 1.5, C.bgRed, { radius: 0.06 }),
-    text(0.7, 5.762, 11.9, 0.4, 'الدعم المطلوب:', 14, { bold: true, color: C.navy, align: 'right', valign: 'middle', rtl: true }),
-    text(0.9, 6.16, 11.7, 0.9, bullets(m.panels.supportRequired), 13, { color: C.slate900, align: 'right', valign: 'top', rtl: true, lineSpacing: 1.2 }),
-  ];
-  return { id: 'summary', bg: C.white, elements: els };
-}
+// The KPI cards own these metrics' delta chips; the funnel must not duplicate them.
+const KPI_DELTA_KEYS = new Set(['total', 'awaitingDispatch', 'awaitingResults', 'completed', 'lateNoResult', 'shippedNotReceived']);
 
-// ============================================================================
-// Slide 3 — Order journey (funnel)
-// ============================================================================
-function buildJourney(m) {
+function buildExecFunnel(m) {
+  const b = m.kpi.buckets;
   const f = m.kpi.funnel;
+  const d = m.kpi.deltas || {};
+
+  // -- ZONE A: 6 KPI cards in one row, right-to-left (total rightmost) --------
+  // 6×1.903 + 5×0.180 gaps = 12.318 → x 0.500…12.818. Each card shows a green
+  // "+N" chip when its own delta key > 0.
+  const cards = [
+    { x: 10.917, v: String(m.kpi.totals.total), vc: C.blue, lab: 'إجمالي الطلبات', sub: 'يناير – يوليو', ac: C.blue, dk: 'total' },
+    { x: 8.833, v: String(b.awaitingDispatch), vc: C.greenSoft, lab: 'في انتظار شحن العينة (المستشفى)', sub: 'قبل الـ Dispatch', ac: C.greenSoft, dk: 'awaitingDispatch' },
+    { x: 6.75, v: String(b.awaitingResults), vc: C.amber, lab: 'في انتظار نتائج العينة (المختبر)', sub: 'بعد الـ Dispatch', ac: C.amber, dk: 'awaitingResults' },
+    { x: 4.667, v: String(b.completed), vc: C.green, lab: 'نتائج مكتملة', sub: '', ac: C.green, dk: 'completed' },
+    { x: 2.583, v: String(b.lateNoResult), vc: C.redPure, lab: 'الطلبات المتأخرة', sub: `تمثل ${b.latePct}% من الطلبات`, ac: C.redPure, dk: 'lateNoResult' },
+    { x: 0.5, v: String(b.shippedNotReceived), vc: C.redSoft, lab: 'شُحنت ولم تُستلم', sub: '', ac: C.redSoft, dk: 'shippedNotReceived' },
+  ];
+  const kpiEls = cards.flatMap((c) => kpiCard({ ...c, delta: d[c.dk] > 0 ? '+' + d[c.dk] : undefined }));
+
+  // -- ZONE B: order-journey funnel (from old buildJourney; X unchanged, Y +0.40)
   const maxV = f.created;
   const rows = [
-    { stage: '1. إنشاء طلب', val: f.created, desc: 'الطلب أُنشئ في مسبار', color: C.navy },
-    { stage: '2. سحب العينة', val: f.collected, desc: 'العينة مُجمَّعة في KAMC', color: C.blue },
-    { stage: '3. شحن العينة', val: f.dispatched, desc: 'العينة شُحنت من قبل المستشفى', color: C.amber },
-    { stage: '4. إستلام العينة', val: f.received, desc: 'حالة إستلام العينة بقبولها او رفضها', color: C.greenSoft },
-    { stage: '5. إصدار نتيجة', val: f.resulted, desc: 'نتيجة تحليل العينة', color: C.greenBright, delta: '+' + m.kpi.deltas.completed },
+    { stage: '1. إنشاء طلب', val: f.created, desc: 'الطلب أُنشئ في مسبار', color: C.navy, key: 'total' },
+    { stage: '2. سحب العينة', val: f.collected, desc: 'العينة مُجمَّعة في KAMC', color: C.blue, key: 'collected' },
+    { stage: '3. شحن العينة', val: f.dispatched, desc: 'العينة شُحنت من قبل المستشفى', color: C.amber, key: 'dispatched' },
+    { stage: '4. إستلام العينة', val: f.received, desc: 'حالة إستلام العينة بقبولها او رفضها', color: C.greenSoft, key: 'received' },
+    { stage: '5. إصدار نتيجة', val: f.resulted, desc: 'نتيجة تحليل العينة', color: C.greenBright, key: 'completed' },
   ];
-  const rowY = [2.826, 3.476, 4.126, 4.776, 5.462];
-  const accentY = [2.876, 3.526, 4.176, 4.826, 5.512];
-  const barY = [2.897, 3.547, 4.197, 4.847, 5.532];
+  const rowY = [3.226, 3.876, 4.526, 5.176, 5.862];
+  const accentY = [3.276, 3.926, 4.576, 5.226, 5.912];
+  const barY = [3.297, 3.947, 4.597, 5.247, 5.932];
   const trackX = 3.92, trackW = 5.0, barH = 0.3;
 
   const els = [
-    ...chrome('رحلة طلب مسبار', 2),
-    text(9.7, 1.186, 3.0, 0.35, 'دورة الطلب تمر بـ 5 مراحل الموضحة أدناه:', 11, { color: C.slate500, align: 'right', valign: 'middle', rtl: true }),
-    // Cancelled card (top-left)
-    rect(0.0, 0.784, 2.242, 1.08, C.white, { radius: 0.04, line: { color: C.border, w: 0.75 } }),
-    rect(2.179, 0.784, 0.063, 1.06, C.black),
-    text(0.065, 0.95, 1.927, 0.7, String(m.kpi.cancelledNote), 40, { bold: true, color: C.black, align: 'right', valign: 'middle' }),
-    text(0.065, 1.5, 1.927, 0.35, 'الطلبات الملغية', 13, { bold: true, color: C.slate900, align: 'right', valign: 'middle', rtl: true }),
-    // Column labels
-    text(9.05, 2.506, 3.0, 0.3, 'المرحلة', 10, { bold: true, color: C.slate500, align: 'right', valign: 'middle', rtl: true }),
-    text(8.629, 2.499, 1.0, 0.3, 'العدد', 10, { bold: true, color: C.slate500, align: 'center', valign: 'middle', rtl: true }),
-    text(-0.25, 2.506, 3.2, 0.3, 'الوصف', 10, { bold: true, color: C.slate500, align: 'right', valign: 'middle', rtl: true }),
+    ...chrome('الملخص التنفيذي  •  رحلة الطلب', 1),
+    ...kpiEls,
+    text(10.542, 2.55, 2.271, 0.32, `* ${m.kpi.cancelledNote} طلب ملغي`, 11, { bold: true, color: C.slate600, align: 'right', valign: 'middle', rtl: true }),
+    // Funnel column labels
+    text(9.05, 2.906, 3.0, 0.3, 'المرحلة', 10, { bold: true, color: C.slate500, align: 'right', valign: 'middle', rtl: true }),
+    text(8.629, 2.906, 1.0, 0.3, 'العدد', 10, { bold: true, color: C.slate500, align: 'center', valign: 'middle', rtl: true }),
+    text(-0.25, 2.906, 3.2, 0.3, 'الوصف', 10, { bold: true, color: C.slate500, align: 'right', valign: 'middle', rtl: true }),
     // Brackets
-    rect(12.03, 3.101, 0.02, 1.3, C.slate600),
-    text(12.35, 3.424, 0.9, 0.55, 'المستشفى', 12, { bold: true, color: C.slate900, align: 'right', valign: 'middle', rtl: true }),
-    rect(12.03, 5.051, 0.02, 0.685, C.slate600),
-    text(12.25, 5.096, 0.95, 0.55, 'المختبرات', 12, { bold: true, color: C.slate900, align: 'right', valign: 'middle', rtl: true }),
+    rect(12.03, 3.501, 0.02, 1.3, C.slate600),
+    text(12.35, 3.824, 0.9, 0.55, 'المستشفى', 12, { bold: true, color: C.slate900, align: 'right', valign: 'middle', rtl: true }),
+    rect(12.03, 5.451, 0.02, 0.685, C.slate600),
+    text(12.25, 5.496, 0.95, 0.55, 'المختبرات', 12, { bold: true, color: C.slate900, align: 'right', valign: 'middle', rtl: true }),
   ];
   rows.forEach((r, i) => {
     const fillW = Math.round((r.val / maxV) * trackW * 1000) / 1000;
@@ -146,13 +131,17 @@ function buildJourney(m) {
       rect(trackX, barY[i], trackW, barH, C.bgLighter, { radius: 0.03 }),
       rect(trackX + trackW - fillW, barY[i], fillW, barH, r.color, { radius: 0.03 }),
     );
-    if (r.delta) els.push(text(7.75, rowY[i], 0.75, 0.55, r.delta, 10, { bold: true, color: C.deltaGreen, align: 'center', valign: 'middle' }));
+    // Stage delta chip — de-duplicated: endpoint metrics (total/completed) are shown
+    // on their KPI cards, so the funnel only surfaces intermediate flow deltas.
+    if (d[r.key] > 0 && !KPI_DELTA_KEYS.has(r.key)) {
+      els.push(text(7.75, rowY[i], 0.75, 0.55, '+' + d[r.key], 10, { bold: true, color: C.deltaGreen, align: 'center', valign: 'middle' }));
+    }
   });
-  return { id: 'journey', bg: C.white, elements: els };
+  return { id: 'execFunnel', bg: C.white, elements: els };
 }
 
 // ============================================================================
-// Slide 4 — Monthly orders & results
+// Slide 3 — Monthly orders & results
 // ============================================================================
 function buildMonthly(m) {
   const mo = m.kpi.monthly;
@@ -208,7 +197,7 @@ function buildMonthly(m) {
 }
 
 // ============================================================================
-// Slide 5 — Compliance measure / late orders
+// Slide 4 — Compliance measure / late orders
 // ============================================================================
 function buildCompliance(m) {
   const lab = m.kpi.byLab;
@@ -256,64 +245,16 @@ function buildCompliance(m) {
 }
 
 // ============================================================================
-// Slide 6 — Lab readiness scorecard
-// ============================================================================
-function buildScorecard(m) {
-  const sc = m.scorecard;
-  const header = rev([
-    '#', 'اسم المختبر', 'نسبة رفع قائمة الفحوصات', 'قائمة الفحوصات المستهدفة',
-    'الفحوصات التي تم رفعها', 'الفحوصات التي لم يتم رفعها', 'فحوصات تتطلب التصحيح',
-    'إمكانية الطلب من قبل المستشفى', 'الفحوصات المتوفرة للطلب من قبل المستشفى',
-  ]);
-  const rows = sc.map((r, i) => {
-    const nameFill = r.canOrder ? C.greenBright : C.redPure;
-    return rev([
-      String(i + 1),
-      { text: r.lab, fill: nameFill, color: C.white, align: 'right' },
-      { text: r.pct, fill: nameFill, color: C.white },
-      String(r.target),
-      String(r.uploaded),
-      String(r.notUploaded),
-      String(r.needFix),
-      { text: r.canOrder ? '✔' : 'Χ', color: r.canOrder ? C.greenBright : C.redPure, bold: true },
-      String(r.available),
-    ]);
-  });
-  const targetTot = sc.reduce((a, r) => a + r.target, 0);
-  const uploadedTot = sc.reduce((a, r) => a + r.uploaded, 0);
-  const availTot = sc.reduce((a, r) => a + r.available, 0);
-  const canCount = sc.filter((r) => r.canOrder).length;
-  const nH = { fill: C.navy, color: C.white, bold: true };
-  const totalRow = rev([
-    { text: '', ...nH },
-    { text: 'اجمالي', ...nH, align: 'right' },
-    { text: '', ...nH },
-    { text: String(targetTot), bold: true },
-    { text: String(uploadedTot), bold: true },
-    { text: '0', bold: true },
-    { text: '0', bold: true },
-    { text: `${canCount} من ${sc.length}`, bold: true },
-    { text: String(availTot), bold: true },
-  ]);
-
-  const table = {
-    t: 'table', x: 0.41, y: 1.109, w: 12.577, rtl: true, rowH: 0.382, headerSize: 9, bodySize: 9.5,
-    header: { fill: C.navy, color: C.white, bold: true },
-    colW: rev([0.367, 2.189, 1.312, 1.312, 1.312, 1.312, 1.312, 1.483, 1.977]),
-    rows: [header, ...rows, totalRow],
-  };
-  return { id: 'scorecard', bg: C.white, elements: [...chrome('بطاقة جاهزية المختبرات', 5), table] };
-}
-
-// ============================================================================
-// Slides 7 & 8 — Task tables (external / internal)
+// Slide 5 — Tasks + challenges + risks (variant changes the task ROWS)
 // ============================================================================
 const STATUS_FILL = { 'مستمر': { fill: C.taskNavy, color: C.white }, 'متأخر': { fill: C.redDark, color: C.white }, 'قيد التنفيذ': { fill: C.amberStatus, color: C.black }, 'مغلق': { fill: C.green, color: C.white }, 'مفتوح': { fill: C.slate500, color: C.white } };
 
-function taskTable(tasks, y, rowH) {
+// Full-width tasks table. '#' is renumbered by row index (i+1) — internal rows do
+// NOT keep their own tk.num (which restarts at 1). rowH/fonts are parametrized.
+function taskTable(tasks, { y, rowH, bodySize, headerSize }) {
   // rtl=0 in deck: visual == authored order [الحالة, تاريخ, المالك, المسؤول, الإجراء, #]
   const header = ['الحالة', 'تاريخ الإكتمال', 'المالك', 'المسؤول', 'الإجراء', '#'];
-  const rows = tasks.map((tk) => {
+  const rows = tasks.map((tk, i) => {
     const st = STATUS_FILL[tk.status] || { fill: C.slate500, color: C.white };
     return [
       { text: tk.status, fill: st.fill, color: st.color, bold: true },
@@ -321,37 +262,57 @@ function taskTable(tasks, y, rowH) {
       { text: tk.owner, align: 'right' },
       tk.responsible,
       { text: tk.task, align: 'right' },
-      String(tk.num),
+      String(i + 1),
     ];
   });
   return {
-    t: 'table', x: 0.641, y, w: 12.259, rtl: true, rowH,
+    t: 'table', x: 0.641, y, w: 12.259, rtl: true, rowH, bodySize, headerSize,
     header: { fill: C.navy, color: C.white, bold: true },
     colW: [1.138, 1.471, 1.95, 1.47, 5.893, 0.337],
     rows: [header, ...rows],
   };
 }
 
-function tasksSubhead(title) {
+function tasksSubhead(title, y = 1.217) {
   return [
-    rect(12.45, 1.237, 0.3, 0.3, C.navy, { radius: 0.15 }),
-    text(12.45, 1.237, 0.3, 0.3, '⚡', 14, { bold: true, color: C.white, align: 'center', valign: 'middle' }),
-    text(0.6, 1.217, 11.8, 0.4, title, 14, { bold: true, color: C.navy, align: 'right', valign: 'middle', rtl: true }),
+    rect(12.45, y + 0.02, 0.3, 0.3, C.navy, { radius: 0.15 }),
+    text(12.45, y + 0.02, 0.3, 0.3, '⚡', 14, { bold: true, color: C.white, align: 'center', valign: 'middle' }),
+    text(0.6, y, 11.8, 0.4, title, 14, { bold: true, color: C.navy, align: 'right', valign: 'middle', rtl: true }),
   ];
 }
 
-function buildTasks(m) {
-  return { id: 'tasks', bg: C.white, elements: [...chrome('المهام', 6), ...tasksSubhead('المهام الحالية'), taskTable(m.tasksCurrent, 1.667, 0.589)] };
-}
-function buildTasksInternal(m) {
-  return { id: 'tasksInternal', bg: C.white, internalOnly: true, elements: [...chrome('المهام (داخلي)', 6), ...tasksSubhead('المهام الحالية'), taskTable(m.tasksInternal, 1.667, 0.55)] };
-}
+function buildAction(m, variant) {
+  // Block 1 — tasks table. nupco = current only; internal appends the internal rows.
+  const taskRows = variant === 'nupco' ? m.tasksCurrent : [...m.tasksCurrent, ...m.tasksInternal];
+  const n = taskRows.length;
+  const CAP = 15;
+  const shown = Math.min(n, CAP);
+  const AREA = 3.35;
+  const rowH = Math.max(0.18, Math.min(0.30, AREA / (shown + 1)));
+  const bodySize = rowH >= 0.26 ? 9.5 : rowH >= 0.21 ? 9 : 8;
+  const headerSize = bodySize;
+  const table = taskTable(taskRows.slice(0, shown), { y: 1.15, rowH, bodySize, headerSize });
 
-// ============================================================================
-// Slide 9 — Challenges & risks
-// ============================================================================
-function buildChallenges(m) {
-  // rtl=0 tables: authored visual order.
+  const els = [
+    ...chrome('المهام والتحديات والمخاطر', 5),
+    ...tasksSubhead('المهام الحالية', 0.84),
+    table,
+  ];
+  if (n > CAP) {
+    const noteY = 1.15 + (shown + 1) * rowH;
+    els.push(text(0.641, noteY, 12.259, 0.24, `+ ${n - CAP} مهمة أخرى`, bodySize, { italic: true, color: C.slate600, align: 'center', valign: 'middle', rtl: true }));
+  }
+
+  // Block 2 — support required (full width red band). Band height holds up to 3
+  // right-aligned single-line bullets (Arabic ink overflows a tight box), while its
+  // bottom (5.54) stays clear of the subhead dots that end exactly at the table top.
+  els.push(
+    rect(0.5, 4.62, 12.3, 0.92, C.bgRed, { radius: 0.06 }),
+    text(0.7, 4.66, 11.9, 0.34, 'الدعم المطلوب:', 14, { bold: true, color: C.navy, align: 'right', valign: 'middle', rtl: true }),
+    text(0.9, 5.02, 11.7, 0.50, bullets(m.panels.supportRequired), 10.5, { color: C.slate900, align: 'right', valign: 'top', rtl: true, lineSpacing: 1.0 }),
+  );
+
+  // Blocks 3 & 4 — challenges (right) + risks (left), side-by-side, subheads at y 5.60.
   const chHeader = ['الإجراء الوقائي/الحل', 'التأثير', 'المسؤول', 'المشكلة', '#'];
   const chRows = m.challenges.map((c, i) => [
     { text: c.solution, align: 'right' },
@@ -361,11 +322,12 @@ function buildChallenges(m) {
     String(i + 1),
   ]);
   const chTable = {
-    t: 'table', x: 0.5, y: 1.46, w: 12.3, rtl: true, rowH: 0.5,
+    t: 'table', x: 6.80, y: 5.88, w: 6.0, rtl: true, rowH: 0.28, bodySize: 8.5, headerSize: 9,
     header: { fill: C.navy, color: C.white, bold: true },
-    colW: [3.756, 0.833, 2.553, 4.676, 0.482],
+    colW: [1.832, 0.406, 1.245, 2.281, 0.235],
     rows: [chHeader, ...chRows],
   };
+
   const rkHeader = ['التأثير', 'إحتمالية', 'المسؤول', 'الخطر', '#'];
   const rkRows = m.risks.map((r, i) => [
     r.impact,
@@ -375,27 +337,30 @@ function buildChallenges(m) {
     String(i + 1),
   ]);
   const rkTable = {
-    t: 'table', x: 0.5, y: 4.5, w: 12.3, rtl: true, rowH: 0.4,
+    t: 'table', x: 0.5, y: 5.88, w: 6.0, rtl: true, rowH: 0.28, bodySize: 8.5, headerSize: 9,
     header: { fill: C.navy, color: C.white, bold: true },
-    colW: [1.4, 1.189, 2.311, 7.0, 0.4],
+    colW: [0.683, 0.580, 1.127, 3.415, 0.195],
     rows: [rkHeader, ...rkRows],
   };
-  const els = [
-    ...chrome('التحديات والمخاطر', 7),
-    rect(12.35, 0.97, 0.3, 0.3, C.red, { radius: 0.15 }),
-    text(12.35, 0.97, 0.3, 0.3, '!', 16, { bold: true, color: C.white, align: 'center', valign: 'middle' }),
-    text(0.5, 0.95, 11.8, 0.4, 'تحديات', 14, { bold: true, color: C.red, align: 'right', valign: 'middle', rtl: true }),
+
+  els.push(
+    // challenges subhead (right half): red dot + '!' + 'تحديات'
+    rect(12.35, 5.58, 0.3, 0.3, C.red, { radius: 0.15 }),
+    text(12.35, 5.58, 0.3, 0.3, '!', 16, { bold: true, color: C.white, align: 'center', valign: 'middle' }),
+    text(6.80, 5.60, 5.50, 0.24, 'تحديات', 14, { bold: true, color: C.red, align: 'right', valign: 'middle', rtl: true }),
     chTable,
-    rect(12.35, 4.07, 0.3, 0.3, C.navy, { radius: 0.15 }),
-    text(12.35, 4.07, 0.3, 0.3, '⚡', 14, { bold: true, color: C.white, align: 'center', valign: 'middle' }),
-    text(0.5, 4.07, 11.8, 0.4, 'المخاطر', 14, { bold: true, color: C.navy, align: 'right', valign: 'middle', rtl: true }),
+    // risks subhead (left half): navy dot + '⚡' + 'المخاطر'
+    rect(6.15, 5.58, 0.3, 0.3, C.navy, { radius: 0.15 }),
+    text(6.15, 5.58, 0.3, 0.3, '⚡', 14, { bold: true, color: C.white, align: 'center', valign: 'middle' }),
+    text(0.5, 5.60, 5.60, 0.24, 'المخاطر', 14, { bold: true, color: C.navy, align: 'right', valign: 'middle', rtl: true }),
     rkTable,
-  ];
-  return { id: 'challenges', bg: C.white, elements: els };
+  );
+
+  return { id: 'action', bg: C.white, elements: els };
 }
 
 // ============================================================================
-// Slide 12 — Thanks
+// Slide 6 — Thanks
 // ============================================================================
 function buildThanks() {
   return {
@@ -410,19 +375,16 @@ function buildThanks() {
 
 /**
  * @param {import('../contracts.js').ReportModel} reportModel
+ * @param {{variant?:('internal'|'nupco')}} [opts]
  * @returns {import('../contracts.js').SlideSpec}
  */
-export function buildSpec(reportModel) {
+export function buildSpec(reportModel, { variant = 'internal' } = {}) {
   return [
     buildCover(reportModel),
-    buildSummary(reportModel),
-    buildJourney(reportModel),
+    buildExecFunnel(reportModel),
     buildMonthly(reportModel),
     buildCompliance(reportModel),
-    buildScorecard(reportModel),
-    buildTasks(reportModel),
-    buildTasksInternal(reportModel),
-    buildChallenges(reportModel),
+    buildAction(reportModel, variant),
     buildThanks(),
   ];
 }

@@ -55,7 +55,7 @@ function buildSeedDoc() {
     historicalConstants: {
       cancelledByMonth: { ...HISTORICAL_CONSTANTS_SEED.cancelledByMonth },
     },
-    snapshot: { ...SNAPSHOT_SEED },
+    snapshot: clone(SNAPSHOT_SEED), // deep clone: SNAPSHOT_SEED.numbers is nested
   };
 }
 
@@ -88,13 +88,33 @@ function persist(doc) {
   return doc;
 }
 
+/**
+ * In-place snapshot-shape migration (schemaVersion stays 1). A legacy snapshot
+ * shaped {prevCompleted, asOf} widens to {asOf, numbers} — numbers seeded from
+ * SNAPSHOT_SEED with completed overridden by the old prevCompleted. Docs already
+ * carrying {numbers} are left untouched.
+ */
+function migrateSnapshotShape(doc) {
+  const s = doc.snapshot;
+  if (isPlainObject(s) && !isPlainObject(s.numbers)) {
+    doc.snapshot = {
+      asOf: s.asOf != null ? s.asOf : SNAPSHOT_SEED.asOf,
+      numbers: {
+        ...SNAPSHOT_SEED.numbers,
+        ...(s.prevCompleted != null ? { completed: Number(s.prevCompleted) } : {}),
+      },
+    };
+  }
+  return doc;
+}
+
 /** Version-check + migrate/reset. v1 is the first schema, so any mismatch resets. */
 function migrate(doc) {
   if (!isPlainObject(doc)) {
     console.warn('[misbar/store] settings root is not an object — resetting to seeds.');
     return persist(buildSeedDoc());
   }
-  if (doc.schemaVersion === SCHEMA_VERSION) return doc;
+  if (doc.schemaVersion === SCHEMA_VERSION) return migrateSnapshotShape(doc);
   // Future schema bumps add forward-migration cases above this line.
   console.warn(
     `[misbar/store] unsupported schemaVersion ${doc.schemaVersion} ` +
@@ -151,12 +171,24 @@ export function saveSettings(s) {
 }
 
 /**
- * Records the previous-report snapshot after a successful generation.
- * @param {{prevCompleted:number, asOf:string}} snap
+ * Records the previous-report snapshot after a successful generation. The full
+ * number set (E6). Partial `numbers` are merged over the existing snapshot's
+ * numbers (only finite numeric values land); asOf is updated when provided.
+ * @param {{asOf?:string, numbers?:Object<string,number>}} snap
  */
-export function updateSnapshot({ prevCompleted, asOf } = {}) {
+export function updateSnapshot({ asOf, numbers } = {}) {
   const doc = loadSettings();
-  doc.snapshot = { prevCompleted: Number(prevCompleted), asOf: String(asOf) };
+  const cur = isPlainObject(doc.snapshot) ? doc.snapshot : {};
+  const nextNumbers = { ...(isPlainObject(cur.numbers) ? cur.numbers : {}) };
+  if (isPlainObject(numbers)) {
+    for (const [k, v] of Object.entries(numbers)) {
+      if (typeof v === 'number' && Number.isFinite(v)) nextNumbers[k] = v;
+    }
+  }
+  doc.snapshot = {
+    asOf: asOf != null ? String(asOf) : cur.asOf,
+    numbers: nextNumbers,
+  };
   return saveSettings(doc);
 }
 
@@ -206,8 +238,13 @@ function validateImport(doc) {
       throw new Error('حقل cancelledByMonth غير صالح: يجب أن يكون كائناً.');
     }
   }
-  if ('snapshot' in doc && !isPlainObject(doc.snapshot)) {
-    throw new Error('حقل snapshot غير صالح: يجب أن يكون كائناً.');
+  if ('snapshot' in doc) {
+    if (!isPlainObject(doc.snapshot)) {
+      throw new Error('حقل snapshot غير صالح: يجب أن يكون كائناً.');
+    }
+    if ('numbers' in doc.snapshot && !isPlainObject(doc.snapshot.numbers)) {
+      throw new Error('حقل snapshot.numbers غير صالح: يجب أن يكون كائناً.');
+    }
   }
   // Element-level checks: a malformed backup must fail here, not crash the
   // settings screen or report generation later.
@@ -220,6 +257,7 @@ function validateImport(doc) {
   };
   if (doc.tatLookup) finiteMap(doc.tatLookup, 'tatLookup');
   if (doc.historicalConstants?.cancelledByMonth) finiteMap(doc.historicalConstants.cancelledByMonth, 'cancelledByMonth');
+  if (doc.snapshot?.numbers) finiteMap(doc.snapshot.numbers, 'snapshot.numbers');
   if (doc.displayNames) {
     for (const [k, v] of Object.entries(doc.displayNames)) {
       if (typeof v !== 'string') throw new Error(`قيمة غير نصية في displayNames: "${k}".`);
@@ -252,8 +290,20 @@ function pickImportKeys(doc) {
       : {};
   }
   if (isPlainObject(out.snapshot)) {
-    const { prevCompleted, asOf } = out.snapshot;
-    out.snapshot = { ...(prevCompleted != null ? { prevCompleted } : {}), ...(asOf != null ? { asOf } : {}) };
+    const snap = out.snapshot;
+    const picked = {};
+    if (snap.asOf != null) picked.asOf = snap.asOf;
+    if (isPlainObject(snap.numbers)) {
+      const nums = {};
+      for (const [k, v] of Object.entries(snap.numbers)) {
+        if (typeof v === 'number' && Number.isFinite(v)) nums[k] = v;
+      }
+      picked.numbers = nums;
+    } else if (snap.prevCompleted != null) {
+      // legacy import shape → fold into the new numbers.completed baseline
+      picked.numbers = { completed: Number(snap.prevCompleted) };
+    }
+    out.snapshot = picked;
   }
   return out;
 }

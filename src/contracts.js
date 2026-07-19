@@ -50,7 +50,12 @@
  * @property {{lab:string, total:number, awaitingResult:number, late:number, latePct:number}[]} byLab
  * @property {{testName:string, late:number}[]} byTest - late-no-result count per test, ascending like the chart
  * @property {string[]} unmatchedTests - test names absent from TAT lookup
- * @property {{completed:number}} deltas - vs settings.snapshot.prevCompleted
+ * @property {{total:number, collected:number, dispatched:number, received:number,
+ *             completed:number, awaitingDispatch:number, shippedNotReceived:number,
+ *             awaitingResults:number, lateNoResult:number}} deltas
+ *   - INCREASE vs the previous report's snapshot numbers (0 when equal/lower or no
+ *     snapshot). Per the workbook's E6 prompt: a green "+N" chip renders ONLY for
+ *     deltas > 0, recomputed each run, never accumulated.
  */
 
 /**
@@ -95,8 +100,13 @@
  * @property {Object<string,number>} tatLookup - test name -> business days
  * @property {Object<string,string>} displayNames
  * @property {{lab:string, pct:string, target:number, uploaded:number, notUploaded:number, needFix:number, canOrder:boolean, available:number}[]} scorecard
- * @property {{cancelledByMonth:Object<string,number>}} historicalConstants - key 'YYYY-MM'; engine merges via max(stored, computed)
- * @property {{prevCompleted:number, asOf:string}} snapshot
+ * @property {{cancelledByMonth:Object<string,number>}} historicalConstants
+ *   - key 'YYYY-MM'; MANUAL additions per the workbook C6 prompt:
+ *     cancelled(m) = countedFromCsv(m) + cancelledByMonth[m] (additive, not max).
+ * @property {{asOf:string, numbers:Object<string,number>}} snapshot
+ *   - the previous report's published numbers (keys = deltas keys above);
+ *     written after each successful generation. Legacy {prevCompleted} docs are
+ *     migrated on load (numbers.completed = prevCompleted).
  */
 
 /** Screen module contract: each ui/screen-*.js exports render(containerEl, ctx)

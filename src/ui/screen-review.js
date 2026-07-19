@@ -99,7 +99,7 @@ export async function render(container, ctx) {
     }
     let spec = null;
     try {
-      spec = buildSpec(model); // buildSpec(reportModel) — variant applied at render time
+      spec = buildSpec(model, { variant: 'internal' }); // preview = internal (the superset)
       if (spec && spec.then) spec = await spec;
       if (spec && !Array.isArray(spec) && spec.slides) spec = spec.slides;
     } catch (e) { console.warn('[review] buildSpec failed', e); }
@@ -144,23 +144,14 @@ export async function render(container, ctx) {
     el('p', { class: 'small muted', style: 'margin-top:8px', text: STR.review.variantsNote }),
   ]);
 
-  // Slide-2 panels
+  // الدعم المطلوب editor (feeds the combined action slide). The المنجزة/المخطط
+  // panels are no longer in the report — their editors were removed.
   const panelsCard = el('div', { class: 'card' }, [
-    el('div', { class: 'card__title', text: STR.review.panelsTitle }),
+    el('div', { class: 'card__title', text: STR.review.panelSupport }),
     textareaField({
       label: STR.review.panelSupport, hint: STR.review.panelHint,
       value: model.panels.supportRequired.join('\n'),
       onInput: (v) => { model.panels.supportRequired = linesToArr(v); schedulePreview(); },
-    }),
-    textareaField({
-      label: STR.review.panelCompleted, hint: STR.review.panelHint,
-      value: model.panels.completedTasks.join('\n'),
-      onInput: (v) => { model.panels.completedTasks = linesToArr(v); schedulePreview(); },
-    }),
-    textareaField({
-      label: STR.review.panelPlanned, hint: STR.review.panelHint,
-      value: model.panels.plannedTasks.join('\n'),
-      onInput: (v) => { model.panels.plannedTasks = linesToArr(v); schedulePreview(); },
     }),
   ]);
 
