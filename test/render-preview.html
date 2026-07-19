@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>مسبار — معاينة الشرائح</title>
+<link rel="stylesheet" href="../styles/slide.css">
+<style>
+  /* Minimal self-hosted Cairo @font-face (fonts.css is owned by another track). */
+  @font-face { font-family:'Cairo'; font-style:normal; font-weight:400; font-display:swap;
+    src:url(../assets/fonts/Cairo-400-arabic.woff2) format('woff2');
+    unicode-range:U+0600-06FF,U+0750-077F,U+0870-088E,U+08A0-08FF,U+200C-200E,U+2010-2011,U+FB50-FDFF,U+FE70-FEFF; }
+  @font-face { font-family:'Cairo'; font-style:normal; font-weight:400; font-display:swap;
+    src:url(../assets/fonts/Cairo-400-latin.woff2) format('woff2'); }
+  @font-face { font-family:'Cairo'; font-style:normal; font-weight:600; font-display:swap;
+    src:url(../assets/fonts/Cairo-600-arabic.woff2) format('woff2');
+    unicode-range:U+0600-06FF,U+0750-077F,U+0870-088E,U+08A0-08FF,U+200C-200E,U+2010-2011,U+FB50-FDFF,U+FE70-FEFF; }
+  @font-face { font-family:'Cairo'; font-style:normal; font-weight:600; font-display:swap;
+    src:url(../assets/fonts/Cairo-600-latin.woff2) format('woff2'); }
+  @font-face { font-family:'Cairo'; font-style:normal; font-weight:700; font-display:swap;
+    src:url(../assets/fonts/Cairo-700-arabic.woff2) format('woff2');
+    unicode-range:U+0600-06FF,U+0750-077F,U+0870-088E,U+08A0-08FF,U+200C-200E,U+2010-2011,U+FB50-FDFF,U+FE70-FEFF; }
+  @font-face { font-family:'Cairo'; font-style:normal; font-weight:700; font-display:swap;
+    src:url(../assets/fonts/Cairo-700-latin.woff2) format('woff2'); }
+
+  body { margin:0; font-family:'Cairo', sans-serif; background:#eef1f5; color:#1e293b; }
+  .toolbar { position:sticky; top:0; z-index:10; display:flex; align-items:center; flex-wrap:wrap;
+    background:#fff; border-bottom:1px solid #d8dee7; padding:10px 16px; }
+  .toolbar > * { margin-inline-start:14px; }
+  .toolbar h1 { font-size:16px; margin:0; margin-inline-start:0; }
+  .toolbar button { font-family:'Cairo',sans-serif; font-size:13px; font-weight:600; cursor:pointer;
+    border:1px solid #1E3A8A; background:#1E3A8A; color:#fff; border-radius:6px; padding:7px 14px; }
+  .toolbar button.secondary { background:#fff; color:#1E3A8A; }
+  .toolbar label { font-size:13px; cursor:pointer; }
+  .toolbar #status { color:#475569; font-size:12px; }
+  #stage { padding:22px 16px 60px; }
+  .preview-slot { position:relative; width:640px; height:360px; overflow:hidden; margin:0 auto 26px;
+    border:1px solid #cbd5e1; border-radius:6px; background:#fff; box-shadow:0 1px 4px rgba(0,0,0,.08); }
+  .preview-frame { position:absolute; top:0; left:0; direction:ltr;
+    width:1280px; height:720px; transform:scale(0.5); transform-origin:top left; }
+  .slot-label { max-width:640px; margin:0 auto 4px; font-size:11px; color:#64748b; }
+</style>
+</head>
+<body>
+<div class="toolbar">
+  <h1>مسبار — معاينة الشرائح</h1>
+  <label><input type="radio" name="variant" value="internal" checked> داخلي</label>
+  <label><input type="radio" name="variant" value="nupco"> نوبكو</label>
+  <button id="btn-pptx">تحميل PPTX</button>
+  <button id="btn-pdf" class="secondary">تحميل PDF</button>
+  <span id="status"></span>
+</div>
+<div id="stage"></div>
+
+<script src="../vendor/pptxgen.bundle.js"></script>
+<script src="../vendor/jspdf.umd.min.js"></script>
+<script src="../vendor/html2canvas.min.js"></script>
+
+<script type="module">
+  import { buildSpec } from '../src/slidespec/build-spec.js';
+  import { renderSlides } from '../src/render/html-renderer.js';
+  import { renderPptx } from '../src/render/pptx-renderer.js';
+  import { exportPdf } from '../src/render/pdf-export.js';
+  import { MOCK_REPORT_MODEL } from './fixtures/mock-report-model.js';
+
+  const stage = document.getElementById('stage');
+  const statusEl = document.getElementById('status');
+  const spec = buildSpec(MOCK_REPORT_MODEL);
+  window.__spec = spec; // debugging convenience
+
+  function currentVariant() {
+    return document.querySelector('input[name="variant"]:checked').value;
+  }
+
+  const onlyParam = new URLSearchParams(location.search).get('only');
+
+  function render() {
+    const variant = currentVariant();
+    stage.textContent = '';
+    const frag = renderSlides(spec, { variant });
+    let children = Array.from(frag.children);
+    if (onlyParam != null) {
+      // Debug mode: render a single slide at full 1280x720 (no scaling) for clean capture.
+      const idx = Math.max(0, Math.min(children.length - 1, parseInt(onlyParam, 10) || 0));
+      const slide = children[idx];
+      stage.style.padding = '0';
+      stage.appendChild(slide);
+      statusEl.textContent = `only #${idx + 1} — ${slide.dataset.slideId}`;
+      return;
+    }
+    children.forEach((slide, i) => {
+      const label = document.createElement('div');
+      label.className = 'slot-label';
+      label.textContent = `#${i + 1} — ${slide.dataset.slideId}`;
+      const slot = document.createElement('div');
+      slot.className = 'preview-slot';
+      const inner = document.createElement('div');
+      inner.className = 'preview-frame';
+      inner.appendChild(slide);
+      slot.appendChild(inner);
+      stage.appendChild(label);
+      stage.appendChild(slot);
+    });
+    statusEl.textContent = `${stage.querySelectorAll('.sl-slide').length} شريحة (${variant})`;
+  }
+
+  document.querySelectorAll('input[name="variant"]').forEach((r) => r.addEventListener('change', render));
+
+  function download(blob, name) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = name; document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
+  }
+
+  document.getElementById('btn-pptx').addEventListener('click', async () => {
+    try {
+      statusEl.textContent = 'جارٍ إنشاء PPTX…';
+      const blob = await renderPptx(spec, { variant: currentVariant(), PptxGenJS: window.PptxGenJS });
+      console.log('PPTX blob size', blob.size);
+      download(blob, `misbar-${currentVariant()}.pptx`);
+      statusEl.textContent = `تم إنشاء PPTX (${(blob.size / 1024).toFixed(0)} KB)`;
+    } catch (err) { console.error(err); statusEl.textContent = 'خطأ PPTX: ' + err.message; }
+  });
+
+  document.getElementById('btn-pdf').addEventListener('click', async () => {
+    try {
+      statusEl.textContent = 'جارٍ إنشاء PDF…';
+      const slides = Array.from(stage.querySelectorAll('.sl-slide'));
+      const blob = await exportPdf(slides, {
+        jsPDF: window.jspdf, html2canvas: window.html2canvas,
+        onProgress: (i, t) => { statusEl.textContent = `PDF ${i}/${t}`; },
+      });
+      console.log('PDF blob size', blob.size);
+      download(blob, `misbar-${currentVariant()}.pdf`);
+      statusEl.textContent = `تم إنشاء PDF (${(blob.size / 1024).toFixed(0)} KB)`;
+    } catch (err) { console.error(err); statusEl.textContent = 'خطأ PDF: ' + err.message; }
+  });
+
+  render();
+</script>
+</body>
+</html>
