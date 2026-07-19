@@ -20,9 +20,32 @@ if (!/^[0-9a-fA-F]{64}$/.test(keyHex || '')) throw new Error('DATA_KEY must be 6
 
 const nowRiyadh = new Date(Date.now() + 10_800_000);
 const asOfIso = nowRiyadh.toISOString().slice(0, 10);
+
+// Cloudflare fronts the instance; present browser-like headers, and on failure
+// dump the response diagnostics (cf-mitigated etc.) before the error propagates.
+const browserFetch = async (url, init = {}) => {
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      ...(init.headers || {}),
+      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36',
+      'Accept': 'application/json, text/plain, */*',
+      'Accept-Language': 'ar,en;q=0.9',
+      'Referer': `${baseUrl}/public-dashboards/${accessToken}`,
+    },
+  });
+  if (!res.ok) {
+    const diag = {};
+    for (const k of ['server', 'cf-ray', 'cf-mitigated', 'cf-cache-status', 'content-type']) diag[k] = res.headers.get(k);
+    console.error('DIAG status:', res.status, JSON.stringify(diag));
+    console.error('DIAG body head:', (await res.clone().text()).slice(0, 300).replace(/\s+/g, ' '));
+  }
+  return res;
+};
+
 const { rows, summary } = await fetchKamcOrders(
   { baseUrl, accessToken, panelId, enabled: true },
-  { fromMs: yearStartMs(asOfIso), toMs: Date.now() },
+  { fromMs: yearStartMs(asOfIso), toMs: Date.now(), fetchImpl: browserFetch },
 );
 console.log(`fetched ${rows.length} rows (${summary.dateRange?.min} -> ${summary.dateRange?.max})`);
 
