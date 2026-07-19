@@ -158,7 +158,12 @@ function buildMonthly(nonCancelled, rejectedAll, cancelledEnriched, cancelledByM
  * Both keep time-of-day; values are rounded to 1 decimal, report-style.
  */
 function buildTurnaround(nonCancelled) {
-  const measured = nonCancelled.filter((e) => e.resultedMs != null && !e.rejected);
+  // receivedMs/dueMs must be present: calDaysBetween would coerce null to epoch-0
+  // and poison the means with ±10,000-day values (dirty rows: resulted with blank
+  // Received, or unmatched test with blank CSV TAT). Golden set is unaffected (422).
+  const measured = nonCancelled.filter(
+    (e) => e.resultedMs != null && !e.rejected && e.receivedMs != null && e.dueMs != null,
+  );
   const groups = new Map();
   for (const e of measured) {
     const m = monthKey(e.orderMs);
@@ -186,7 +191,7 @@ function buildByLab(nonCancelled) {
     return labs.get(name);
   };
   for (const e of nonCancelled) {
-    const L = get(e.facility);
+    const L = get(e.facility ?? 'غير محدد');
     L.total++;
     if (e.receivedMs != null && e.resultedMs == null && !e.rejected) L.awaitingResult++;
     // late = COUNTIFS(D=lab, T="Late", N="") — "Late" already excludes cancelled/rejected
@@ -197,7 +202,7 @@ function buildByLab(nonCancelled) {
       ...L,
       latePct: L.awaitingResult > 0 ? round1((L.late / L.awaitingResult) * 100) : 0,
     }))
-    .sort((a, b) => b.total - a.total || a.lab.localeCompare(b.lab));
+    .sort((a, b) => b.total - a.total || String(a.lab ?? '').localeCompare(String(b.lab ?? '')));
 }
 
 /**

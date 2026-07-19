@@ -32,8 +32,46 @@ function isBlank(canvas) {
   } catch (_) { return false; }
 }
 
-async function shot(el, html2canvas, scale) {
-  return html2canvas(el, { scale, backgroundColor: '#FFFFFF', useCORS: false, logging: false, width: el.offsetWidth, height: el.offsetHeight });
+// html2canvas rasterizes inline <svg> by serializing it into an isolated <img>,
+// which cannot see the page's @font-face — chart labels would fall back to a
+// generic font. Embed Cairo as base64 @font-face rules INSIDE each cloned svg.
+let fontCssPromise = null;
+function svgFontCss() {
+  if (!fontCssPromise) {
+    fontCssPromise = (async () => {
+      const b64 = async (rel) => {
+        const buf = await (await fetch(new URL(rel, import.meta.url))).arrayBuffer();
+        const bytes = new Uint8Array(buf);
+        let s = '';
+        for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+        return btoa(s);
+      };
+      const RANGE_AR = 'U+0600-06FF,U+0750-077F,U+0870-088E,U+0890-0891,U+0897-08E1,U+08E3-08FF,U+200C-200E,U+2010-2011,U+204F,U+2E41,U+FB50-FDFF,U+FE70-FE74,U+FE76-FEFC';
+      const RANGE_LA = 'U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+2000-206F,U+20AC,U+2122,U+2212';
+      const face = (data, range) => `@font-face{font-family:'Cairo';font-style:normal;font-weight:100 900;src:url(data:font/woff2;base64,${data}) format('woff2');unicode-range:${range}}`;
+      const [ar, la] = await Promise.all([
+        b64('../../assets/fonts/Cairo-400-arabic.woff2'),
+        b64('../../assets/fonts/Cairo-400-latin.woff2'),
+      ]);
+      return face(ar, RANGE_AR) + face(la, RANGE_LA);
+    })().catch((e) => { console.warn('[pdf] svg font embed unavailable', e); return ''; });
+  }
+  return fontCssPromise;
+}
+
+async function shot(el, html2canvas, scale, fontCss) {
+  return html2canvas(el, {
+    scale, backgroundColor: '#FFFFFF', useCORS: false, logging: false,
+    width: el.offsetWidth, height: el.offsetHeight,
+    onclone: (doc) => {
+      if (!fontCss) return;
+      doc.querySelectorAll('svg').forEach((svg) => {
+        const st = doc.createElementNS('http://www.w3.org/2000/svg', 'style');
+        st.textContent = fontCss;
+        svg.insertBefore(st, svg.firstChild);
+      });
+    },
+  });
 }
 
 /**
@@ -43,14 +81,15 @@ async function shot(el, html2canvas, scale) {
  */
 export async function exportPdf(slideEls, { jsPDF, html2canvas, onProgress }) {
   await ensureFonts();
+  const fontCss = await svgFontCss();
   const JsPDF = jsPDF.jsPDF || jsPDF;
   const pdf = new JsPDF({ orientation: 'landscape', unit: 'in', format: [13.333, 7.5], compress: true });
   const total = slideEls.length;
 
   for (let i = 0; i < total; i++) {
     const el = slideEls[i];
-    let canvas = await shot(el, html2canvas, 2);
-    if (isBlank(canvas)) canvas = await shot(el, html2canvas, 1.5); // iOS safeguard
+    let canvas = await shot(el, html2canvas, 2, fontCss);
+    if (isBlank(canvas)) canvas = await shot(el, html2canvas, 1.5, fontCss); // iOS safeguard
     const img = canvas.toDataURL('image/jpeg', 0.92);
     if (i > 0) pdf.addPage([13.333, 7.5], 'landscape');
     pdf.addImage(img, 'JPEG', 0, 0, 13.333, 7.5, undefined, 'FAST');

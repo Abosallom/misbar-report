@@ -209,6 +209,53 @@ function validateImport(doc) {
   if ('snapshot' in doc && !isPlainObject(doc.snapshot)) {
     throw new Error('حقل snapshot غير صالح: يجب أن يكون كائناً.');
   }
+  // Element-level checks: a malformed backup must fail here, not crash the
+  // settings screen or report generation later.
+  const finiteMap = (m, label) => {
+    for (const [k, v] of Object.entries(m || {})) {
+      if (typeof v !== 'number' || !Number.isFinite(v)) {
+        throw new Error(`قيمة غير رقمية في ${label}: "${k}".`);
+      }
+    }
+  };
+  if (doc.tatLookup) finiteMap(doc.tatLookup, 'tatLookup');
+  if (doc.historicalConstants?.cancelledByMonth) finiteMap(doc.historicalConstants.cancelledByMonth, 'cancelledByMonth');
+  if (doc.displayNames) {
+    for (const [k, v] of Object.entries(doc.displayNames)) {
+      if (typeof v !== 'string') throw new Error(`قيمة غير نصية في displayNames: "${k}".`);
+    }
+  }
+  if (doc.scorecard) {
+    doc.scorecard.forEach((r, i) => {
+      if (!isPlainObject(r) || typeof r.lab !== 'string') {
+        throw new Error(`صف غير صالح في scorecard (رقم ${i + 1}).`);
+      }
+      for (const f of ['target', 'uploaded', 'notUploaded', 'needFix', 'available']) {
+        if (f in r && (typeof r[f] !== 'number' || !Number.isFinite(r[f]))) {
+          throw new Error(`قيمة "${f}" غير رقمية في scorecard (صف ${i + 1}).`);
+        }
+      }
+    });
+  }
+}
+
+// Only these top-level keys may ever be persisted — the "no PHI in storage"
+// invariant depends on unknown keys being discarded before the merge.
+const IMPORT_KEYS = ['schemaVersion', 'tatLookup', 'displayNames', 'scorecard', 'historicalConstants', 'snapshot'];
+
+function pickImportKeys(doc) {
+  const out = {};
+  for (const k of IMPORT_KEYS) if (k in doc) out[k] = doc[k];
+  if (isPlainObject(out.historicalConstants)) {
+    out.historicalConstants = 'cancelledByMonth' in out.historicalConstants
+      ? { cancelledByMonth: out.historicalConstants.cancelledByMonth }
+      : {};
+  }
+  if (isPlainObject(out.snapshot)) {
+    const { prevCompleted, asOf } = out.snapshot;
+    out.snapshot = { ...(prevCompleted != null ? { prevCompleted } : {}), ...(asOf != null ? { asOf } : {}) };
+  }
+  return out;
 }
 
 /** Deep-merge with the incoming (over) document winning on every leaf/array. */
@@ -253,6 +300,7 @@ export function importSettings(jsonText) {
     throw new Error('ملف غير صالح: تعذّر قراءة JSON.');
   }
   validateImport(incoming);
+  incoming = pickImportKeys(incoming); // discard unknown keys — nothing but config may persist
 
   const current = clone(loadSettings());
   const merged = deepMergeImportWins(current, incoming);

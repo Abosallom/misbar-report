@@ -12,7 +12,13 @@
  * @param {import('../contracts.js').OrderRow} r @returns {string}
  */
 export function defaultKey(r) {
-  const line = r.lineNo != null && r.lineNo !== '' ? String(r.lineNo) : '';
+  // Workbook line ids are stable strings that embed the order id ("…463:1").
+  // The daily CSV has no line id — ingest fills a positional row index (a plain
+  // number), which would make every row globally unique and defeat dedupe across
+  // concatenated re-exports. Positional (purely numeric) lineNos are ignored.
+  const raw = r.lineNo;
+  const stable = raw != null && raw !== '' && !/^\d+$/.test(String(raw));
+  const line = stable ? String(raw) : '';
   return `${r.orderId ?? ''}||${line || `t:${r.testName ?? ''}`}`;
 }
 

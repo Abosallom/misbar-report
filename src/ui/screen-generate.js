@@ -235,16 +235,25 @@ export async function render(container, ctx) {
       }
     } catch (e) { console.warn('[generate] snapshot update failed', e); }
 
-    // Sequential downloads (~300ms apart) to survive iOS single-download throttling.
-    for (let i = 0; i < produced.length; i++) {
-      const p = produced[i];
-      p.url = triggerDownload(p.blob, p.def.name);
-      if (i < produced.length - 1) await new Promise((r) => setTimeout(r, isMobile() ? 350 : 250));
+    // Auto-download works on desktop; iOS/Safari may drop programmatic clicks
+    // that fire without recent user activation, so it's attempted on desktop only
+    // and the panel below always offers gesture-driven buttons.
+    if (!isMobile()) {
+      for (let i = 0; i < produced.length; i++) {
+        const p = produced[i];
+        p.url = triggerDownload(p.blob, p.def.name);
+        if (i < produced.length - 1) await new Promise((r) => setTimeout(r, 250));
+      }
     }
 
     resultHost.appendChild(el('div', { class: 'success-panel' }, [
       el('div', { class: 'success-panel__icon', text: '✅' }),
       el('h3', { text: STR.generate.done }),
+      el('button', {
+        class: 'btn btn--primary btn--block', text: STR.generate.downloadAll,
+        // Runs synchronously inside the tap so each click carries user activation.
+        onClick: () => { produced.forEach((p) => { p.url = triggerDownload(p.blob, p.def.name); }); },
+      }),
       hadError ? el('p', { class: 'small muted', text: STR.generate.genMissing }) : null,
       el('p', { class: 'small muted', style: 'margin-top:6px', text: STR.generate.downloadHint }),
       el('div', { class: 'dl-links' }, produced.map((p) =>

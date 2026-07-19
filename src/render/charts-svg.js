@@ -141,7 +141,8 @@ function barH(el) {
     s += `<line x1="${x.toFixed(1)}" y1="${m.top}" x2="${x.toFixed(1)}" y2="${H - m.bottom}" stroke="${GRID}" stroke-width="1"/>`;
   }
   cats.forEach((cat, i) => {
-    const cy = m.top + i * rowH + rowH / 2;
+    // index 0 at the BOTTOM (ascending upward) — matches PptxGenJS and the source deck
+    const cy = m.top + (cats.length - 1 - i) * rowH + rowH / 2;
     const v = ser.values[i] ?? 0;
     const len = (v / vmax) * plotW;
     s += `<rect x="${(baseX - len).toFixed(1)}" y="${(cy - bh / 2).toFixed(1)}" width="${len.toFixed(1)}" height="${bh.toFixed(1)}" fill="${ser.color}"/>`;
@@ -155,8 +156,9 @@ function barH(el) {
 
 // ---------------------------------------------------------------------------
 function legend(series, W, y) {
-  // RTL: lay swatch+label items from the right toward the left, centered.
-  const items = series.map((s) => ({ name: s.name, color: s.color }));
+  // Item ORDER matches PptxGenJS/the source deck: series[0] leftmost. Each item
+  // itself is still drawn swatch-right-of-label per RTL habit.
+  const items = series.map((s) => ({ name: s.name, color: s.color })).reverse();
   const gap = 18, sw = 11, textGap = 5;
   const widths = items.map((it) => sw + textGap + it.name.length * 6.2 + gap);
   const total = widths.reduce((a, b) => a + b, 0) - gap;

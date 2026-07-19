@@ -83,10 +83,8 @@ function addChart(slide, P, e) {
       valGridLine: { color: 'D9D9D9', size: 1 },
     });
   } else if (e.kind === 'line') {
-    slide.addChart(P.ChartType.line, data, {
+    const common = {
       x: e.x, y: e.y, w: e.w, h: e.h,
-      chartColors: colors,
-      lineSize: 2, lineDataSymbol: 'circle', lineDataSymbolSize: 6,
       displayBlanksAs: 'gap',
       showLegend: legendOn, legendPos: 'b', legendFontFace: 'Cairo', legendFontSize: 8,
       showValAxisTitle: !!e.opts?.title, valAxisTitle: e.opts?.title || '', valAxisTitleFontFace: 'Cairo', valAxisTitleFontSize: 9,
@@ -94,11 +92,35 @@ function addChart(slide, P, e) {
       catAxisLabelFontFace: 'Cairo', catAxisLabelFontSize: 8,
       valAxisLabelFontFace: 'Cairo', valAxisLabelFontSize: 8,
       valGridLine: { color: 'D9D9D9', size: 1 },
-    });
+    };
+    const styled = e.series.some((s) => s.dash || (s.marker && s.marker !== 'circle'));
+    if (styled) {
+      // Per-series dash/marker needs one chart group per series (combo form) —
+      // a single addChart applies lineDash/lineDataSymbol to every series.
+      const groups = e.series.map((s, i) => ({
+        type: P.ChartType.line,
+        data: [data[i]],
+        options: {
+          chartColors: [colors[i]],
+          lineSize: 2,
+          lineDash: s.dash ? 'dash' : 'solid',
+          lineDataSymbol: s.marker || 'circle',
+          lineDataSymbolSize: 6,
+        },
+      }));
+      slide.addChart(groups, common);
+    } else {
+      slide.addChart(P.ChartType.line, data, {
+        ...common,
+        chartColors: colors,
+        lineSize: 2, lineDataSymbol: 'circle', lineDataSymbolSize: 6,
+      });
+    }
   } else if (e.kind === 'barH') {
     slide.addChart(P.ChartType.bar, data, {
       x: e.x, y: e.y, w: e.w, h: e.h,
       barDir: 'bar', barGrouping: 'clustered', barGapWidthPct: 30,
+      valAxisOrientation: 'maxMin', // RTL: zero baseline on the right, bars grow left
       chartColors: colors,
       showLegend: false,
       showValue: !!e.opts?.dataLabels, dataLabelFontFace: 'Cairo', dataLabelFontSize: 8, dataLabelColor: hex(C.slate900), dataLabelPosition: 'outEnd',

@@ -55,6 +55,11 @@ export async function render(container, ctx) {
   if (!state.reportDate) state.reportDate = todayISO();
   if (!state.reportModel) state.reportModel = buildDraftReportModel(state, store);
   const model = state.reportModel;
+  { // settings may have been edited since the model was drafted — re-source them
+    const s = store.settings || {};
+    if (s.scorecard) model.scorecard = s.scorecard;
+    if (s.displayNames) model.displayNames = s.displayNames;
+  }
   const kpi = model.kpi;
 
   /* ---------- Preview machinery ---------- */
@@ -125,6 +130,7 @@ export async function render(container, ctx) {
   const dateInput = el('input', { type: 'date', value: state.reportDate });
   dateInput.addEventListener('change', () => {
     state.reportDate = dateInput.value || todayISO();
+    model.reportDate = state.reportDate; // sync immediately — generate must never see a stale date
     dateHint.textContent = formatDateAr(state.reportDate);
     schedulePreview();
   });
@@ -244,7 +250,16 @@ export async function render(container, ctx) {
   const generateBtn = el('div', { class: 'sticky-actions' }, [
     el('button', {
       class: 'btn btn--primary btn--block', text: STR.review.generate,
-      onClick: () => { state.reportModel = model; navigate('generate'); },
+      onClick: () => {
+        model.reportDate = state.reportDate; // beat the 260ms preview debounce
+        // Settings edited after the model was drafted (scorecard, display names)
+        // must reach the generated files.
+        const s = store.settings || {};
+        model.scorecard = s.scorecard || model.scorecard;
+        model.displayNames = s.displayNames || model.displayNames;
+        state.reportModel = model;
+        navigate('generate');
+      },
     }),
   ]);
 
