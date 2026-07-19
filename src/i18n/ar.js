@@ -102,6 +102,7 @@ export const STR = {
       total: 'إجمالي الطلبات',
       completed: 'النتائج المكتملة',
       awaitingResults: 'بانتظار النتائج',
+      rejected: 'النتائج المرفوضة',
       late: 'المتأخرة بدون نتيجة',
       latePct: 'نسبة التأخر',
       turnaround: 'معدل الدوران (فعلي/متوقع)',

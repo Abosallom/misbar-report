@@ -33,19 +33,21 @@ export const GOLDEN_EXPECTED = {
     shippedNotReceived: 12,
     awaitingResults: 159,
     completed: 422,
+    rejected: 15, // surfaced as own value (2026-07-19); {05:14, 06:1}
     lateNoResult: 67,
     latePct: 42.1,
   },
 
   // order-month, excl. cancelled; cancelled = merged max(stored, computed-in-data)
+  // rejected is per order-month (own value); does not change incomplete = orders − results.
   monthly: [
-    { month: '2026-01', orders: 0, results: 0, incomplete: 0, completionPct: null, cancelled: 8 },
-    { month: '2026-02', orders: 0, results: 0, incomplete: 0, completionPct: null, cancelled: 1 },
-    { month: '2026-03', orders: 0, results: 0, incomplete: 0, completionPct: null, cancelled: 30 },
-    { month: '2026-04', orders: 3, results: 3, incomplete: 0, completionPct: 100, cancelled: 4 },
-    { month: '2026-05', orders: 105, results: 76, incomplete: 29, completionPct: 72.4, cancelled: 6 },
-    { month: '2026-06', orders: 410, results: 340, incomplete: 70, completionPct: 82.9, cancelled: 4 },
-    { month: '2026-07', orders: 100, results: 3, incomplete: 97, completionPct: 3.0, cancelled: 0 },
+    { month: '2026-01', orders: 0, results: 0, rejected: 0, incomplete: 0, completionPct: null, cancelled: 8 },
+    { month: '2026-02', orders: 0, results: 0, rejected: 0, incomplete: 0, completionPct: null, cancelled: 1 },
+    { month: '2026-03', orders: 0, results: 0, rejected: 0, incomplete: 0, completionPct: null, cancelled: 30 },
+    { month: '2026-04', orders: 3, results: 3, rejected: 0, incomplete: 0, completionPct: 100, cancelled: 4 },
+    { month: '2026-05', orders: 105, results: 76, rejected: 14, incomplete: 29, completionPct: 72.4, cancelled: 6 },
+    { month: '2026-06', orders: 410, results: 340, rejected: 1, incomplete: 70, completionPct: 82.9, cancelled: 4 },
+    { month: '2026-07', orders: 100, results: 3, rejected: 0, incomplete: 97, completionPct: 3.0, cancelled: 0 },
   ],
   monthlyTotals: { orders: 618, results: 422, incomplete: 196, completionPct: 68.3 },
   cancelledNote: 53,
@@ -65,13 +67,14 @@ export const GOLDEN_EXPECTED = {
 
   // facility-normalized, excl. cancelled; sorted total-desc (workbook table order).
   // latePct = late / awaitingResult (0 when awaitingResult = 0).
+  // rejected per lab (own value): Advanced 14, Fal 1, others 0.
   byLab: [
-    { lab: 'Advanced Laboratory Services .Co', total: 301, awaitingResult: 89, late: 60, latePct: 67.4 },
-    { lab: 'Fal Specialized Medical Lab', total: 151, awaitingResult: 21, late: 2, latePct: 9.5 },
-    { lab: 'king Abdullaziz Medical city in Riyadh', total: 113, awaitingResult: 35, late: 3, latePct: 8.6 },
-    { lab: 'Eurofins clinical', total: 27, awaitingResult: 0, late: 0, latePct: 0 },
-    { lab: 'Saudi Diagnostics Limited Company', total: 19, awaitingResult: 7, late: 2, latePct: 28.6 },
-    { lab: 'Anwa Medical Company', total: 7, awaitingResult: 7, late: 0, latePct: 0 },
+    { lab: 'Advanced Laboratory Services .Co', total: 301, awaitingResult: 89, rejected: 14, late: 60, latePct: 67.4 },
+    { lab: 'Fal Specialized Medical Lab', total: 151, awaitingResult: 21, rejected: 1, late: 2, latePct: 9.5 },
+    { lab: 'king Abdullaziz Medical city in Riyadh', total: 113, awaitingResult: 35, rejected: 0, late: 3, latePct: 8.6 },
+    { lab: 'Eurofins clinical', total: 27, awaitingResult: 0, rejected: 0, late: 0, latePct: 0 },
+    { lab: 'Saudi Diagnostics Limited Company', total: 19, awaitingResult: 7, rejected: 0, late: 2, latePct: 28.6 },
+    { lab: 'Anwa Medical Company', total: 7, awaitingResult: 7, rejected: 0, late: 0, latePct: 0 },
   ],
   byLabTotals: { total: 618, awaitingResult: 159, late: 67, latePct: 42.1 },
 
@@ -106,6 +109,7 @@ export const GOLDEN_EXPECTED = {
     dispatched: 0,
     received: 0,
     completed: 0,
+    rejected: 0,
     awaitingDispatch: 0,
     shippedNotReceived: 0,
     awaitingResults: 0,

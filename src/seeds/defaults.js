@@ -28,6 +28,7 @@ export const SNAPSHOT_SEED = {
     dispatched: 608,
     received: 596,
     completed: 422, // dated-only rule re-baseline (2026-07-19): rejected excluded
+    rejected: 15, // 09-07 baseline: rejected surfaced as its own value (2026-07-19)
     awaitingDispatch: 10,
     shippedNotReceived: 12,
     awaitingResults: 159,

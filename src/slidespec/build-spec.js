@@ -65,13 +65,16 @@ function buildCover(m) {
 // ============================================================================
 // Slide 2 — Executive summary + order-journey funnel (merged)
 // ============================================================================
-// KPI card factory (reused verbatim from the old buildSummary).
-function kpiCard({ x, v, vc, lab, sub, ac, delta }) {
-  const y = 0.93, w = 1.903, h = 1.6;
+// KPI card factory. Width is a param (the row packs 7 cards now); height/y and the
+// inner layout proportions are fixed. Number font 34pt — the narrower 1.639in card
+// leaves ~1.40in of ink box, which still fits a 4-char worst case ('1234') at 34pt
+// (was 40pt when cards were 1.903in wide).
+function kpiCard({ x, w, v, vc, lab, sub, ac, delta }) {
+  const y = 0.93, h = 1.6;
   const els = [
     rect(x, y, w, h, C.white, { radius: 0.05, line: { color: C.border, w: 0.75 } }),
     rect(x + w - 0.063, y, 0.063, h, ac),
-    text(x + 0.08, y + 0.13, w - 0.24, 0.72, v, 40, { bold: true, color: vc, align: 'right', valign: 'middle' }),
+    text(x + 0.08, y + 0.13, w - 0.24, 0.72, v, 34, { bold: true, color: vc, align: 'right', valign: 'middle' }),
     text(x + 0.08, y + 0.9, w - 0.16, 0.42, lab, 11.5, { bold: true, color: C.slate900, align: 'right', valign: 'top', rtl: true }),
   ];
   if (sub) els.push(text(x + 0.08, y + 1.28, w - 0.16, 0.28, sub, 9.5, { color: C.slate500, align: 'right', valign: 'top', rtl: true }));
@@ -80,25 +83,33 @@ function kpiCard({ x, v, vc, lab, sub, ac, delta }) {
 }
 
 // The KPI cards own these metrics' delta chips; the funnel must not duplicate them.
-const KPI_DELTA_KEYS = new Set(['total', 'awaitingDispatch', 'awaitingResults', 'completed', 'lateNoResult', 'shippedNotReceived']);
+const KPI_DELTA_KEYS = new Set(['total', 'awaitingDispatch', 'awaitingResults', 'completed', 'rejected', 'lateNoResult', 'shippedNotReceived']);
+
+// KPI row geometry: 7 cards between x 0.500 and 12.818 (span 12.318in), gap 0.140.
+// cardW = (12.318 − 6×0.140) / 7 = 1.639in; step = cardW + gap = 1.779in.
+// Rightmost card (total) at x = 12.818 − 1.639 = 11.179; each card to its left is
+// one step lower. Leftmost (shippedNotReceived) lands at 0.505 (≈ the 0.500 edge).
+const KPI_CARD_W = 1.639;
+const KPI_X = (i) => Math.round((11.179 - i * 1.779) * 1000) / 1000; // i=0 rightmost
 
 function buildExecFunnel(m) {
   const b = m.kpi.buckets;
   const f = m.kpi.funnel;
   const d = m.kpi.deltas || {};
 
-  // -- ZONE A: 6 KPI cards in one row, right-to-left (total rightmost) --------
-  // 6×1.903 + 5×0.180 gaps = 12.318 → x 0.500…12.818. Each card shows a green
-  // "+N" chip when its own delta key > 0.
+  // -- ZONE A: 7 KPI cards in one row, right-to-left (total rightmost). المرفوضة
+  // sits between المكتملة and المتأخرة. Each card shows a green "+N" chip when its
+  // own delta key > 0.
   const cards = [
-    { x: 10.917, v: String(m.kpi.totals.total), vc: C.blue, lab: 'إجمالي الطلبات', sub: 'يناير – يوليو', ac: C.blue, dk: 'total' },
-    { x: 8.833, v: String(b.awaitingDispatch), vc: C.greenSoft, lab: 'في انتظار شحن العينة (المستشفى)', sub: 'قبل الـ Dispatch', ac: C.greenSoft, dk: 'awaitingDispatch' },
-    { x: 6.75, v: String(b.awaitingResults), vc: C.amber, lab: 'في انتظار نتائج العينة (المختبر)', sub: 'بعد الـ Dispatch', ac: C.amber, dk: 'awaitingResults' },
-    { x: 4.667, v: String(b.completed), vc: C.green, lab: 'نتائج مكتملة', sub: '', ac: C.green, dk: 'completed' },
-    { x: 2.583, v: String(b.lateNoResult), vc: C.redPure, lab: 'الطلبات المتأخرة', sub: `تمثل ${b.latePct}% من الطلبات`, ac: C.redPure, dk: 'lateNoResult' },
-    { x: 0.5, v: String(b.shippedNotReceived), vc: C.redSoft, lab: 'شُحنت ولم تُستلم', sub: '', ac: C.redSoft, dk: 'shippedNotReceived' },
+    { x: KPI_X(0), v: String(m.kpi.totals.total), vc: C.blue, lab: 'إجمالي الطلبات', sub: 'يناير – يوليو', ac: C.blue, dk: 'total' },
+    { x: KPI_X(1), v: String(b.awaitingDispatch), vc: C.greenSoft, lab: 'في انتظار شحن العينة (المستشفى)', sub: 'قبل الـ Dispatch', ac: C.greenSoft, dk: 'awaitingDispatch' },
+    { x: KPI_X(2), v: String(b.awaitingResults), vc: C.amber, lab: 'في انتظار نتائج العينة (المختبر)', sub: 'بعد الـ Dispatch', ac: C.amber, dk: 'awaitingResults' },
+    { x: KPI_X(3), v: String(b.completed), vc: C.green, lab: 'نتائج مكتملة', sub: '', ac: C.green, dk: 'completed' },
+    { x: KPI_X(4), v: String(b.rejected), vc: C.redSoft, lab: 'النتائج المرفوضة', sub: 'نتائج مرفوضة من المختبر', ac: C.redSoft, dk: 'rejected' },
+    { x: KPI_X(5), v: String(b.lateNoResult), vc: C.redPure, lab: 'الطلبات المتأخرة', sub: `تمثل ${b.latePct}% من الطلبات`, ac: C.redPure, dk: 'lateNoResult' },
+    { x: KPI_X(6), v: String(b.shippedNotReceived), vc: C.redSoft, lab: 'شُحنت ولم تُستلم', sub: '', ac: C.redSoft, dk: 'shippedNotReceived' },
   ];
-  const kpiEls = cards.flatMap((c) => kpiCard({ ...c, delta: d[c.dk] > 0 ? '+' + d[c.dk] : undefined }));
+  const kpiEls = cards.flatMap((c) => kpiCard({ ...c, w: KPI_CARD_W, delta: d[c.dk] > 0 ? '+' + d[c.dk] : undefined }));
 
   // -- ZONE B: order-journey funnel (from old buildJourney; X unchanged, Y +0.40)
   const maxV = f.created;
@@ -160,6 +171,7 @@ function buildMonthly(m) {
   // Totals column computed from the rows (guard divide-by-zero on completion).
   const oTot = mo.reduce((s, x) => s + x.orders, 0);
   const rTot = mo.reduce((s, x) => s + x.results, 0);
+  const rejTot = mo.reduce((s, x) => s + (x.rejected || 0), 0);
   const iTot = mo.reduce((s, x) => s + x.incomplete, 0);
   const cPct = oTot > 0 ? Math.round((rTot / oTot) * 1000) / 10 : null; // round1(results/orders*100)
   const cTot = pctMonthly(cPct);
@@ -167,6 +179,7 @@ function buildMonthly(m) {
   const header = rev(['المؤشر', ...monthLabels, { text: 'الإجمالي', fill: C.navyDark }]);
   const rowOrders = rev([{ text: 'الطلبات', align: 'right' }, ...mo.map((x) => String(x.orders)), { text: String(oTot), fill: bg, bold: true }]);
   const rowResults = rev([{ text: 'النتائج المستلمة', align: 'right' }, ...mo.map((x) => String(x.results)), { text: String(rTot), fill: bg, bold: true }]);
+  const rowRejected = rev([{ text: 'النتائج المرفوضة', align: 'right' }, ...mo.map((x) => String(x.rejected || 0)), { text: String(rejTot), fill: bg, bold: true }]);
   const rowIncomplete = rev([{ text: 'النتائج غير المكتملة', align: 'right' }, ...mo.map((x) => String(x.incomplete)), { text: String(iTot), fill: bg, bold: true }]);
   const rowCompletion = rev([{ text: 'نسبة الاكتمال', align: 'right' }, ...mo.map((x) => pctMonthly(x.completionPct)), { text: cTot, fill: bg, bold: true }]);
 
@@ -183,7 +196,7 @@ function buildMonthly(m) {
     t: 'table', x: 6.604, y: 1.069, w: TABLE_W, rtl: true, rowH: 0.456,
     header: { fill: C.navy, color: C.white, bold: true },
     colW: rev([LABEL_COLW, ...monthColW, TOTAL_COLW]),
-    rows: [header, rowOrders, rowResults, rowIncomplete, rowCompletion],
+    rows: [header, rowOrders, rowResults, rowRejected, rowIncomplete, rowCompletion],
   };
 
   const monthlyChart = {
@@ -229,13 +242,16 @@ function buildMonthly(m) {
 // ============================================================================
 function buildCompliance(m) {
   const lab = m.kpi.byLab;
-  // logical (deck rtl) order per row: [#, lab, total, awaitingResult, late, late%]; reverse -> visual
-  const header = rev(['#', 'المختبر', 'مجموع الطلبات', 'طلبات مستلمة بانتظار نتيجة', 'الطلبات المتأخرة', 'نسبة الطلبات المتأخرة']);
+  // logical (deck rtl) order per row: [#, lab, total, awaitingResult, rejected, late, late%];
+  // reverse -> visual. 'مرفوضة' sits between 'مستلمة بانتظار نتيجة' and 'المتأخرة'.
+  const rejTot = lab.reduce((s, r) => s + (r.rejected || 0), 0);
+  const header = rev(['#', 'المختبر', 'مجموع الطلبات', 'طلبات مستلمة بانتظار نتيجة', 'مرفوضة', 'الطلبات المتأخرة', 'نسبة الطلبات المتأخرة']);
   const labRows = lab.map((r, i) => rev([
     String(i + 1),
     { text: r.lab, align: 'right' },
     String(r.total),
     String(r.awaitingResult),
+    String(r.rejected || 0),
     String(r.late),
     pctLab(r.latePct),
   ]));
@@ -244,14 +260,17 @@ function buildCompliance(m) {
     { text: 'المجموع', bold: true, fill: C.bgLighter, align: 'right' },
     { text: '618', bold: true, fill: C.bgLighter },
     { text: '159', bold: true, fill: C.bgLighter },
+    { text: String(rejTot), bold: true, fill: C.bgLighter },
     { text: '67', bold: true, fill: C.bgLighter },
     { text: '42.1%', bold: true, fill: C.bgLighter },
   ]);
 
+  // colW: shaved the wide lab-name column 3.264 -> 2.714 to fund a 0.55in 'مرفوضة'
+  // column; total width stays 11.667 (0.556+2.714+1.667+2.083+0.55+1.944+2.153).
   const labTable = {
     t: 'table', x: 0.833, y: 1.194, w: 11.667, rtl: true, rowH: 0.275,
     header: { fill: C.navy, color: C.white, bold: true },
-    colW: rev([0.556, 3.264, 1.667, 2.083, 1.944, 2.153]),
+    colW: rev([0.556, 2.714, 1.667, 2.083, 0.55, 1.944, 2.153]),
     rows: [header, ...labRows, totalRow],
   };
 

@@ -12,7 +12,7 @@ import { GOLDEN_EXPECTED } from './fixtures/golden-expected.js';
 import { SNAPSHOT_SEED } from '../src/seeds/defaults.js';
 
 const ZERO_DELTAS = {
-  total: 0, collected: 0, dispatched: 0, received: 0, completed: 0,
+  total: 0, collected: 0, dispatched: 0, received: 0, completed: 0, rejected: 0,
   awaitingDispatch: 0, shippedNotReceived: 0, awaitingResults: 0, lateNoResult: 0,
 };
 
@@ -129,6 +129,18 @@ test('deltas: no snapshot → every delta is 0', () => {
   delete opts.prevCompleted; // no baseline of any kind
   const out = compute(GOLDEN_ORDERS, TAT_LOOKUP, opts);
   assert.deepEqual(out.deltas, ZERO_DELTAS);
+});
+
+test('deltas: a lower prev rejected → positive rejected delta', () => {
+  // prev rejected below current (15) → deltas.rejected = 15 − 10 = 5; completed
+  // held at current (422) so it stays 0; every other key equals its seed.
+  const prevNumbers = { ...SNAPSHOT_SEED.numbers, completed: 422, rejected: 10 };
+  const out = compute(GOLDEN_ORDERS, TAT_LOOKUP, {
+    asOf: goldenOpts().asOf,
+    cancelledByMonth: goldenOpts().cancelledByMonth,
+    snapshot: { asOf: '2026-07-01', numbers: prevNumbers },
+  });
+  assert.deepEqual(out.deltas, { ...ZERO_DELTAS, rejected: 5 });
 });
 
 test('deltas: a lower current value never goes negative (clamped at 0)', () => {

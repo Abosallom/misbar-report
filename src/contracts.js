@@ -43,15 +43,15 @@
  * @typedef {Object} EngineOutput
  * @property {{lines:number, cancelledInData:number, total:number}} totals - total = lines - cancelledInData
  * @property {{created:number, collected:number, dispatched:number, received:number, resulted:number}} funnel - all excl. cancelled
- * @property {{awaitingDispatch:number, shippedNotReceived:number, awaitingResults:number, completed:number, lateNoResult:number, latePct:number}} buckets
- * @property {{month:string, orders:number, results:number, incomplete:number, completionPct:number|null, cancelled:number}[]} monthly - month='YYYY-MM'; includes historical months merged from settings
+ * @property {{awaitingDispatch:number, shippedNotReceived:number, awaitingResults:number, completed:number, rejected:number, lateNoResult:number, latePct:number}} buckets
+ * @property {{month:string, orders:number, results:number, rejected:number, incomplete:number, completionPct:number|null, cancelled:number}[]} monthly - month='YYYY-MM'; includes historical months merged from settings
  * @property {number} cancelledNote - sum of merged cancelledByMonth (the "* N طلب ملغي" note)
  * @property {{overallActual:number, overallExpected:number, perMonth:{month:string, actual:number|null, expected:number|null}[]}} turnaround - days, 1-decimal semantics per report
- * @property {{lab:string, total:number, awaitingResult:number, late:number, latePct:number}[]} byLab
+ * @property {{lab:string, total:number, awaitingResult:number, rejected:number, late:number, latePct:number}[]} byLab
  * @property {{testName:string, late:number}[]} byTest - late-no-result count per test, ascending like the chart
  * @property {string[]} unmatchedTests - test names absent from TAT lookup
  * @property {{total:number, collected:number, dispatched:number, received:number,
- *             completed:number, awaitingDispatch:number, shippedNotReceived:number,
+ *             completed:number, rejected:number, awaitingDispatch:number, shippedNotReceived:number,
  *             awaitingResults:number, lateNoResult:number}} deltas
  *   - INCREASE vs the previous report's snapshot numbers (0 when equal/lower or no
  *     snapshot). Per the workbook's E6 prompt: a green "+N" chip renders ONLY for

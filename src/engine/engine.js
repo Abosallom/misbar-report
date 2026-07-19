@@ -111,11 +111,16 @@ function buildBuckets(nonCancelled) {
     (e) => e.receivedMs != null && e.resultedMs == null && !e.rejected,
   ).length;
   const completed = nonCancelled.filter((e) => e.resultedMs != null).length;
+  // rejected surfaced as its own value (user decision 2026-07-19): non-cancelled
+  // rows whose Order Status was 'Result Rejected'. Excluded from completed above.
+  const rejected = nonCancelled.filter((e) => e.rejected).length;
   const lateNoResult = nonCancelled.filter(
     (e) => e.status === STATUS.LATE && e.resultedMs == null,
   ).length;
   const latePct = awaitingResults > 0 ? round1((lateNoResult / awaitingResults) * 100) : 0;
-  return { awaitingDispatch, shippedNotReceived, awaitingResults, completed, lateNoResult, latePct };
+  return {
+    awaitingDispatch, shippedNotReceived, awaitingResults, completed, rejected, lateNoResult, latePct,
+  };
 }
 
 /**
@@ -159,10 +164,13 @@ function buildMonthly(nonCancelled, cancelledEnriched, cancelledByMonth) {
     const orders = nonCancelled.filter((e) => e.hasCreated && monthKey(e.orderMs) === m).length;
     const results =
       nonCancelled.filter((e) => e.resultedMs != null && monthKey(e.orderMs) === m).length;
+    // rejected per order-month (own value; does NOT affect the incomplete = orders − results rule).
+    const rejected =
+      nonCancelled.filter((e) => e.rejected && monthKey(e.orderMs) === m).length;
     const cancelled = merged.get(m) || 0;
     const incomplete = orders - results;
     const completionPct = orders > 0 ? round1((results / orders) * 100) : null;
-    return { month: m, orders, results, incomplete, completionPct, cancelled };
+    return { month: m, orders, results, rejected, incomplete, completionPct, cancelled };
   });
 
   return { monthly, cancelledNote };
@@ -204,13 +212,14 @@ function buildTurnaround(nonCancelled) {
 function buildByLab(nonCancelled) {
   const labs = new Map();
   const get = (name) => {
-    if (!labs.has(name)) labs.set(name, { lab: name, total: 0, awaitingResult: 0, late: 0 });
+    if (!labs.has(name)) labs.set(name, { lab: name, total: 0, awaitingResult: 0, rejected: 0, late: 0 });
     return labs.get(name);
   };
   for (const e of nonCancelled) {
     const L = get(e.facility ?? 'غير محدد');
     L.total++;
     if (e.receivedMs != null && e.resultedMs == null && !e.rejected) L.awaitingResult++;
+    if (e.rejected) L.rejected++; // rejected count per lab (own value)
     // late = COUNTIFS(D=lab, T="Late", N="") — "Late" already excludes cancelled/rejected
     if (e.status === STATUS.LATE && e.resultedMs == null) L.late++;
   }
@@ -324,6 +333,7 @@ export function compute(rows, tatLookup, opts = {}) {
     dispatched: funnel.dispatched,
     received: funnel.received,
     completed: buckets.completed,
+    rejected: buckets.rejected,
     awaitingDispatch: buckets.awaitingDispatch,
     shippedNotReceived: buckets.shippedNotReceived,
     awaitingResults: buckets.awaitingResults,

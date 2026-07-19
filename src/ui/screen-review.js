@@ -227,6 +227,7 @@ export async function render(container, ctx) {
     { label: STR.review.kpi.total, value: (kpi.totals && kpi.totals.total) ?? '—' },
     { label: STR.review.kpi.completed, value: b.completed ?? '—', delta: delta > 0 ? '+' + delta : '' },
     { label: STR.review.kpi.awaitingResults, value: b.awaitingResults ?? '—' },
+    { label: STR.review.kpi.rejected, value: b.rejected ?? '—' },
     { label: STR.review.kpi.late, value: b.lateNoResult ?? '—' },
     { label: STR.review.kpi.latePct, value: fmtPct(b.latePct) },
     { label: STR.review.kpi.turnaround, value: `${ta.overallActual ?? '—'} / ${ta.overallExpected ?? '—'} ${STR.review.kpi.days}` },

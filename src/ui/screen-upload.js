@@ -67,15 +67,15 @@ export function buildMockEngineOutput(settings) {
   return {
     totals: { lines: 628, cancelledInData: 10, total: 618 },
     funnel: { created: 618, collected: 612, dispatched: 608, received: 596, resulted: 422 },
-    buckets: { awaitingDispatch: 10, shippedNotReceived: 12, awaitingResults: 159, completed: 422, lateNoResult: 67, latePct: 42.1 },
+    buckets: { awaitingDispatch: 10, shippedNotReceived: 12, awaitingResults: 159, completed: 422, rejected: 15, lateNoResult: 67, latePct: 42.1 },
     monthly: [
-      { month: '2026-01', orders: 0, results: 0, incomplete: 0, completionPct: null, cancelled: 8 },
-      { month: '2026-02', orders: 0, results: 0, incomplete: 0, completionPct: null, cancelled: 1 },
-      { month: '2026-03', orders: 0, results: 0, incomplete: 0, completionPct: null, cancelled: 30 },
-      { month: '2026-04', orders: 3, results: 3, incomplete: 0, completionPct: 100, cancelled: 4 },
-      { month: '2026-05', orders: 105, results: 76, incomplete: 29, completionPct: 72.4, cancelled: 6 },
-      { month: '2026-06', orders: 410, results: 340, incomplete: 70, completionPct: 82.9, cancelled: 4 },
-      { month: '2026-07', orders: 100, results: 3, incomplete: 97, completionPct: 3, cancelled: 0 },
+      { month: '2026-01', orders: 0, results: 0, rejected: 0, incomplete: 0, completionPct: null, cancelled: 8 },
+      { month: '2026-02', orders: 0, results: 0, rejected: 0, incomplete: 0, completionPct: null, cancelled: 1 },
+      { month: '2026-03', orders: 0, results: 0, rejected: 0, incomplete: 0, completionPct: null, cancelled: 30 },
+      { month: '2026-04', orders: 3, results: 3, rejected: 0, incomplete: 0, completionPct: 100, cancelled: 4 },
+      { month: '2026-05', orders: 105, results: 76, rejected: 14, incomplete: 29, completionPct: 72.4, cancelled: 6 },
+      { month: '2026-06', orders: 410, results: 340, rejected: 1, incomplete: 70, completionPct: 82.9, cancelled: 4 },
+      { month: '2026-07', orders: 100, results: 3, rejected: 0, incomplete: 97, completionPct: 3, cancelled: 0 },
     ],
     cancelledNote: 53,
     turnaround: {
@@ -91,12 +91,12 @@ export function buildMockEngineOutput(settings) {
       ],
     },
     byLab: [
-      { lab: 'Advanced Laboratory Services .Co', total: 301, awaitingResult: 89, late: 60, latePct: 67.4 },
-      { lab: 'Fal Specialized Medical Lab', total: 151, awaitingResult: 21, late: 2, latePct: 9.5 },
-      { lab: 'king Abdullaziz Medical city in Riyadh', total: 113, awaitingResult: 35, late: 3, latePct: 8.6 },
-      { lab: 'Eurofins clinical', total: 27, awaitingResult: 0, late: 0, latePct: 0 },
-      { lab: 'Saudi Diagnostics Limited Company', total: 19, awaitingResult: 7, late: 2, latePct: 28.6 },
-      { lab: 'Anwa  Medical Company', total: 7, awaitingResult: 7, late: 0, latePct: 0 },
+      { lab: 'Advanced Laboratory Services .Co', total: 301, awaitingResult: 89, rejected: 14, late: 60, latePct: 67.4 },
+      { lab: 'Fal Specialized Medical Lab', total: 151, awaitingResult: 21, rejected: 1, late: 2, latePct: 9.5 },
+      { lab: 'king Abdullaziz Medical city in Riyadh', total: 113, awaitingResult: 35, rejected: 0, late: 3, latePct: 8.6 },
+      { lab: 'Eurofins clinical', total: 27, awaitingResult: 0, rejected: 0, late: 0, latePct: 0 },
+      { lab: 'Saudi Diagnostics Limited Company', total: 19, awaitingResult: 7, rejected: 0, late: 2, latePct: 28.6 },
+      { lab: 'Anwa  Medical Company', total: 7, awaitingResult: 7, rejected: 0, late: 0, latePct: 0 },
     ],
     byTest: [
       { testName: 'Glucagon Plasma', late: 1 },
@@ -117,6 +117,7 @@ export function buildMockEngineOutput(settings) {
     deltas: {
       total: 0, collected: 0, dispatched: 0, received: 0,
       completed: Math.max(0, 422 - prev),
+      rejected: 0,
       awaitingDispatch: 0, shippedNotReceived: 0, awaitingResults: 0, lateNoResult: 0,
     },
   };

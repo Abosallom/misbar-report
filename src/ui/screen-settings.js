@@ -42,6 +42,7 @@ const SNAPSHOT_FIELDS = [
   { key: 'awaitingDispatch', label: 'بانتظار الإرسال' },
   { key: 'shippedNotReceived', label: 'أُرسلت ولم تُستلم' },
   { key: 'awaitingResults', label: 'بانتظار النتائج' },
+  { key: 'rejected', label: 'نتائج مرفوضة' },
   { key: 'lateNoResult', label: 'متأخرة بدون نتيجة' },
 ];
 

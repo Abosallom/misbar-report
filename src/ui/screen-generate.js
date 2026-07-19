@@ -245,6 +245,7 @@ export async function render(container, ctx) {
         dispatched: k.funnel && k.funnel.dispatched,
         received: k.funnel && k.funnel.received,
         completed: k.buckets && k.buckets.completed,
+        rejected: k.buckets && k.buckets.rejected,
         awaitingDispatch: k.buckets && k.buckets.awaitingDispatch,
         shippedNotReceived: k.buckets && k.buckets.shippedNotReceived,
         awaitingResults: k.buckets && k.buckets.awaitingResults,
