@@ -10,7 +10,7 @@
 //   cancelledByMonth   = MANUAL additive constants only (Jan–Apr); May/June come
 //                        from the CSV data (6 + 4). Additive per C6:
 //                        cancelled(m) = countedFromCsv(m) + manual[m].
-//   tatFallbackFromCsv = true ; prevCompleted = 437 (legacy baseline; the engine
+//   tatFallbackFromCsv = true ; prevCompleted = 375 (legacy baseline; the engine
 //                        folds it into deltas.completed when no snapshot.numbers).
 
 export const GOLDEN_ASOF = '2026-07-09';
@@ -21,18 +21,18 @@ export const GOLDEN_CANCELLED_BY_MONTH = {
   '2026-01': 8, '2026-02': 1, '2026-03': 30, '2026-04': 4,
 };
 
-export const GOLDEN_PREV_COMPLETED = 437;
+export const GOLDEN_PREV_COMPLETED = 422; // == current completed (dated-only rule) → main golden run expects zero deltas
 
 export const GOLDEN_EXPECTED = {
   totals: { lines: 628, cancelledInData: 10, total: 618 },
 
-  funnel: { created: 618, collected: 612, dispatched: 608, received: 596, resulted: 437 },
+  funnel: { created: 618, collected: 612, dispatched: 608, received: 596, resulted: 422 }, // dated-only rule (2026-07-19): rejected no longer counted
 
   buckets: {
     awaitingDispatch: 10,
     shippedNotReceived: 12,
     awaitingResults: 159,
-    completed: 437,
+    completed: 422,
     lateNoResult: 67,
     latePct: 42.1,
   },
@@ -43,11 +43,11 @@ export const GOLDEN_EXPECTED = {
     { month: '2026-02', orders: 0, results: 0, incomplete: 0, completionPct: null, cancelled: 1 },
     { month: '2026-03', orders: 0, results: 0, incomplete: 0, completionPct: null, cancelled: 30 },
     { month: '2026-04', orders: 3, results: 3, incomplete: 0, completionPct: 100, cancelled: 4 },
-    { month: '2026-05', orders: 105, results: 90, incomplete: 15, completionPct: 85.7, cancelled: 6 },
-    { month: '2026-06', orders: 410, results: 341, incomplete: 69, completionPct: 83.2, cancelled: 4 },
+    { month: '2026-05', orders: 105, results: 76, incomplete: 29, completionPct: 72.4, cancelled: 6 },
+    { month: '2026-06', orders: 410, results: 340, incomplete: 70, completionPct: 82.9, cancelled: 4 },
     { month: '2026-07', orders: 100, results: 3, incomplete: 97, completionPct: 3.0, cancelled: 0 },
   ],
-  monthlyTotals: { orders: 618, results: 437, incomplete: 181, completionPct: 70.7 },
+  monthlyTotals: { orders: 618, results: 422, incomplete: 196, completionPct: 68.3 },
   cancelledNote: 53,
 
   // resulted rows excl. Rejected (n = 422); 1-decimal report rounding
@@ -98,7 +98,7 @@ export const GOLDEN_EXPECTED = {
   unmatchedTests: [], // every test in the data resolves in the TAT lookup
 
   // Full deltas set (E6). The golden run's baseline is the legacy prevCompleted
-  // (437 == current completed) folded into numbers.completed; every key resolves
+  // (422 == current completed) folded into numbers.completed; every key resolves
   // to a non-increase, so all nine deltas are 0.
   deltas: {
     total: 0,

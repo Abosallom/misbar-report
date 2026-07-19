@@ -28,8 +28,8 @@ const MONTHLY = [
   { month: '2026-02', orders: 0,   results: 0,   incomplete: 0,  completionPct: null,  cancelled: 1 },
   { month: '2026-03', orders: 0,   results: 0,   incomplete: 0,  completionPct: null,  cancelled: 30 },
   { month: '2026-04', orders: 3,   results: 3,   incomplete: 0,  completionPct: 100,   cancelled: 4 },
-  { month: '2026-05', orders: 105, results: 90,  incomplete: 15, completionPct: 85.7,  cancelled: 6 },
-  { month: '2026-06', orders: 410, results: 341, incomplete: 69, completionPct: 83.2,  cancelled: 4 },
+  { month: '2026-05', orders: 105, results: 76,  incomplete: 29, completionPct: 72.4,  cancelled: 6 },
+  { month: '2026-06', orders: 410, results: 340, incomplete: 70, completionPct: 82.9,  cancelled: 4 },
   { month: '2026-07', orders: 100, results: 3,   incomplete: 97, completionPct: 3.0,   cancelled: 0 },
 ];
 
@@ -97,12 +97,12 @@ export const MOCK_REPORT_MODEL = {
   reportDate: '2026-07-09',
   kpi: {
     totals: { lines: 671, cancelledInData: 53, total: 618 },
-    funnel: { created: 618, collected: 612, dispatched: 608, received: 596, resulted: 437 },
+    funnel: { created: 618, collected: 612, dispatched: 608, received: 596, resulted: 422 },
     buckets: {
       awaitingDispatch: 10,        // 10 — في انتظار شحن العينة (المستشفى)
       shippedNotReceived: 12,      // 12 — شُحنت ولم تُستلم
       awaitingResults: 159,        // 159 — في انتظار نتائج العينة (المختبر)
-      completed: 437,              // 437 — نتائج مكتملة
+      completed: 422,              // 422 — نتائج مكتملة (dated-only rule)
       lateNoResult: 67,            // 67 — الطلبات المتأخرة
       latePct: 42.1,
     },

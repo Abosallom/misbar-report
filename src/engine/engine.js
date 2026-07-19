@@ -77,20 +77,30 @@ function enrichRow(row, tatIndex, asOfMs, opts) {
   };
 }
 
-/** Slide-3 funnel — all counts exclude cancelled. Resulted also counts Rejected. */
-function buildFunnel(nonCancelled, rejectedAll) {
+/**
+ * Slide-3 funnel — all counts exclude cancelled.
+ * Resulted counts ONLY rows with a Result report date (resultedMs != null).
+ * Rejected rows have no result date and are NO LONGER counted here (user
+ * decision 2026-07-19). This supersedes the old workbook C6 behavior, which
+ * folded rejectedAll into resulted.
+ */
+function buildFunnel(nonCancelled) {
   return {
     created: nonCancelled.filter((e) => e.hasCreated).length,
     collected: nonCancelled.filter((e) => e.collectedMs != null).length,
     dispatched: nonCancelled.filter((e) => e.dispatchedMs != null).length,
     received: nonCancelled.filter((e) => e.receivedMs != null).length,
-    resulted:
-      nonCancelled.filter((e) => e.resultedMs != null).length + rejectedAll.length,
+    resulted: nonCancelled.filter((e) => e.resultedMs != null).length,
   };
 }
 
-/** Slide-2 status buckets. */
-function buildBuckets(nonCancelled, rejectedAll) {
+/**
+ * Slide-2 status buckets.
+ * completed counts ONLY rows with a Result report date (resultedMs != null);
+ * Rejected rows are NO LONGER counted (user decision 2026-07-19), superseding
+ * the old workbook C6 behavior that added rejectedAll here.
+ */
+function buildBuckets(nonCancelled) {
   const awaitingDispatch = nonCancelled.filter(
     (e) => e.dispatchedMs == null && e.hasCreated,
   ).length;
@@ -100,8 +110,7 @@ function buildBuckets(nonCancelled, rejectedAll) {
   const awaitingResults = nonCancelled.filter(
     (e) => e.receivedMs != null && e.resultedMs == null && !e.rejected,
   ).length;
-  const completed =
-    nonCancelled.filter((e) => e.resultedMs != null).length + rejectedAll.length;
+  const completed = nonCancelled.filter((e) => e.resultedMs != null).length;
   const lateNoResult = nonCancelled.filter(
     (e) => e.status === STATUS.LATE && e.resultedMs == null,
   ).length;
@@ -115,9 +124,14 @@ function buildBuckets(nonCancelled, rejectedAll) {
  *   cancelled(m) = countedFromCsv(m) + manualConstants[m]
  * Months present only in the manual map still surface (orders 0, cancelled =
  * manual). This replaces the earlier max(stored, computed) merge.
+ *
+ * Per-month `results` counts ONLY rows with a Result report date
+ * (resultedMs != null); Rejected rows are NO LONGER added (user decision
+ * 2026-07-19), superseding the old workbook C6 behavior that folded
+ * rejectedAll into each month's results.
  * @returns {{monthly: object[], cancelledNote: number}}
  */
-function buildMonthly(nonCancelled, rejectedAll, cancelledEnriched, cancelledByMonth) {
+function buildMonthly(nonCancelled, cancelledEnriched, cancelledByMonth) {
   // computed cancelled-in-data per order-month
   const dataCancel = new Map();
   for (const e of cancelledEnriched) {
@@ -144,8 +158,7 @@ function buildMonthly(nonCancelled, rejectedAll, cancelledEnriched, cancelledByM
   const monthly = sorted.map((m) => {
     const orders = nonCancelled.filter((e) => e.hasCreated && monthKey(e.orderMs) === m).length;
     const results =
-      nonCancelled.filter((e) => e.resultedMs != null && monthKey(e.orderMs) === m).length +
-      rejectedAll.filter((e) => monthKey(e.orderMs) === m).length;
+      nonCancelled.filter((e) => e.resultedMs != null && monthKey(e.orderMs) === m).length;
     const cancelled = merged.get(m) || 0;
     const incomplete = orders - results;
     const completionPct = orders > 0 ? round1((results / orders) * 100) : null;
@@ -267,7 +280,6 @@ export function compute(rows, tatLookup, opts = {}) {
 
   const nonCancelled = enriched.filter((e) => !e.cancelled);
   const cancelledEnriched = enriched.filter((e) => e.cancelled);
-  const rejectedAll = enriched.filter((e) => e.rejected); // rejected rows are never cancelled
 
   const totals = {
     lines: source.length,
@@ -275,10 +287,10 @@ export function compute(rows, tatLookup, opts = {}) {
     total: source.length - cancelledEnriched.length,
   };
 
-  const funnel = buildFunnel(nonCancelled, rejectedAll);
-  const buckets = buildBuckets(nonCancelled, rejectedAll);
+  const funnel = buildFunnel(nonCancelled);
+  const buckets = buildBuckets(nonCancelled);
   const { monthly, cancelledNote } = buildMonthly(
-    nonCancelled, rejectedAll, cancelledEnriched, cancelledByMonth,
+    nonCancelled, cancelledEnriched, cancelledByMonth,
   );
   const t = buildTurnaround(nonCancelled);
   const turnaround = {

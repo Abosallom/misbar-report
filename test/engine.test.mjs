@@ -113,9 +113,9 @@ test('dedupe is a no-op on the clean golden data', () => {
 
 // ---- deltas (E6: full 9-key set, increase-only) -----------------------------
 test('deltas: full snapshot.numbers baseline → only completed rises (+47)', () => {
-  // prev = the seed set except completed=390; every other current value equals
-  // its prev, so only completed produces a positive delta (437 − 390 = 47).
-  const prevNumbers = { ...SNAPSHOT_SEED.numbers, completed: 390 };
+  // prev = the seed set except completed=375; every other current value equals
+  // its prev, so only completed produces a positive delta (422 − 375 = 47).
+  const prevNumbers = { ...SNAPSHOT_SEED.numbers, completed: 375 };
   const out = compute(GOLDEN_ORDERS, TAT_LOOKUP, {
     asOf: goldenOpts().asOf,
     cancelledByMonth: goldenOpts().cancelledByMonth,

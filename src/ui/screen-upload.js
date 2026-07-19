@@ -63,18 +63,18 @@ export function buildMockEngineOutput(settings) {
   const snap = (settings && settings.snapshot) || {};
   const prev = (snap.numbers && snap.numbers.completed) != null
     ? snap.numbers.completed
-    : (snap.prevCompleted != null ? snap.prevCompleted : 437); // legacy shape tolerance
+    : (snap.prevCompleted != null ? snap.prevCompleted : 422); // legacy shape tolerance
   return {
     totals: { lines: 628, cancelledInData: 10, total: 618 },
-    funnel: { created: 618, collected: 612, dispatched: 608, received: 596, resulted: 437 },
-    buckets: { awaitingDispatch: 10, shippedNotReceived: 12, awaitingResults: 159, completed: 437, lateNoResult: 67, latePct: 42.1 },
+    funnel: { created: 618, collected: 612, dispatched: 608, received: 596, resulted: 422 },
+    buckets: { awaitingDispatch: 10, shippedNotReceived: 12, awaitingResults: 159, completed: 422, lateNoResult: 67, latePct: 42.1 },
     monthly: [
       { month: '2026-01', orders: 0, results: 0, incomplete: 0, completionPct: null, cancelled: 8 },
       { month: '2026-02', orders: 0, results: 0, incomplete: 0, completionPct: null, cancelled: 1 },
       { month: '2026-03', orders: 0, results: 0, incomplete: 0, completionPct: null, cancelled: 30 },
       { month: '2026-04', orders: 3, results: 3, incomplete: 0, completionPct: 100, cancelled: 4 },
-      { month: '2026-05', orders: 105, results: 90, incomplete: 15, completionPct: 85.7, cancelled: 6 },
-      { month: '2026-06', orders: 410, results: 341, incomplete: 69, completionPct: 83.2, cancelled: 4 },
+      { month: '2026-05', orders: 105, results: 76, incomplete: 29, completionPct: 72.4, cancelled: 6 },
+      { month: '2026-06', orders: 410, results: 340, incomplete: 70, completionPct: 82.9, cancelled: 4 },
       { month: '2026-07', orders: 100, results: 3, incomplete: 97, completionPct: 3, cancelled: 0 },
     ],
     cancelledNote: 53,
@@ -116,7 +116,7 @@ export function buildMockEngineOutput(settings) {
     unmatchedTests: [],
     deltas: {
       total: 0, collected: 0, dispatched: 0, received: 0,
-      completed: Math.max(0, 437 - prev),
+      completed: Math.max(0, 422 - prev),
       awaitingDispatch: 0, shippedNotReceived: 0, awaitingResults: 0, lateNoResult: 0,
     },
   };
