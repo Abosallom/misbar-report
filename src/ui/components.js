@@ -33,7 +33,7 @@ export function dropZone({ title, hint, accept, onFile }) {
   const iconEl = el('div', { class: 'dropzone__icon', text: '📄' });
   const titleEl = el('div', { class: 'dropzone__title', text: title });
   const hintEl = el('div', { class: 'dropzone__hint', text: hint });
-  const fileEl = el('div', { class: 'dropzone__file' });
+  const fileEl = el('div', { class: 'dropzone__file', dir: 'ltr' }); // filenames mix AR+digits+'.ext' — isolate LTR
 
   const zone = el('label', { class: 'dropzone' }, [iconEl, titleEl, hintEl, fileEl, input]);
 

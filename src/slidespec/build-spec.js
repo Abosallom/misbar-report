@@ -121,7 +121,7 @@ function buildExecFunnel(m) {
     // Funnel column labels
     text(9.05, 2.906, 3.0, 0.3, 'المرحلة', 10, { bold: true, color: C.slate500, align: 'right', valign: 'middle', rtl: true }),
     text(8.629, 2.906, 1.0, 0.3, 'العدد', 10, { bold: true, color: C.slate500, align: 'center', valign: 'middle', rtl: true }),
-    text(-0.25, 2.906, 3.2, 0.3, 'الوصف', 10, { bold: true, color: C.slate500, align: 'right', valign: 'middle', rtl: true }),
+    text(0.05, 2.906, 2.9, 0.3, 'الوصف', 10, { bold: true, color: C.slate500, align: 'right', valign: 'middle', rtl: true }),
     // Brackets
     rect(12.03, 3.501, 0.02, 1.3, C.slate600),
     text(12.35, 3.824, 0.9, 0.55, 'المستشفى', 12, { bold: true, color: C.slate900, align: 'right', valign: 'middle', rtl: true }),
@@ -134,7 +134,7 @@ function buildExecFunnel(m) {
       rect(11.97, accentY[i], 0.06, 0.45, r.color),
       text(9.05, rowY[i], 2.85, 0.55, r.stage, 12, { bold: true, color: C.slate900, align: 'right', valign: 'middle', rtl: true }),
       text(8.629, rowY[i], 1.0, 0.55, String(r.val), 14, { bold: true, color: r.color, align: 'center', valign: 'middle' }),
-      text(-0.25, rowY[i], 3.2, 0.55, r.desc, 10, { color: C.slate500, align: 'right', valign: 'middle', rtl: true }),
+      text(0.05, rowY[i], 2.9, 0.55, r.desc, 10, { color: C.slate500, align: 'right', valign: 'middle', rtl: true }),
       rect(trackX, barY[i], trackW, barH, C.bgLighter, { radius: 0.03 }),
       rect(trackX + trackW - fillW, barY[i], fillW, barH, r.color, { radius: 0.03 }),
     );

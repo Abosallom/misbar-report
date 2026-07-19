@@ -146,7 +146,7 @@ export async function render(container, ctx) {
     const status = el('span', { class: 'gen-file__status', text: '…' });
     const row = el('div', { class: 'gen-file', id: 'genrow-' + f.id }, [
       el('span', { class: 'gen-file__icon', text: f.icon }),
-      el('span', { class: 'gen-file__name', text: f.name }),
+      el('span', { class: 'gen-file__name', dir: 'ltr', text: f.name }), // dir=ltr: keeps '….pptx' after the digits in RTL context
       status,
     ]);
     rowEls[f.id] = { row, status };
@@ -281,7 +281,7 @@ export async function render(container, ctx) {
         el('a', {
           class: 'dl-link', href: p.url || URL.createObjectURL(p.blob), download: p.def.name,
         }, [
-          el('span', { text: p.def.icon + ' ' + p.def.name }),
+          el('span', { dir: 'ltr', text: p.def.icon + ' ' + p.def.name }),
           el('span', { class: 'small', text: '⬇ ' + STR.generate.downloadAgain }),
         ]))),
     ]));

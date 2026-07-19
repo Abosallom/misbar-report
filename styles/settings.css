@@ -151,6 +151,18 @@
   width: 100%;
   min-width: 140px;
 }
+/* .st-grow's 220px flex-basis is a WIDTH inside row bars; as a lone child of the
+   column-flex .st-field it would become a 220px HEIGHT — neutralize it there. */
+.st-field > .st-grow {
+  flex: 0 0 auto;
+  width: 100%;
+}
+/* checkbox + label on one row (class referenced by screen-settings.js) */
+.st-field--check {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
 .st-num {
   width: 96px;
   text-align: center;
@@ -325,7 +337,7 @@
 .st-toast {
   position: fixed;
   bottom: 20px;
-  inset-inline-start: 50%;
+  left: 50%; /* physical: must pair with the physical translate(-50%) below (RTL-safe) */
   transform: translate(-50%, 12px);
   background: var(--st-navy);
   color: var(--st-white);

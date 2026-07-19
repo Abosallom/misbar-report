@@ -79,7 +79,11 @@ export async function render(container, ctx) {
     scaleEl.style.transformOrigin = 'top right';
     requestAnimationFrame(() => {
       const h = scaleEl.scrollHeight * scale;
-      if (h > 0) viewport.style.height = h + 'px';
+      // Guard: setting height retriggers the ResizeObserver — only write real changes
+      // to break the resize feedback loop.
+      if (h > 0 && Math.abs(h - (parseFloat(viewport.style.height) || 0)) > 1) {
+        viewport.style.height = h + 'px';
+      }
     });
   }
 

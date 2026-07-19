@@ -8,7 +8,7 @@ import { renderChartSVG } from './charts-svg.js';
 
 const PX = GEOM.pxPerIn;          // 96
 const PT2PX = 96 / 72;            // points -> px
-const isArabic = (s) => /[؀-ۿ]/.test(String(s));
+const isArabic = (s) => /[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿]/.test(String(s));
 
 function px(v) { return `${v * PX}px`; }
 function setBox(node, e) {

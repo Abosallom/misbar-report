@@ -15,19 +15,34 @@ import { buildReportModel } from '../src/model/report-model.js';
 const require = createRequire(import.meta.url);
 const Papa = require('../vendor/papaparse.min.js');
 
-// Read-only real sample inputs (absolute paths — dev fixtures, not shipped).
-const CSV_PATH = '/Users/aziz/KAMC Order details-data-2026-07-19 10_23_40.csv';
-const TRK_PATH = '/Users/aziz/Misbar Project Tracker.xlsx';
-const TAT_PATH = '/Users/aziz/TAT Lookup.xlsx';
+// Read-only real sample inputs. Preferred: the repo-local (gitignored) copies in
+// test/samples/. Fallback: the original home-directory files. When neither exists
+// (e.g. a fresh clone of the public repo), these suites skip instead of failing.
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+const HERE = dirname(fileURLToPath(import.meta.url));
+const firstExisting = (...paths) => paths.find((p) => existsSync(p)) || null;
+
+const CSV_PATH = firstExisting(
+  join(HERE, 'samples/orders.csv'),
+  '/Users/aziz/KAMC Order details-data-2026-07-19 10_23_40.csv',
+);
+const TRK_PATH = firstExisting(
+  join(HERE, 'samples/tracker.xlsx'),
+  '/Users/aziz/Misbar Project Tracker.xlsx',
+);
+const TAT_PATH = firstExisting('/Users/aziz/TAT Lookup.xlsx');
 
 const REPORT_DATE = '2026-07-09';
+const SKIP = { csv: !CSV_PATH, trk: !TRK_PATH, tat: !TAT_PATH };
 
 // Load once, share across tests. Pass Uint8Array to mimic the browser ArrayBuffer path.
-const csvText = readFileSync(CSV_PATH, 'utf8');
-const trkBuf = new Uint8Array(readFileSync(TRK_PATH));
-const tatBuf = new Uint8Array(readFileSync(TAT_PATH));
+const csvText = CSV_PATH ? readFileSync(CSV_PATH, 'utf8') : '';
+const trkBuf = TRK_PATH ? new Uint8Array(readFileSync(TRK_PATH)) : new Uint8Array();
+const tatBuf = TAT_PATH ? new Uint8Array(readFileSync(TAT_PATH)) : new Uint8Array();
 
-test('parseKamcCsv — counts match the real daily export', () => {
+test('parseKamcCsv — counts match the real daily export', { skip: SKIP.csv }, () => {
   const { rows, summary, errors } = parseKamcCsv(csvText, Papa);
   assert.equal(errors.length, 0, `unexpected errors: ${errors.join(' | ')}`);
   assert.equal(summary.rowCount, 629, 'rowCount');
@@ -38,7 +53,7 @@ test('parseKamcCsv — counts match the real daily export', () => {
   assert.equal(summary.dateRange.max, '2026-07-08');
 });
 
-test('parseKamcCsv — OrderRow mapping is faithful (no PII, IDs as strings)', () => {
+test('parseKamcCsv — OrderRow mapping is faithful (no PII, IDs as strings)', { skip: SKIP.csv }, () => {
   const { rows } = parseKamcCsv(csvText, Papa);
   const r0 = rows[0];
   // Leading-zero order id preserved as a string.
@@ -59,7 +74,7 @@ test('parseKamcCsv — OrderRow mapping is faithful (no PII, IDs as strings)', (
   }
 });
 
-test('parseTracker — task / challenge / risk counts', () => {
+test('parseTracker — task / challenge / risk counts', { skip: SKIP.trk }, () => {
   const trk = parseTracker(trkBuf, XLSX);
   assert.equal(trk.tasks.length, 51, 'tasks');
   assert.equal(trk.challenges.length, 5, 'challenges');
@@ -75,7 +90,7 @@ test('parseTracker — task / challenge / risk counts', () => {
   assert.ok(range, 'expected at least one dated task');
 });
 
-test('parseTatLookupXlsx — 59 tests from the TAT Lookup workbook', () => {
+test('parseTatLookupXlsx — 59 tests from the TAT Lookup workbook', { skip: SKIP.tat }, () => {
   const { tests, count } = parseTatLookupXlsx(tatBuf, XLSX);
   assert.equal(count, 59, 'count');
   assert.equal(Object.keys(tests).length, 59, 'distinct test names');
@@ -85,7 +100,7 @@ test('parseTatLookupXlsx — 59 tests from the TAT Lookup workbook', () => {
   );
 });
 
-test('autoDraft — reproduces the 8 current / 5 internal split', () => {
+test('autoDraft — reproduces the 8 current / 5 internal split', { skip: SKIP.trk }, () => {
   const trk = parseTracker(trkBuf, XLSX);
   const d = autoDraft(trk, REPORT_DATE);
   assert.equal(d.tasksCurrent.length, 8, 'current (external) tasks');
@@ -103,7 +118,7 @@ test('autoDraft — reproduces the 8 current / 5 internal split', () => {
   assert.ok(d.supportRequired.every((s) => typeof s === 'string' && !s.includes('\n')));
 });
 
-test('buildReportModel — wires drafts and applies edits (shallow merge)', () => {
+test('buildReportModel — wires drafts and applies edits (shallow merge)', { skip: SKIP.trk }, () => {
   const trk = parseTracker(trkBuf, XLSX);
   const engineOutput = { totals: { lines: 629 } }; // opaque to this module
   const settings = { scorecard: [{ lab: 'X' }], displayNames: { A: 'a' } };

@@ -237,7 +237,8 @@ export function render(container, ctx) {
 
         tbody.appendChild(
           h('tr', null, [
-            h('td', { class: 'st-td-name', title: name, text: name }),
+            // dir=auto: long Latin test names show their START (not end-clipped) in the RTL table
+            h('td', { class: 'st-td-name', dir: 'auto', title: name, text: name }),
             h('td', { class: 'st-td-num' }, [daysInput]),
             h('td', { class: 'st-td-actions' }, [delBtn]),
           ]),
@@ -449,7 +450,7 @@ export function render(container, ctx) {
 
         tbody.appendChild(
           h('tr', null, [
-            h('td', { class: 'st-td-name' }, [labInput]),
+            h('td', { class: 'st-td-name', dir: 'auto' }, [labInput]),
             h('td', { class: 'st-td-num' }, [pctInput]),
             numCell(row, 'target'),
             numCell(row, 'uploaded'),
@@ -587,7 +588,7 @@ export function render(container, ctx) {
         });
         tbody.appendChild(
           h('tr', null, [
-            h('td', { class: 'st-td-name', text: m }),
+            h('td', { class: 'st-td-name', dir: 'auto', text: m }),
             h('td', { class: 'st-td-num' }, [numInput]),
             h('td', { class: 'st-td-actions' }, [delBtn]),
           ]),

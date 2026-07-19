@@ -240,7 +240,8 @@ input, select, textarea { font-family: inherit; font-size: 1rem; }
 
 .unmatched-row {
   display: grid;
-  grid-template-columns: 1fr 96px auto;
+  /* 4th slot: the '✓ تم الحفظ' span appended after saving stays on the same row */
+  grid-template-columns: 1fr 96px auto auto;
   gap: 8px;
   align-items: center;
   padding: 6px 0;
