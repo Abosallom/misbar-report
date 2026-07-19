@@ -1,0 +1,32 @@
+{
+ "categories": [
+  "Glucagon Plasma",
+  "HLA PRA Screening",
+  "HLA PRA II Single Antigen",
+  "HLA PRA I SA Single Antigen",
+  "Oligoclonal Banding CSF/Serum",
+  "GAD65 Ab Assay Serum (RIA)",
+  "Treponema Pallidum (VDRL)",
+  "Kidney Stone Analysis (IR)",
+  "Immunofixation 24h Urine",
+  "Copper Blood DRC-ICP-MS",
+  "Urine Protein Electrophoresis 24h",
+  "Ig Free Light Chain 24h Urine",
+  "Kappa/Lambda Free Light Chains [Serum]"
+ ],
+ "values": [
+  1.0,
+  1.0,
+  1.0,
+  1.0,
+  2.0,
+  2.0,
+  2.0,
+  2.0,
+  3.0,
+  4.0,
+  7.0,
+  15.0,
+  15.0
+ ]
+}

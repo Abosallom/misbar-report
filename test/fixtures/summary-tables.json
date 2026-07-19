@@ -1,0 +1,1361 @@
+[
+ {
+  "ref": "A1",
+  "value": "KAMC Order Summary"
+ },
+ {
+  "ref": "A2",
+  "value": "Live from 'KAMC Order details-data-2026-05'  •  Updated July 9, 2026",
+  "formula": "=\"Live from 'KAMC Order details-data-2026-05'  •  Updated \"&TEXT(TODAY(),\"mmmm d, yyyy\")"
+ },
+ {
+  "ref": "A4",
+  "value": "Order Stage Counts (Slide 3)"
+ },
+ {
+  "ref": "A5",
+  "value": "Metric"
+ },
+ {
+  "ref": "B5",
+  "value": "Count"
+ },
+ {
+  "ref": "A6",
+  "value": "Total Orders"
+ },
+ {
+  "ref": "B6",
+  "value": 618,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$E$2:$E$962,\"<>\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\")"
+ },
+ {
+  "ref": "A7",
+  "value": "Collected"
+ },
+ {
+  "ref": "B7",
+  "value": 612,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$J$2:$J$962,\"<>\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\")"
+ },
+ {
+  "ref": "A8",
+  "value": "Dispatched"
+ },
+ {
+  "ref": "B8",
+  "value": 608,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$L$2:$L$962,\"<>\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\")"
+ },
+ {
+  "ref": "A9",
+  "value": "Received"
+ },
+ {
+  "ref": "B9",
+  "value": 596,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$M$2:$M$962,\"<>\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\")"
+ },
+ {
+  "ref": "A10",
+  "value": "Results"
+ },
+ {
+  "ref": "B10",
+  "value": 437,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$N$2:$N$962,\"<>\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\")+COUNTIFS('KAMC Order details-data-2026-05'!$P$2:$P$962,\"Result Rejected\")"
+ },
+ {
+  "ref": "A12",
+  "value": "Order Status Breakdown (Slide 2)"
+ },
+ {
+  "ref": "A13",
+  "value": "Metric"
+ },
+ {
+  "ref": "B13",
+  "value": "Count"
+ },
+ {
+  "ref": "C13",
+  "value": "% of Total"
+ },
+ {
+  "ref": "A14",
+  "value": "Total Orders"
+ },
+ {
+  "ref": "B14",
+  "value": 618,
+  "formula": "=B6"
+ },
+ {
+  "ref": "A15",
+  "value": "Awaiting to be dispatched (Hospital)"
+ },
+ {
+  "ref": "B15",
+  "value": 10,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$L$2:$L$962,\"\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$E$2:$E$962,\"<>\")"
+ },
+ {
+  "ref": "C15",
+  "value": 0.016181229773462782,
+  "formula": "=IFERROR(B15/$B$14,\"-\")"
+ },
+ {
+  "ref": "A16",
+  "value": "Shipped not Received"
+ },
+ {
+  "ref": "B16",
+  "value": 12,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$L$2:$L$962,\"<>\",'KAMC Order details-data-2026-05'!$M$2:$M$962,\"\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\")"
+ },
+ {
+  "ref": "C16",
+  "value": 0.019417475728155338,
+  "formula": "=IFERROR(B16/$B$14,\"-\")"
+ },
+ {
+  "ref": "A17",
+  "value": "Awaiting Results"
+ },
+ {
+  "ref": "B17",
+  "value": 159,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$M$2:$M$962,\"<>\",'KAMC Order details-data-2026-05'!$N$2:$N$962,\"\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Result Rejected\")"
+ },
+ {
+  "ref": "C17",
+  "value": 0.25728155339805825,
+  "formula": "=IFERROR(B17/$B$14,\"-\")"
+ },
+ {
+  "ref": "A18",
+  "value": "Completed Results"
+ },
+ {
+  "ref": "B18",
+  "value": 437,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$N$2:$N$962,\"<>\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\")+COUNTIFS('KAMC Order details-data-2026-05'!$P$2:$P$962,\"Result Rejected\")"
+ },
+ {
+  "ref": "C18",
+  "value": 0.7071197411003236,
+  "formula": "=IFERROR(B18/$B$14,\"-\")"
+ },
+ {
+  "ref": "A19",
+  "value": "Late Orders (no result)"
+ },
+ {
+  "ref": "B19",
+  "value": 67,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$T$2:$T$962,\"Late\",'KAMC Order details-data-2026-05'!$N$2:$N$962,\"\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\")"
+ },
+ {
+  "ref": "C19",
+  "value": 0.42138364779874216,
+  "formula": "=IFERROR(B19/COUNTIFS('KAMC Order details-data-2026-05'!$M$2:$M$962,\"<>\",'KAMC Order details-data-2026-05'!$N$2:$N$962,\"\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Result Rejected\"),\"-\")"
+ },
+ {
+  "ref": "A21",
+  "value": "Monthly Breakdown (2026) (Slide 4)"
+ },
+ {
+  "ref": "A22",
+  "value": "Month"
+ },
+ {
+  "ref": "B22",
+  "value": "Total Orders"
+ },
+ {
+  "ref": "C22",
+  "value": "Resulted"
+ },
+ {
+  "ref": "D22",
+  "value": "Cancelled"
+ },
+ {
+  "ref": "E22",
+  "value": "Non Resulted"
+ },
+ {
+  "ref": "F22",
+  "value": "% Resulted"
+ },
+ {
+  "ref": "I22",
+  "value": "Month start (helper)"
+ },
+ {
+  "ref": "A23",
+  "value": "January"
+ },
+ {
+  "ref": "B23",
+  "value": 0,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$A$2:$A$962,\">=\"&$I23,'KAMC Order details-data-2026-05'!$A$2:$A$962,\"<=\"&EOMONTH($I23,0),'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$E$2:$E$962,\"<>\")"
+ },
+ {
+  "ref": "C23",
+  "value": 0,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$A$2:$A$962,\">=\"&$I23,'KAMC Order details-data-2026-05'!$A$2:$A$962,\"<=\"&EOMONTH($I23,0),'KAMC Order details-data-2026-05'!$N$2:$N$962,\"<>\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\")+COUNTIFS('KAMC Order details-data-2026-05'!$A$2:$A$962,\">=\"&$I23,'KAMC Order details-data-2026-05'!$A$2:$A$962,\"<=\"&EOMONTH($I23,0),'KAMC Order details-data-2026-05'!$P$2:$P$962,\"Result Rejected\")"
+ },
+ {
+  "ref": "D23",
+  "value": 8,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$A$2:$A$962,\">=\"&$I23,'KAMC Order details-data-2026-05'!$A$2:$A$962,\"<=\"&EOMONTH($I23,0),'KAMC Order details-data-2026-05'!$P$2:$P$962,\"Order Cancelled\")+8"
+ },
+ {
+  "ref": "E23",
+  "value": 0,
+  "formula": "=B23-C23"
+ },
+ {
+  "ref": "F23",
+  "value": "-",
+  "formula": "=IF($B23=0,\"-\",$C23/$B23)"
+ },
+ {
+  "ref": "I23",
+  "value": "2026-01-01 00:00:00",
+  "formula": "=DATE(2026,1,1)"
+ },
+ {
+  "ref": "A24",
+  "value": "February"
+ },
+ {
+  "ref": "B24",
+  "value": 0,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$A$2:$A$962,\">=\"&$I24,'KAMC Order details-data-2026-05'!$A$2:$A$962,\"<=\"&EOMONTH($I24,0),'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$E$2:$E$962,\"<>\")"
+ },
+ {
+  "ref": "C24",
+  "value": 0,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$A$2:$A$962,\">=\"&$I24,'KAMC Order details-data-2026-05'!$A$2:$A$962,\"<=\"&EOMONTH($I24,0),'KAMC Order details-data-2026-05'!$N$2:$N$962,\"<>\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\")+COUNTIFS('KAMC Order details-data-2026-05'!$A$2:$A$962,\">=\"&$I24,'KAMC Order details-data-2026-05'!$A$2:$A$962,\"<=\"&EOMONTH($I24,0),'KAMC Order details-data-2026-05'!$P$2:$P$962,\"Result Rejected\")"
+ },
+ {
+  "ref": "D24",
+  "value": 1,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$A$2:$A$962,\">=\"&$I24,'KAMC Order details-data-2026-05'!$A$2:$A$962,\"<=\"&EOMONTH($I24,0),'KAMC Order details-data-2026-05'!$P$2:$P$962,\"Order Cancelled\")+1"
+ },
+ {
+  "ref": "E24",
+  "value": 0,
+  "formula": "=B24-C24"
+ },
+ {
+  "ref": "F24",
+  "value": "-",
+  "formula": "=IF($B24=0,\"-\",$C24/$B24)"
+ },
+ {
+  "ref": "I24",
+  "value": "2026-02-01 00:00:00",
+  "formula": "=EDATE(I23,1)"
+ },
+ {
+  "ref": "A25",
+  "value": "March"
+ },
+ {
+  "ref": "B25",
+  "value": 0,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$A$2:$A$962,\">=\"&$I25,'KAMC Order details-data-2026-05'!$A$2:$A$962,\"<=\"&EOMONTH($I25,0),'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$E$2:$E$962,\"<>\")"
+ },
+ {
+  "ref": "C25",
+  "value": 0,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$A$2:$A$962,\">=\"&$I25,'KAMC Order details-data-2026-05'!$A$2:$A$962,\"<=\"&EOMONTH($I25,0),'KAMC Order details-data-2026-05'!$N$2:$N$962,\"<>\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\")+COUNTIFS('KAMC Order details-data-2026-05'!$A$2:$A$962,\">=\"&$I25,'KAMC Order details-data-2026-05'!$A$2:$A$962,\"<=\"&EOMONTH($I25,0),'KAMC Order details-data-2026-05'!$P$2:$P$962,\"Result Rejected\")"
+ },
+ {
+  "ref": "D25",
+  "value": 30,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$A$2:$A$962,\">=\"&$I25,'KAMC Order details-data-2026-05'!$A$2:$A$962,\"<=\"&EOMONTH($I25,0),'KAMC Order details-data-2026-05'!$P$2:$P$962,\"Order Cancelled\")+30"
+ },
+ {
+  "ref": "E25",
+  "value": 0,
+  "formula": "=B25-C25"
+ },
+ {
+  "ref": "F25",
+  "value": "-",
+  "formula": "=IF($B25=0,\"-\",$C25/$B25)"
+ },
+ {
+  "ref": "I25",
+  "value": "2026-03-01 00:00:00",
+  "formula": "=EDATE(I24,1)"
+ },
+ {
+  "ref": "A26",
+  "value": "April"
+ },
+ {
+  "ref": "B26",
+  "value": 3,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$A$2:$A$962,\">=\"&$I26,'KAMC Order details-data-2026-05'!$A$2:$A$962,\"<=\"&EOMONTH($I26,0),'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$E$2:$E$962,\"<>\")"
+ },
+ {
+  "ref": "C26",
+  "value": 3,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$A$2:$A$962,\">=\"&$I26,'KAMC Order details-data-2026-05'!$A$2:$A$962,\"<=\"&EOMONTH($I26,0),'KAMC Order details-data-2026-05'!$N$2:$N$962,\"<>\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\")+COUNTIFS('KAMC Order details-data-2026-05'!$A$2:$A$962,\">=\"&$I26,'KAMC Order details-data-2026-05'!$A$2:$A$962,\"<=\"&EOMONTH($I26,0),'KAMC Order details-data-2026-05'!$P$2:$P$962,\"Result Rejected\")"
+ },
+ {
+  "ref": "D26",
+  "value": 4,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$A$2:$A$962,\">=\"&$I26,'KAMC Order details-data-2026-05'!$A$2:$A$962,\"<=\"&EOMONTH($I26,0),'KAMC Order details-data-2026-05'!$P$2:$P$962,\"Order Cancelled\")+4"
+ },
+ {
+  "ref": "E26",
+  "value": 0,
+  "formula": "=B26-C26"
+ },
+ {
+  "ref": "F26",
+  "value": 1,
+  "formula": "=IF($B26=0,\"-\",$C26/$B26)"
+ },
+ {
+  "ref": "I26",
+  "value": "2026-04-01 00:00:00",
+  "formula": "=EDATE(I25,1)"
+ },
+ {
+  "ref": "A27",
+  "value": "May"
+ },
+ {
+  "ref": "B27",
+  "value": 105,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$A$2:$A$962,\">=\"&$I27,'KAMC Order details-data-2026-05'!$A$2:$A$962,\"<=\"&EOMONTH($I27,0),'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$E$2:$E$962,\"<>\")"
+ },
+ {
+  "ref": "C27",
+  "value": 90,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$A$2:$A$962,\">=\"&$I27,'KAMC Order details-data-2026-05'!$A$2:$A$962,\"<=\"&EOMONTH($I27,0),'KAMC Order details-data-2026-05'!$N$2:$N$962,\"<>\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\")+COUNTIFS('KAMC Order details-data-2026-05'!$A$2:$A$962,\">=\"&$I27,'KAMC Order details-data-2026-05'!$A$2:$A$962,\"<=\"&EOMONTH($I27,0),'KAMC Order details-data-2026-05'!$P$2:$P$962,\"Result Rejected\")"
+ },
+ {
+  "ref": "D27",
+  "value": 6,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$A$2:$A$962,\">=\"&$I27,'KAMC Order details-data-2026-05'!$A$2:$A$962,\"<=\"&EOMONTH($I27,0),'KAMC Order details-data-2026-05'!$P$2:$P$962,\"Order Cancelled\")+0"
+ },
+ {
+  "ref": "E27",
+  "value": 15,
+  "formula": "=B27-C27"
+ },
+ {
+  "ref": "F27",
+  "value": 0.8571428571428571,
+  "formula": "=IF($B27=0,\"-\",$C27/$B27)"
+ },
+ {
+  "ref": "I27",
+  "value": "2026-05-01 00:00:00",
+  "formula": "=EDATE(I26,1)"
+ },
+ {
+  "ref": "A28",
+  "value": "June"
+ },
+ {
+  "ref": "B28",
+  "value": 410,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$A$2:$A$962,\">=\"&$I28,'KAMC Order details-data-2026-05'!$A$2:$A$962,\"<=\"&EOMONTH($I28,0),'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$E$2:$E$962,\"<>\")"
+ },
+ {
+  "ref": "C28",
+  "value": 341,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$A$2:$A$962,\">=\"&$I28,'KAMC Order details-data-2026-05'!$A$2:$A$962,\"<=\"&EOMONTH($I28,0),'KAMC Order details-data-2026-05'!$N$2:$N$962,\"<>\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\")+COUNTIFS('KAMC Order details-data-2026-05'!$A$2:$A$962,\">=\"&$I28,'KAMC Order details-data-2026-05'!$A$2:$A$962,\"<=\"&EOMONTH($I28,0),'KAMC Order details-data-2026-05'!$P$2:$P$962,\"Result Rejected\")"
+ },
+ {
+  "ref": "D28",
+  "value": 4,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$A$2:$A$962,\">=\"&$I28,'KAMC Order details-data-2026-05'!$A$2:$A$962,\"<=\"&EOMONTH($I28,0),'KAMC Order details-data-2026-05'!$P$2:$P$962,\"Order Cancelled\")+0"
+ },
+ {
+  "ref": "E28",
+  "value": 69,
+  "formula": "=B28-C28"
+ },
+ {
+  "ref": "F28",
+  "value": 0.8317073170731707,
+  "formula": "=IF($B28=0,\"-\",$C28/$B28)"
+ },
+ {
+  "ref": "I28",
+  "value": "2026-06-01 00:00:00",
+  "formula": "=EDATE(I27,1)"
+ },
+ {
+  "ref": "A29",
+  "value": "July"
+ },
+ {
+  "ref": "B29",
+  "value": 100,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$A$2:$A$962,\">=\"&$I29,'KAMC Order details-data-2026-05'!$A$2:$A$962,\"<=\"&EOMONTH($I29,0),'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$E$2:$E$962,\"<>\")"
+ },
+ {
+  "ref": "C29",
+  "value": 3,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$A$2:$A$962,\">=\"&$I29,'KAMC Order details-data-2026-05'!$A$2:$A$962,\"<=\"&EOMONTH($I29,0),'KAMC Order details-data-2026-05'!$N$2:$N$962,\"<>\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\")+COUNTIFS('KAMC Order details-data-2026-05'!$A$2:$A$962,\">=\"&$I29,'KAMC Order details-data-2026-05'!$A$2:$A$962,\"<=\"&EOMONTH($I29,0),'KAMC Order details-data-2026-05'!$P$2:$P$962,\"Result Rejected\")"
+ },
+ {
+  "ref": "D29",
+  "value": 0,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$A$2:$A$962,\">=\"&$I29,'KAMC Order details-data-2026-05'!$A$2:$A$962,\"<=\"&EOMONTH($I29,0),'KAMC Order details-data-2026-05'!$P$2:$P$962,\"Order Cancelled\")+0"
+ },
+ {
+  "ref": "E29",
+  "value": 97,
+  "formula": "=B29-C29"
+ },
+ {
+  "ref": "F29",
+  "value": 0.03,
+  "formula": "=IF($B29=0,\"-\",$C29/$B29)"
+ },
+ {
+  "ref": "I29",
+  "value": "2026-07-01 00:00:00",
+  "formula": "=EDATE(I28,1)"
+ },
+ {
+  "ref": "A30",
+  "value": "Total"
+ },
+ {
+  "ref": "B30",
+  "value": 618,
+  "formula": "=SUM(B23:B29)"
+ },
+ {
+  "ref": "C30",
+  "value": 437,
+  "formula": "=SUM(C23:C29)"
+ },
+ {
+  "ref": "D30",
+  "value": 53,
+  "formula": "=SUM(D23:D29)"
+ },
+ {
+  "ref": "E30",
+  "value": 181,
+  "formula": "=SUM(E23:E29)"
+ },
+ {
+  "ref": "F30",
+  "value": 0.7071197411003236,
+  "formula": "=IF(B30=0,\"-\",C30/B30)"
+ },
+ {
+  "ref": "A32",
+  "value": "Average Turnaround: Received → Result   ·   معدل الدوران   (Slide 4)"
+ },
+ {
+  "ref": "A33",
+  "value": "Actual 12.0 days  vs  Expected 7.0 days   (Received → Result)   ·   422 orders measured (excl. Cancelled)",
+  "formula": "=\"Actual \"&TEXT($I$41,\"0.0\")&\" days  vs  Expected \"&TEXT($J$41,\"0.0\")&\" days   (Received → Result)   ·   \"&$I$42&\" orders measured (excl. Cancelled)\""
+ },
+ {
+  "ref": "H33",
+  "value": "Month"
+ },
+ {
+  "ref": "I33",
+  "value": "Actual Avg (days)"
+ },
+ {
+  "ref": "J33",
+  "value": "Expected Avg (days)"
+ },
+ {
+  "ref": "H34",
+  "value": "January",
+  "formula": "=A23"
+ },
+ {
+  "ref": "I34",
+  "value": "#N/A"
+ },
+ {
+  "ref": "J34",
+  "value": "#N/A"
+ },
+ {
+  "ref": "H35",
+  "value": "February",
+  "formula": "=A24"
+ },
+ {
+  "ref": "I35",
+  "value": "#N/A"
+ },
+ {
+  "ref": "J35",
+  "value": "#N/A"
+ },
+ {
+  "ref": "H36",
+  "value": "March",
+  "formula": "=A25"
+ },
+ {
+  "ref": "I36",
+  "value": "#N/A"
+ },
+ {
+  "ref": "J36",
+  "value": "#N/A"
+ },
+ {
+  "ref": "H37",
+  "value": "April",
+  "formula": "=A26"
+ },
+ {
+  "ref": "I37",
+  "value": 20.337164351867006
+ },
+ {
+  "ref": "J37",
+  "value": 4.423800154334458
+ },
+ {
+  "ref": "H38",
+  "value": "May",
+  "formula": "=A27"
+ },
+ {
+  "ref": "I38",
+  "value": 23.27486156794332
+ },
+ {
+  "ref": "J38",
+  "value": 7.621630573840823
+ },
+ {
+  "ref": "H39",
+  "value": "June",
+  "formula": "=A28"
+ },
+ {
+  "ref": "I39",
+  "value": 9.448622451538304
+ },
+ {
+  "ref": "J39",
+  "value": 6.972375204246397
+ },
+ {
+  "ref": "H40",
+  "value": "July",
+  "formula": "=A29"
+ },
+ {
+  "ref": "I40",
+  "value": 1.965042648097248
+ },
+ {
+  "ref": "J40",
+  "value": 2.470335648096807
+ },
+ {
+  "ref": "H41",
+  "value": "Overall avg (days)"
+ },
+ {
+  "ref": "I41",
+  "value": 11.96286192816732
+ },
+ {
+  "ref": "J41",
+  "value": 7.039179858916993
+ },
+ {
+  "ref": "H42",
+  "value": "Orders measured"
+ },
+ {
+  "ref": "I42",
+  "value": 422
+ },
+ {
+  "ref": "A48",
+  "value": "Late Orders by Lab (Slide 5 table)"
+ },
+ {
+  "ref": "H48",
+  "value": "Late Orders by Test (Slide 5 chart)"
+ },
+ {
+  "ref": "A49",
+  "value": "#"
+ },
+ {
+  "ref": "B49",
+  "value": "Lab"
+ },
+ {
+  "ref": "C49",
+  "value": "Total Orders"
+ },
+ {
+  "ref": "D49",
+  "value": "Received Orders (No Results)"
+ },
+ {
+  "ref": "E49",
+  "value": "Late Orders"
+ },
+ {
+  "ref": "F49",
+  "value": "% Late"
+ },
+ {
+  "ref": "H49",
+  "value": "Test"
+ },
+ {
+  "ref": "I49",
+  "value": "Late Orders"
+ },
+ {
+  "ref": "A50",
+  "value": 1
+ },
+ {
+  "ref": "B50",
+  "value": "Advanced Laboratory Services .Co"
+ },
+ {
+  "ref": "C50",
+  "value": 301,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B50,'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\")"
+ },
+ {
+  "ref": "D50",
+  "value": 89,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B50,'KAMC Order details-data-2026-05'!$M$2:$M$962,\"<>\",'KAMC Order details-data-2026-05'!$N$2:$N$962,\"\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Result Rejected\")"
+ },
+ {
+  "ref": "E50",
+  "value": 60,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B50,'KAMC Order details-data-2026-05'!$T$2:$T$962,\"Late\",'KAMC Order details-data-2026-05'!$N$2:$N$962,\"\")"
+ },
+ {
+  "ref": "F50",
+  "value": 0.6741573033707865,
+  "formula": "=IFERROR(E50/D50,0)"
+ },
+ {
+  "ref": "H50",
+  "value": "Kappa light chains.free/Lambda light chains.free [Mass Ratio] in Serum"
+ },
+ {
+  "ref": "I50",
+  "value": 15,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$H$2:$H$962,$H50,'KAMC Order details-data-2026-05'!$T$2:$T$962,\"Late\",'KAMC Order details-data-2026-05'!$N$2:$N$962,\"\")"
+ },
+ {
+  "ref": "A51",
+  "value": 2
+ },
+ {
+  "ref": "B51",
+  "value": "Fal Specialized Medical Lab"
+ },
+ {
+  "ref": "C51",
+  "value": 151,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B51,'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\")"
+ },
+ {
+  "ref": "D51",
+  "value": 21,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B51,'KAMC Order details-data-2026-05'!$M$2:$M$962,\"<>\",'KAMC Order details-data-2026-05'!$N$2:$N$962,\"\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Result Rejected\")"
+ },
+ {
+  "ref": "E51",
+  "value": 2,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B51,'KAMC Order details-data-2026-05'!$T$2:$T$962,\"Late\",'KAMC Order details-data-2026-05'!$N$2:$N$962,\"\")"
+ },
+ {
+  "ref": "F51",
+  "value": 0.09523809523809523,
+  "formula": "=IFERROR(E51/D51,0)"
+ },
+ {
+  "ref": "H51",
+  "value": "SEND OUT TEST IMMUNOFIXATION 24 HOUR URINE TURBIDIMETRIC IMMUNOASSAY"
+ },
+ {
+  "ref": "I51",
+  "value": 3,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$H$2:$H$962,$H51,'KAMC Order details-data-2026-05'!$T$2:$T$962,\"Late\",'KAMC Order details-data-2026-05'!$N$2:$N$962,\"\")"
+ },
+ {
+  "ref": "A52",
+  "value": 3
+ },
+ {
+  "ref": "B52",
+  "value": "king Abdullaziz Medical city in Riyadh"
+ },
+ {
+  "ref": "C52",
+  "value": 113,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B52,'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\")"
+ },
+ {
+  "ref": "D52",
+  "value": 35,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B52,'KAMC Order details-data-2026-05'!$M$2:$M$962,\"<>\",'KAMC Order details-data-2026-05'!$N$2:$N$962,\"\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Result Rejected\")"
+ },
+ {
+  "ref": "E52",
+  "value": 3,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B52,'KAMC Order details-data-2026-05'!$T$2:$T$962,\"Late\",'KAMC Order details-data-2026-05'!$N$2:$N$962,\"\")"
+ },
+ {
+  "ref": "F52",
+  "value": 0.08571428571428572,
+  "formula": "=IFERROR(E52/D52,0)"
+ },
+ {
+  "ref": "H52",
+  "value": "SEND OUT TEST IMMUNOGLOBULIN FREE LIGHT CHAIN 24 HOURS URINE NEPHELOMETRY"
+ },
+ {
+  "ref": "I52",
+  "value": 15,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$H$2:$H$962,$H52,'KAMC Order details-data-2026-05'!$T$2:$T$962,\"Late\",'KAMC Order details-data-2026-05'!$N$2:$N$962,\"\")"
+ },
+ {
+  "ref": "A53",
+  "value": 4
+ },
+ {
+  "ref": "B53",
+  "value": "Eurofins clinical"
+ },
+ {
+  "ref": "C53",
+  "value": 27,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B53,'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\")"
+ },
+ {
+  "ref": "D53",
+  "value": 0,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B53,'KAMC Order details-data-2026-05'!$M$2:$M$962,\"<>\",'KAMC Order details-data-2026-05'!$N$2:$N$962,\"\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Result Rejected\")"
+ },
+ {
+  "ref": "E53",
+  "value": 0,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B53,'KAMC Order details-data-2026-05'!$T$2:$T$962,\"Late\",'KAMC Order details-data-2026-05'!$N$2:$N$962,\"\")"
+ },
+ {
+  "ref": "F53",
+  "value": 0,
+  "formula": "=IFERROR(E53/D53,0)"
+ },
+ {
+  "ref": "H53",
+  "value": "SEND OUT TEST URINE ELECTROPHORESIS PROTEIN ELECTROPHORESIS 24 HOUR URINE"
+ },
+ {
+  "ref": "I53",
+  "value": 7,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$H$2:$H$962,$H53,'KAMC Order details-data-2026-05'!$T$2:$T$962,\"Late\",'KAMC Order details-data-2026-05'!$N$2:$N$962,\"\")"
+ },
+ {
+  "ref": "A54",
+  "value": 5
+ },
+ {
+  "ref": "B54",
+  "value": "Saudi Diagnostics Limited Company"
+ },
+ {
+  "ref": "C54",
+  "value": 19,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B54,'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\")"
+ },
+ {
+  "ref": "D54",
+  "value": 7,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B54,'KAMC Order details-data-2026-05'!$M$2:$M$962,\"<>\",'KAMC Order details-data-2026-05'!$N$2:$N$962,\"\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Result Rejected\")"
+ },
+ {
+  "ref": "E54",
+  "value": 2,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B54,'KAMC Order details-data-2026-05'!$T$2:$T$962,\"Late\",'KAMC Order details-data-2026-05'!$N$2:$N$962,\"\")"
+ },
+ {
+  "ref": "F54",
+  "value": 0.2857142857142857,
+  "formula": "=IFERROR(E54/D54,0)"
+ },
+ {
+  "ref": "H54",
+  "value": "SEND OUT TEST 17-HYDROXYPROGESTERONE BLOOD LC-MS/MS"
+ },
+ {
+  "ref": "I54",
+  "value": 0,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$H$2:$H$962,$H54,'KAMC Order details-data-2026-05'!$T$2:$T$962,\"Late\",'KAMC Order details-data-2026-05'!$N$2:$N$962,\"\")"
+ },
+ {
+  "ref": "A55",
+  "value": 6
+ },
+ {
+  "ref": "B55",
+  "value": "Anwa  Medical Company"
+ },
+ {
+  "ref": "C55",
+  "value": 7,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B55,'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\")"
+ },
+ {
+  "ref": "D55",
+  "value": 7,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B55,'KAMC Order details-data-2026-05'!$M$2:$M$962,\"<>\",'KAMC Order details-data-2026-05'!$N$2:$N$962,\"\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Result Rejected\")"
+ },
+ {
+  "ref": "E55",
+  "value": 0,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B55,'KAMC Order details-data-2026-05'!$T$2:$T$962,\"Late\",'KAMC Order details-data-2026-05'!$N$2:$N$962,\"\")"
+ },
+ {
+  "ref": "F55",
+  "value": 0,
+  "formula": "=IFERROR(E55/D55,0)"
+ },
+ {
+  "ref": "H55",
+  "value": "SEND OUT TEST KIDNEY STONE ANALYSIS INFRARED SPECTRUM ANALYSIS"
+ },
+ {
+  "ref": "I55",
+  "value": 2,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$H$2:$H$962,$H55,'KAMC Order details-data-2026-05'!$T$2:$T$962,\"Late\",'KAMC Order details-data-2026-05'!$N$2:$N$962,\"\")"
+ },
+ {
+  "ref": "A56",
+  "value": "Total"
+ },
+ {
+  "ref": "C56",
+  "value": 618,
+  "formula": "=SUM(C50:C55)"
+ },
+ {
+  "ref": "D56",
+  "value": 159,
+  "formula": "=SUM(D50:D55)"
+ },
+ {
+  "ref": "E56",
+  "value": 67,
+  "formula": "=SUM(E50:E55)"
+ },
+ {
+  "ref": "F56",
+  "value": 0.42138364779874216,
+  "formula": "=IFERROR(E56/D56,0)"
+ },
+ {
+  "ref": "H56",
+  "value": "SEND OUT TEST COPPER BLOOD DRC-ICP-MS"
+ },
+ {
+  "ref": "I56",
+  "value": 4,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$H$2:$H$962,$H56,'KAMC Order details-data-2026-05'!$T$2:$T$962,\"Late\",'KAMC Order details-data-2026-05'!$N$2:$N$962,\"\")"
+ },
+ {
+  "ref": "H57",
+  "value": "SEND OUT TEST TREPONEMA PALLIDUM (VDRL) ABS IGG IGM BLOOD EIA"
+ },
+ {
+  "ref": "I57",
+  "value": 2,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$H$2:$H$962,$H57,'KAMC Order details-data-2026-05'!$T$2:$T$962,\"Late\",'KAMC Order details-data-2026-05'!$N$2:$N$962,\"\")"
+ },
+ {
+  "ref": "H58",
+  "value": "SEND OUT TEST HLA PRA I SA SINGLE ANTIGEN SERUM ELISA"
+ },
+ {
+  "ref": "I58",
+  "value": 1,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$H$2:$H$962,$H58,'KAMC Order details-data-2026-05'!$T$2:$T$962,\"Late\",'KAMC Order details-data-2026-05'!$N$2:$N$962,\"\")"
+ },
+ {
+  "ref": "A59",
+  "value": "Daily Inflow (Slide 2/3 indicators)"
+ },
+ {
+  "ref": "H59",
+  "value": "SEND OUT TEST HLA PRA II SINGLE ANTIGEN SERUM ELISA"
+ },
+ {
+  "ref": "I59",
+  "value": 1,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$H$2:$H$962,$H59,'KAMC Order details-data-2026-05'!$T$2:$T$962,\"Late\",'KAMC Order details-data-2026-05'!$N$2:$N$962,\"\")"
+ },
+ {
+  "ref": "A60",
+  "value": "Report date"
+ },
+ {
+  "ref": "B60",
+  "value": "2026-07-09 00:00:00",
+  "formula": "=TODAY()"
+ },
+ {
+  "ref": "H60",
+  "value": "SEND OUT TEST HLA PRA SCREENING SERUM ELISA"
+ },
+ {
+  "ref": "I60",
+  "value": 1,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$H$2:$H$962,$H60,'KAMC Order details-data-2026-05'!$T$2:$T$962,\"Late\",'KAMC Order details-data-2026-05'!$N$2:$N$962,\"\")"
+ },
+ {
+  "ref": "A61",
+  "value": "Awaiting Results — entered today (dispatched today, no result)"
+ },
+ {
+  "ref": "B61",
+  "value": 0,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$L$2:$L$962,\">=\"&INT($B$60),'KAMC Order details-data-2026-05'!$L$2:$L$962,\"<\"&(INT($B$60)+1),'KAMC Order details-data-2026-05'!$N$2:$N$962,\"\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Result Rejected\")"
+ },
+ {
+  "ref": "H61",
+  "value": "SEND OUT TEST HLA CLASS I GENOTYPING HIGH RESOLUTION DONOR / RECIPIENT VARIOUS SAMPLE NGS"
+ },
+ {
+  "ref": "I61",
+  "value": 0,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$H$2:$H$962,$H61,'KAMC Order details-data-2026-05'!$T$2:$T$962,\"Late\",'KAMC Order details-data-2026-05'!$N$2:$N$962,\"\")"
+ },
+ {
+  "ref": "A62",
+  "value": "Late — newly overdue today (due today, no result)"
+ },
+ {
+  "ref": "B62",
+  "value": 0,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$R$2:$R$962,INT($B$60),'KAMC Order details-data-2026-05'!$N$2:$N$962,\"\",'KAMC Order details-data-2026-05'!$T$2:$T$962,\"Late\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\")"
+ },
+ {
+  "ref": "H62",
+  "value": "Strongyloides sp IgG Ab [Measurement] in Serum"
+ },
+ {
+  "ref": "I62",
+  "value": 0,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$H$2:$H$962,$H62,'KAMC Order details-data-2026-05'!$T$2:$T$962,\"Late\",'KAMC Order details-data-2026-05'!$N$2:$N$962,\"\")"
+ },
+ {
+  "ref": "A63",
+  "value": "Inflow = orders that ENTERED the state on Report date (set B43). Feeds the green +N on Slide 2/3 queue metrics (Awaiting Results, Late) — these are daily arrivals, not the net change of the running count."
+ },
+ {
+  "ref": "H63",
+  "value": "SEND OUT TEST MYOGLOBIN IN URINE TURBIDIMETRIC IMMUNOASSAY"
+ },
+ {
+  "ref": "I63",
+  "value": 0,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$H$2:$H$962,$H63,'KAMC Order details-data-2026-05'!$T$2:$T$962,\"Late\",'KAMC Order details-data-2026-05'!$N$2:$N$962,\"\")"
+ },
+ {
+  "ref": "H64",
+  "value": "SEND OUT TEST CANCER ANTIGEN 72-4 BLOOD IMMUNOASSAY"
+ },
+ {
+  "ref": "I64",
+  "value": 0,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$H$2:$H$962,$H64,'KAMC Order details-data-2026-05'!$T$2:$T$962,\"Late\",'KAMC Order details-data-2026-05'!$N$2:$N$962,\"\")"
+ },
+ {
+  "ref": "H65",
+  "value": "SEND OUT TEST GAD65 AB ASSAY SERUM RADIOIMMUNOASSAY (RIA)"
+ },
+ {
+  "ref": "I65",
+  "value": 2,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$H$2:$H$962,$H65,'KAMC Order details-data-2026-05'!$T$2:$T$962,\"Late\",'KAMC Order details-data-2026-05'!$N$2:$N$962,\"\")"
+ },
+ {
+  "ref": "H66",
+  "value": "SEND OUT TEST GLUCAGON PLASMA EIA"
+ },
+ {
+  "ref": "I66",
+  "value": 1,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$H$2:$H$962,$H66,'KAMC Order details-data-2026-05'!$T$2:$T$962,\"Late\",'KAMC Order details-data-2026-05'!$N$2:$N$962,\"\")"
+ },
+ {
+  "ref": "H67",
+  "value": "SEND OUT TEST OLIGOCLONAL BANDING CSF AND SERUM TEST IMMUNOBLOT (IB)"
+ },
+ {
+  "ref": "I67",
+  "value": 2,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$H$2:$H$962,$H67,'KAMC Order details-data-2026-05'!$T$2:$T$962,\"Late\",'KAMC Order details-data-2026-05'!$N$2:$N$962,\"\")"
+ },
+ {
+  "ref": "H68",
+  "value": "SEND OUT TEST COPPER URINE 24 HOURS ICP-MS"
+ },
+ {
+  "ref": "I68",
+  "value": 0,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$H$2:$H$962,$H68,'KAMC Order details-data-2026-05'!$T$2:$T$962,\"Late\",'KAMC Order details-data-2026-05'!$N$2:$N$962,\"\")"
+ },
+ {
+  "ref": "H69",
+  "value": "SEND OUT TEST MYELIN OLIGODENDROCYTE GLYCOPROTEIN (MOG) ABS IGG IFT BLOOD"
+ },
+ {
+  "ref": "I69",
+  "value": 0,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$H$2:$H$962,$H69,'KAMC Order details-data-2026-05'!$T$2:$T$962,\"Late\",'KAMC Order details-data-2026-05'!$N$2:$N$962,\"\")"
+ },
+ {
+  "ref": "H70",
+  "value": "SEND OUT TEST BK VIRUS MOLECULAR DETECTION QUANTITATIVE PCR PLASMA"
+ },
+ {
+  "ref": "I70",
+  "value": 0,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$H$2:$H$962,$H70,'KAMC Order details-data-2026-05'!$T$2:$T$962,\"Late\",'KAMC Order details-data-2026-05'!$N$2:$N$962,\"\")"
+ },
+ {
+  "ref": "A73",
+  "value": "Shipped — Not Yet Received: Aging by Lab"
+ },
+ {
+  "ref": "A74",
+  "value": "As of (live):"
+ },
+ {
+  "ref": "B74",
+  "value": "2026-07-09 16:57:29",
+  "formula": "=NOW()"
+ },
+ {
+  "ref": "A75",
+  "value": "Counts of orders Dispatched (shipped) but with no Received date yet (excl. Cancelled), bucketed by time since dispatch. Longer buckets = the overdue shipments to chase."
+ },
+ {
+  "ref": "A76",
+  "value": "#"
+ },
+ {
+  "ref": "B76",
+  "value": "Lab"
+ },
+ {
+  "ref": "C76",
+  "value": "≤24 hrs"
+ },
+ {
+  "ref": "D76",
+  "value": "24-48 hrs"
+ },
+ {
+  "ref": "E76",
+  "value": "48-72 hrs"
+ },
+ {
+  "ref": "F76",
+  "value": "72-96 hrs"
+ },
+ {
+  "ref": "G76",
+  "value": "96 hrs+ (5d+)"
+ },
+ {
+  "ref": "H76",
+  "value": "Total Awaiting"
+ },
+ {
+  "ref": "A77",
+  "value": 1
+ },
+ {
+  "ref": "B77",
+  "value": "Advanced Laboratory Services .Co"
+ },
+ {
+  "ref": "C77",
+  "value": 0,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B77,'KAMC Order details-data-2026-05'!$M$2:$M$962,\"\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$L$2:$L$962,\">=\"&($B$74-1),'KAMC Order details-data-2026-05'!$L$2:$L$962,\"<=\"&$B$74)"
+ },
+ {
+  "ref": "D77",
+  "value": 0,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B77,'KAMC Order details-data-2026-05'!$M$2:$M$962,\"\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$L$2:$L$962,\">=\"&($B$74-2),'KAMC Order details-data-2026-05'!$L$2:$L$962,\"<\"&($B$74-1))"
+ },
+ {
+  "ref": "E77",
+  "value": 0,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B77,'KAMC Order details-data-2026-05'!$M$2:$M$962,\"\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$L$2:$L$962,\">=\"&($B$74-3),'KAMC Order details-data-2026-05'!$L$2:$L$962,\"<\"&($B$74-2))"
+ },
+ {
+  "ref": "F77",
+  "value": 0,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B77,'KAMC Order details-data-2026-05'!$M$2:$M$962,\"\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$L$2:$L$962,\">=\"&($B$74-4),'KAMC Order details-data-2026-05'!$L$2:$L$962,\"<\"&($B$74-3))"
+ },
+ {
+  "ref": "G77",
+  "value": 3,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B77,'KAMC Order details-data-2026-05'!$M$2:$M$962,\"\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$L$2:$L$962,\">\"&0,'KAMC Order details-data-2026-05'!$L$2:$L$962,\"<\"&($B$74-4))"
+ },
+ {
+  "ref": "H77",
+  "value": 3,
+  "formula": "=SUM(C77:G77)"
+ },
+ {
+  "ref": "A78",
+  "value": 2
+ },
+ {
+  "ref": "B78",
+  "value": "Fal Specialized Medical Lab"
+ },
+ {
+  "ref": "C78",
+  "value": 0,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B78,'KAMC Order details-data-2026-05'!$M$2:$M$962,\"\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$L$2:$L$962,\">=\"&($B$74-1),'KAMC Order details-data-2026-05'!$L$2:$L$962,\"<=\"&$B$74)"
+ },
+ {
+  "ref": "D78",
+  "value": 0,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B78,'KAMC Order details-data-2026-05'!$M$2:$M$962,\"\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$L$2:$L$962,\">=\"&($B$74-2),'KAMC Order details-data-2026-05'!$L$2:$L$962,\"<\"&($B$74-1))"
+ },
+ {
+  "ref": "E78",
+  "value": 0,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B78,'KAMC Order details-data-2026-05'!$M$2:$M$962,\"\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$L$2:$L$962,\">=\"&($B$74-3),'KAMC Order details-data-2026-05'!$L$2:$L$962,\"<\"&($B$74-2))"
+ },
+ {
+  "ref": "F78",
+  "value": 1,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B78,'KAMC Order details-data-2026-05'!$M$2:$M$962,\"\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$L$2:$L$962,\">=\"&($B$74-4),'KAMC Order details-data-2026-05'!$L$2:$L$962,\"<\"&($B$74-3))"
+ },
+ {
+  "ref": "G78",
+  "value": 4,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B78,'KAMC Order details-data-2026-05'!$M$2:$M$962,\"\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$L$2:$L$962,\">\"&0,'KAMC Order details-data-2026-05'!$L$2:$L$962,\"<\"&($B$74-4))"
+ },
+ {
+  "ref": "H78",
+  "value": 5,
+  "formula": "=SUM(C78:G78)"
+ },
+ {
+  "ref": "A79",
+  "value": 3
+ },
+ {
+  "ref": "B79",
+  "value": "king Abdullaziz Medical city in Riyadh"
+ },
+ {
+  "ref": "C79",
+  "value": 0,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B79,'KAMC Order details-data-2026-05'!$M$2:$M$962,\"\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$L$2:$L$962,\">=\"&($B$74-1),'KAMC Order details-data-2026-05'!$L$2:$L$962,\"<=\"&$B$74)"
+ },
+ {
+  "ref": "D79",
+  "value": 0,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B79,'KAMC Order details-data-2026-05'!$M$2:$M$962,\"\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$L$2:$L$962,\">=\"&($B$74-2),'KAMC Order details-data-2026-05'!$L$2:$L$962,\"<\"&($B$74-1))"
+ },
+ {
+  "ref": "E79",
+  "value": 0,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B79,'KAMC Order details-data-2026-05'!$M$2:$M$962,\"\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$L$2:$L$962,\">=\"&($B$74-3),'KAMC Order details-data-2026-05'!$L$2:$L$962,\"<\"&($B$74-2))"
+ },
+ {
+  "ref": "F79",
+  "value": 0,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B79,'KAMC Order details-data-2026-05'!$M$2:$M$962,\"\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$L$2:$L$962,\">=\"&($B$74-4),'KAMC Order details-data-2026-05'!$L$2:$L$962,\"<\"&($B$74-3))"
+ },
+ {
+  "ref": "G79",
+  "value": 0,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B79,'KAMC Order details-data-2026-05'!$M$2:$M$962,\"\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$L$2:$L$962,\">\"&0,'KAMC Order details-data-2026-05'!$L$2:$L$962,\"<\"&($B$74-4))"
+ },
+ {
+  "ref": "H79",
+  "value": 0,
+  "formula": "=SUM(C79:G79)"
+ },
+ {
+  "ref": "A80",
+  "value": 4
+ },
+ {
+  "ref": "B80",
+  "value": "Eurofins clinical"
+ },
+ {
+  "ref": "C80",
+  "value": 0,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B80,'KAMC Order details-data-2026-05'!$M$2:$M$962,\"\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$L$2:$L$962,\">=\"&($B$74-1),'KAMC Order details-data-2026-05'!$L$2:$L$962,\"<=\"&$B$74)"
+ },
+ {
+  "ref": "D80",
+  "value": 3,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B80,'KAMC Order details-data-2026-05'!$M$2:$M$962,\"\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$L$2:$L$962,\">=\"&($B$74-2),'KAMC Order details-data-2026-05'!$L$2:$L$962,\"<\"&($B$74-1))"
+ },
+ {
+  "ref": "E80",
+  "value": 0,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B80,'KAMC Order details-data-2026-05'!$M$2:$M$962,\"\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$L$2:$L$962,\">=\"&($B$74-3),'KAMC Order details-data-2026-05'!$L$2:$L$962,\"<\"&($B$74-2))"
+ },
+ {
+  "ref": "F80",
+  "value": 0,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B80,'KAMC Order details-data-2026-05'!$M$2:$M$962,\"\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$L$2:$L$962,\">=\"&($B$74-4),'KAMC Order details-data-2026-05'!$L$2:$L$962,\"<\"&($B$74-3))"
+ },
+ {
+  "ref": "G80",
+  "value": 0,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B80,'KAMC Order details-data-2026-05'!$M$2:$M$962,\"\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$L$2:$L$962,\">\"&0,'KAMC Order details-data-2026-05'!$L$2:$L$962,\"<\"&($B$74-4))"
+ },
+ {
+  "ref": "H80",
+  "value": 3,
+  "formula": "=SUM(C80:G80)"
+ },
+ {
+  "ref": "A81",
+  "value": 5
+ },
+ {
+  "ref": "B81",
+  "value": "Saudi Diagnostics Limited Company"
+ },
+ {
+  "ref": "C81",
+  "value": 0,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B81,'KAMC Order details-data-2026-05'!$M$2:$M$962,\"\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$L$2:$L$962,\">=\"&($B$74-1),'KAMC Order details-data-2026-05'!$L$2:$L$962,\"<=\"&$B$74)"
+ },
+ {
+  "ref": "D81",
+  "value": 0,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B81,'KAMC Order details-data-2026-05'!$M$2:$M$962,\"\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$L$2:$L$962,\">=\"&($B$74-2),'KAMC Order details-data-2026-05'!$L$2:$L$962,\"<\"&($B$74-1))"
+ },
+ {
+  "ref": "E81",
+  "value": 0,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B81,'KAMC Order details-data-2026-05'!$M$2:$M$962,\"\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$L$2:$L$962,\">=\"&($B$74-3),'KAMC Order details-data-2026-05'!$L$2:$L$962,\"<\"&($B$74-2))"
+ },
+ {
+  "ref": "F81",
+  "value": 0,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B81,'KAMC Order details-data-2026-05'!$M$2:$M$962,\"\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$L$2:$L$962,\">=\"&($B$74-4),'KAMC Order details-data-2026-05'!$L$2:$L$962,\"<\"&($B$74-3))"
+ },
+ {
+  "ref": "G81",
+  "value": 1,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B81,'KAMC Order details-data-2026-05'!$M$2:$M$962,\"\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$L$2:$L$962,\">\"&0,'KAMC Order details-data-2026-05'!$L$2:$L$962,\"<\"&($B$74-4))"
+ },
+ {
+  "ref": "H81",
+  "value": 1,
+  "formula": "=SUM(C81:G81)"
+ },
+ {
+  "ref": "A82",
+  "value": 6
+ },
+ {
+  "ref": "B82",
+  "value": "Anwa  Medical Company"
+ },
+ {
+  "ref": "C82",
+  "value": 0,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B82,'KAMC Order details-data-2026-05'!$M$2:$M$962,\"\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$L$2:$L$962,\">=\"&($B$74-1),'KAMC Order details-data-2026-05'!$L$2:$L$962,\"<=\"&$B$74)"
+ },
+ {
+  "ref": "D82",
+  "value": 0,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B82,'KAMC Order details-data-2026-05'!$M$2:$M$962,\"\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$L$2:$L$962,\">=\"&($B$74-2),'KAMC Order details-data-2026-05'!$L$2:$L$962,\"<\"&($B$74-1))"
+ },
+ {
+  "ref": "E82",
+  "value": 0,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B82,'KAMC Order details-data-2026-05'!$M$2:$M$962,\"\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$L$2:$L$962,\">=\"&($B$74-3),'KAMC Order details-data-2026-05'!$L$2:$L$962,\"<\"&($B$74-2))"
+ },
+ {
+  "ref": "F82",
+  "value": 0,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B82,'KAMC Order details-data-2026-05'!$M$2:$M$962,\"\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$L$2:$L$962,\">=\"&($B$74-4),'KAMC Order details-data-2026-05'!$L$2:$L$962,\"<\"&($B$74-3))"
+ },
+ {
+  "ref": "G82",
+  "value": 0,
+  "formula": "=COUNTIFS('KAMC Order details-data-2026-05'!$D$2:$D$962,$B82,'KAMC Order details-data-2026-05'!$M$2:$M$962,\"\",'KAMC Order details-data-2026-05'!$P$2:$P$962,\"<>Order Cancelled\",'KAMC Order details-data-2026-05'!$L$2:$L$962,\">\"&0,'KAMC Order details-data-2026-05'!$L$2:$L$962,\"<\"&($B$74-4))"
+ },
+ {
+  "ref": "H82",
+  "value": 0,
+  "formula": "=SUM(C82:G82)"
+ },
+ {
+  "ref": "A83",
+  "value": "Total"
+ },
+ {
+  "ref": "C83",
+  "value": 0,
+  "formula": "=SUM(C77:C82)"
+ },
+ {
+  "ref": "D83",
+  "value": 3,
+  "formula": "=SUM(D77:D82)"
+ },
+ {
+  "ref": "E83",
+  "value": 0,
+  "formula": "=SUM(E77:E82)"
+ },
+ {
+  "ref": "F83",
+  "value": 1,
+  "formula": "=SUM(F77:F82)"
+ },
+ {
+  "ref": "G83",
+  "value": 8,
+  "formula": "=SUM(G77:G82)"
+ },
+ {
+  "ref": "H83",
+  "value": 12,
+  "formula": "=SUM(H77:H82)"
+ }
+]
