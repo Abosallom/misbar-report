@@ -1,0 +1,789 @@
+// ui/screen-settings.js — Track C settings screen (Arabic RTL, vanilla DOM).
+// Screen-module contract: export render(container, ctx) where
+//   ctx = { state, store, navigate(screenId), rerender() }.
+// Every edit autosaves immediately through ctx.store.saveSettings and flashes a
+// subtle 'تم الحفظ' toast. Five tabs: TAT durations, lab readiness scorecard,
+// historical constants, previous-report snapshot, and backup (export/import).
+
+import { SNAPSHOT_SEED } from '../seeds/defaults.js';
+
+const TABS = [
+  { id: 'tat', label: 'مدة الفحوصات' },
+  { id: 'labs', label: 'جاهزية المختبرات' },
+  { id: 'const', label: 'ثوابت تاريخية' },
+  { id: 'snapshot', label: 'لقطة التقرير السابق' },
+  { id: 'backup', label: 'نسخ احتياطي' },
+];
+
+// Tiny hyperscript helper — keeps the DOM construction terse and readable.
+function h(tag, attrs, children) {
+  const node = document.createElement(tag);
+  if (attrs) {
+    for (const [k, v] of Object.entries(attrs)) {
+      if (v == null || v === false) continue;
+      if (k === 'class') node.className = v;
+      else if (k === 'text') node.textContent = v;
+      else if (k === 'html') node.innerHTML = v;
+      else if (k === 'style' && typeof v === 'object') Object.assign(node.style, v);
+      else if (k.startsWith('on') && typeof v === 'function') {
+        node.addEventListener(k.slice(2).toLowerCase(), v);
+      } else node.setAttribute(k, v === true ? '' : String(v));
+    }
+  }
+  if (children != null) {
+    for (const c of Array.isArray(children) ? children : [children]) {
+      if (c == null || c === false) continue;
+      node.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+    }
+  }
+  return node;
+}
+
+function toInt(v) {
+  const n = parseInt(v, 10);
+  return Number.isFinite(n) ? n : null;
+}
+
+const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+/**
+ * @param {HTMLElement} container
+ * @param {{state?:Object, store:Object, navigate?:Function, rerender?:Function}} ctx
+ */
+export function render(container, ctx) {
+  const store = ctx.store;
+  const state = ctx.state || {};
+  // Working document holder; reassigned after every save so closures stay fresh.
+  const S = { doc: store.loadSettings() };
+  const ui = { tab: 'tat', tatSearch: '' };
+
+  container.innerHTML = '';
+  container.classList.add('st-root');
+  container.setAttribute('dir', 'rtl');
+
+  // ---- toast + autosave -----------------------------------------------------
+  const toastEl = h('div', { class: 'st-toast', 'aria-live': 'polite' });
+  let toastTimer = null;
+  function toast(msg) {
+    toastEl.textContent = msg;
+    toastEl.classList.add('st-toast--show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastEl.classList.remove('st-toast--show'), 1400);
+  }
+  function save() {
+    store.saveSettings(S.doc);
+    S.doc = store.loadSettings(); // re-read the stamped, fresh copy
+  }
+  function autosave() {
+    save();
+    toast('تم الحفظ');
+  }
+
+  container.appendChild(toastEl);
+
+  // ---- ephemeral banner -----------------------------------------------------
+  if (store.isEphemeral && store.isEphemeral()) {
+    container.appendChild(
+      h('div', { class: 'st-banner st-banner--warn' }, [
+        'تعذّر حفظ الإعدادات في هذا المتصفح (قد يكون وضع التصفح الخاص). ' +
+          'التغييرات مؤقتة وستُفقد عند إغلاق الصفحة.',
+      ]),
+    );
+  }
+
+  // ---- header + tabs --------------------------------------------------------
+  container.appendChild(
+    h('div', { class: 'st-header' }, [h('h1', { class: 'st-title', text: 'الإعدادات' })]),
+  );
+
+  const tabBar = h('div', { class: 'st-tabs', role: 'tablist' });
+  const panel = h('div', { class: 'st-panel' });
+
+  function renderTabs() {
+    tabBar.innerHTML = '';
+    for (const t of TABS) {
+      const active = ui.tab === t.id;
+      tabBar.appendChild(
+        h('button', {
+          class: 'st-tab' + (active ? ' st-tab--active' : ''),
+          type: 'button',
+          role: 'tab',
+          'aria-selected': active ? 'true' : 'false',
+          text: t.label,
+          onClick: () => {
+            if (ui.tab === t.id) return;
+            ui.tab = t.id;
+            renderTabs();
+            renderPanel();
+          },
+        }),
+      );
+    }
+  }
+
+  function renderPanel() {
+    panel.innerHTML = '';
+    if (ui.tab === 'tat') renderTat(panel);
+    else if (ui.tab === 'labs') renderLabs(panel);
+    else if (ui.tab === 'const') renderConst(panel);
+    else if (ui.tab === 'snapshot') renderSnapshot(panel);
+    else if (ui.tab === 'backup') renderBackup(panel);
+  }
+
+  container.appendChild(tabBar);
+  container.appendChild(panel);
+
+  // Small reusable table scaffold in a horizontal-scroll wrapper.
+  function tableWrap(table) {
+    return h('div', { class: 'st-tablewrap' }, [table]);
+  }
+
+  // ===========================================================================
+  // (a) مدة الفحوصات — TAT durations
+  // ===========================================================================
+  function renderTat(root) {
+    const lookup = S.doc.tatLookup;
+    const badge = h('span', { class: 'st-badge' });
+
+    const searchInput = h('input', {
+      class: 'st-input st-search',
+      type: 'search',
+      placeholder: 'ابحث باسم الفحص…',
+      value: ui.tatSearch,
+      inputmode: 'search',
+      'aria-label': 'بحث',
+    });
+
+    const tbody = h('tbody');
+
+    function updateBadge(shown) {
+      const total = Object.keys(lookup).length;
+      badge.textContent =
+        shown != null && shown !== total ? `${shown} / ${total} فحص` : `${total} فحص`;
+    }
+
+    function paintRows() {
+      tbody.innerHTML = '';
+      const q = ui.tatSearch.trim().toLowerCase();
+      let shown = 0;
+      for (const [name, days] of Object.entries(lookup)) {
+        if (q && !name.toLowerCase().includes(q)) continue;
+        shown += 1;
+
+        const daysInput = h('input', {
+          class: 'st-input st-num',
+          type: 'number',
+          min: '0',
+          step: '1',
+          value: String(days),
+          inputmode: 'numeric',
+          'aria-label': 'المدة بالأيام',
+        });
+        daysInput.addEventListener('change', () => {
+          const v = toInt(daysInput.value);
+          if (v != null && v >= 0) {
+            lookup[name] = v;
+            autosave();
+          } else {
+            daysInput.value = String(lookup[name]);
+          }
+        });
+
+        const delBtn = h('button', {
+          class: 'st-btn st-btn--danger st-btn--icon',
+          type: 'button',
+          title: 'حذف',
+          'aria-label': `حذف ${name}`,
+          text: '×',
+          onClick: () => {
+            if (confirm(`حذف «${name}» من قائمة المدد؟`)) {
+              delete lookup[name];
+              autosave();
+              paintRows();
+            }
+          },
+        });
+
+        tbody.appendChild(
+          h('tr', null, [
+            h('td', { class: 'st-td-name', title: name, text: name }),
+            h('td', { class: 'st-td-num' }, [daysInput]),
+            h('td', { class: 'st-td-actions' }, [delBtn]),
+          ]),
+        );
+      }
+      if (shown === 0) {
+        tbody.appendChild(
+          h('tr', null, [
+            h('td', { colspan: '3', class: 'st-empty', text: 'لا توجد نتائج مطابقة.' }),
+          ]),
+        );
+      }
+      updateBadge(shown);
+    }
+
+    searchInput.addEventListener('input', () => {
+      ui.tatSearch = searchInput.value;
+      paintRows();
+    });
+
+    // Add-row controls.
+    const addName = h('input', {
+      class: 'st-input st-grow',
+      type: 'text',
+      placeholder: 'اسم الفحص الجديد',
+    });
+    const addDays = h('input', {
+      class: 'st-input st-num',
+      type: 'number',
+      min: '0',
+      step: '1',
+      placeholder: 'أيام',
+      inputmode: 'numeric',
+    });
+    function addRow() {
+      const name = addName.value.trim();
+      const days = toInt(addDays.value);
+      if (!name) return toast('أدخل اسم الفحص');
+      if (name in lookup) return toast('هذا الفحص موجود بالفعل');
+      if (days == null || days < 0) return toast('أدخل عدد أيام صالح');
+      lookup[name] = days;
+      autosave();
+      addName.value = '';
+      addDays.value = '';
+      ui.tatSearch = '';
+      searchInput.value = '';
+      paintRows();
+    }
+    addName.addEventListener('keydown', (e) => e.key === 'Enter' && addRow());
+    addDays.addEventListener('keydown', (e) => e.key === 'Enter' && addRow());
+
+    // Excel merge file input.
+    const fileMsg = h('span', { class: 'st-file-msg' });
+    const fileInput = h('input', {
+      class: 'st-file',
+      type: 'file',
+      accept: '.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+    fileInput.addEventListener('change', () => {
+      const file = fileInput.files && fileInput.files[0];
+      fileInput.value = '';
+      if (!file) return;
+      const handler = state.onTatFileMerge;
+      if (typeof handler === 'function') {
+        fileMsg.textContent = 'جارٍ المعالجة…';
+        Promise.resolve(handler(file))
+          .then((res) => {
+            S.doc = store.loadSettings();
+            paintRows();
+            const parts = [];
+            if (res && res.added != null) parts.push(`أُضيف ${res.added}`);
+            if (res && res.updated != null) parts.push(`حُدّث ${res.updated}`);
+            fileMsg.textContent = parts.length ? parts.join(' • ') : 'تم التحديث من الملف';
+            toast('تم التحديث');
+          })
+          .catch((err) => {
+            fileMsg.textContent = 'تعذّر: ' + ((err && err.message) || err);
+          });
+      } else {
+        fileMsg.textContent = 'متاح بعد التكامل';
+      }
+    });
+
+    const table = h('table', { class: 'st-table' }, [
+      h('thead', null, [
+        h('tr', null, [
+          h('th', { text: 'اسم الفحص' }),
+          h('th', { class: 'st-th-num', text: 'المدة (أيام)' }),
+          h('th', { class: 'st-th-actions', text: '' }),
+        ]),
+      ]),
+      tbody,
+    ]);
+
+    root.appendChild(
+      h('div', { class: 'st-section' }, [
+        h('div', { class: 'st-toolbar' }, [
+          searchInput,
+          badge,
+          h('label', { class: 'st-file-label' }, [
+            h('span', { text: 'تحديث من ملف Excel' }),
+            fileInput,
+          ]),
+          fileMsg,
+        ]),
+        h('div', { class: 'st-addbar' }, [
+          addName,
+          addDays,
+          h('button', {
+            class: 'st-btn st-btn--primary',
+            type: 'button',
+            text: 'إضافة فحص',
+            onClick: addRow,
+          }),
+        ]),
+        tableWrap(table),
+      ]),
+    );
+
+    paintRows();
+  }
+
+  // ===========================================================================
+  // (b) جاهزية المختبرات — scorecard
+  // ===========================================================================
+  function renderLabs(root) {
+    const NUM_KEYS = ['target', 'uploaded', 'notUploaded', 'needFix', 'available'];
+    const totalCells = {};
+
+    function recomputeTotals() {
+      for (const k of NUM_KEYS) {
+        const sum = S.doc.scorecard.reduce((a, r) => a + (Number(r[k]) || 0), 0);
+        if (totalCells[k]) totalCells[k].textContent = String(sum);
+      }
+      const canOrderCount = S.doc.scorecard.filter((r) => r.canOrder).length;
+      if (totalCells.canOrder) {
+        totalCells.canOrder.textContent = `${canOrderCount} / ${S.doc.scorecard.length}`;
+      }
+    }
+
+    function numCell(row, key) {
+      const input = h('input', {
+        class: 'st-input st-num',
+        type: 'number',
+        min: '0',
+        step: '1',
+        value: String(row[key] ?? 0),
+        inputmode: 'numeric',
+        'aria-label': key,
+      });
+      input.addEventListener('change', () => {
+        const v = toInt(input.value);
+        row[key] = v != null && v >= 0 ? v : 0;
+        input.value = String(row[key]);
+        recomputeTotals();
+        autosave();
+      });
+      return h('td', { class: 'st-td-num' }, [input]);
+    }
+
+    function buildBody(tbody) {
+      tbody.innerHTML = '';
+      S.doc.scorecard.forEach((row, idx) => {
+        const labInput = h('input', {
+          class: 'st-input st-grow',
+          type: 'text',
+          value: row.lab || '',
+          'aria-label': 'اسم المختبر',
+        });
+        labInput.addEventListener('change', () => {
+          row.lab = labInput.value;
+          autosave();
+        });
+
+        const pctInput = h('input', {
+          class: 'st-input st-num',
+          type: 'text',
+          value: row.pct || '',
+          placeholder: '%',
+          'aria-label': 'النسبة',
+        });
+        pctInput.addEventListener('change', () => {
+          row.pct = pctInput.value;
+          autosave();
+        });
+
+        const canOrder = h('input', { type: 'checkbox', class: 'st-check' });
+        canOrder.checked = !!row.canOrder;
+        canOrder.addEventListener('change', () => {
+          row.canOrder = canOrder.checked;
+          recomputeTotals();
+          autosave();
+        });
+
+        const delBtn = h('button', {
+          class: 'st-btn st-btn--danger st-btn--icon',
+          type: 'button',
+          title: 'حذف',
+          text: '×',
+          onClick: () => {
+            if (confirm(`حذف المختبر «${row.lab || '—'}»؟`)) {
+              S.doc.scorecard.splice(idx, 1);
+              autosave();
+              buildBody(tbody);
+              recomputeTotals();
+            }
+          },
+        });
+
+        tbody.appendChild(
+          h('tr', null, [
+            h('td', { class: 'st-td-name' }, [labInput]),
+            h('td', { class: 'st-td-num' }, [pctInput]),
+            numCell(row, 'target'),
+            numCell(row, 'uploaded'),
+            numCell(row, 'notUploaded'),
+            numCell(row, 'needFix'),
+            h('td', { class: 'st-td-check' }, [canOrder]),
+            numCell(row, 'available'),
+            h('td', { class: 'st-td-actions' }, [delBtn]),
+          ]),
+        );
+      });
+    }
+
+    const tbody = h('tbody');
+    const tfootCells = [
+      h('td', { class: 'st-td-total', text: 'الإجمالي' }),
+      h('td', { class: 'st-td-total' }), // pct — blank
+    ];
+    for (const k of NUM_KEYS.slice(0, 4)) {
+      const c = h('td', { class: 'st-td-total st-td-num' });
+      totalCells[k] = c;
+      tfootCells.push(c);
+    }
+    const canOrderTotal = h('td', { class: 'st-td-total st-td-check' });
+    totalCells.canOrder = canOrderTotal;
+    tfootCells.push(canOrderTotal);
+    const availTotal = h('td', { class: 'st-td-total st-td-num' });
+    totalCells.available = availTotal;
+    tfootCells.push(availTotal);
+    tfootCells.push(h('td', { class: 'st-td-total' }));
+
+    const table = h('table', { class: 'st-table' }, [
+      h('thead', null, [
+        h('tr', null, [
+          h('th', { text: 'المختبر' }),
+          h('th', { class: 'st-th-num', text: 'النسبة' }),
+          h('th', { class: 'st-th-num', text: 'المستهدف' }),
+          h('th', { class: 'st-th-num', text: 'مُحمّل' }),
+          h('th', { class: 'st-th-num', text: 'غير محمّل' }),
+          h('th', { class: 'st-th-num', text: 'يحتاج إصلاح' }),
+          h('th', { text: 'يمكن الطلب' }),
+          h('th', { class: 'st-th-num', text: 'متاح' }),
+          h('th', { class: 'st-th-actions', text: '' }),
+        ]),
+      ]),
+      tbody,
+      h('tfoot', null, [h('tr', null, tfootCells)]),
+    ]);
+
+    buildBody(tbody);
+    recomputeTotals();
+
+    root.appendChild(
+      h('div', { class: 'st-section' }, [
+        h('div', { class: 'st-addbar' }, [
+          h('button', {
+            class: 'st-btn st-btn--primary',
+            type: 'button',
+            text: 'إضافة مختبر',
+            onClick: () => {
+              S.doc.scorecard.push({
+                lab: '',
+                pct: '',
+                target: 0,
+                uploaded: 0,
+                notUploaded: 0,
+                needFix: 0,
+                canOrder: false,
+                available: 0,
+              });
+              autosave();
+              buildBody(tbody);
+              recomputeTotals();
+            },
+          }),
+        ]),
+        tableWrap(table),
+      ]),
+    );
+  }
+
+  // ===========================================================================
+  // (c) ثوابت تاريخية — cancelledByMonth
+  // ===========================================================================
+  function renderConst(root) {
+    function hc() {
+      if (!S.doc.historicalConstants) S.doc.historicalConstants = { cancelledByMonth: {} };
+      if (!S.doc.historicalConstants.cancelledByMonth) {
+        S.doc.historicalConstants.cancelledByMonth = {};
+      }
+      return S.doc.historicalConstants.cancelledByMonth;
+    }
+
+    const tbody = h('tbody');
+    const totalEl = h('span', { class: 'st-badge' });
+
+    function updateTotal() {
+      const sum = Object.values(hc()).reduce((a, b) => a + (Number(b) || 0), 0);
+      totalEl.textContent = `الإجمالي: ${sum} طلب ملغي`;
+    }
+
+    function paint() {
+      const map = hc();
+      tbody.innerHTML = '';
+      const months = Object.keys(map).sort();
+      for (const m of months) {
+        const numInput = h('input', {
+          class: 'st-input st-num',
+          type: 'number',
+          min: '0',
+          step: '1',
+          value: String(map[m]),
+          inputmode: 'numeric',
+          'aria-label': 'عدد الملغاة',
+        });
+        numInput.addEventListener('change', () => {
+          const v = toInt(numInput.value);
+          map[m] = v != null && v >= 0 ? v : 0;
+          numInput.value = String(map[m]);
+          updateTotal();
+          autosave();
+        });
+        const delBtn = h('button', {
+          class: 'st-btn st-btn--danger st-btn--icon',
+          type: 'button',
+          title: 'حذف',
+          text: '×',
+          onClick: () => {
+            if (confirm(`حذف شهر ${m}؟`)) {
+              delete map[m];
+              autosave();
+              paint();
+            }
+          },
+        });
+        tbody.appendChild(
+          h('tr', null, [
+            h('td', { class: 'st-td-name', text: m }),
+            h('td', { class: 'st-td-num' }, [numInput]),
+            h('td', { class: 'st-td-actions' }, [delBtn]),
+          ]),
+        );
+      }
+      if (months.length === 0) {
+        tbody.appendChild(
+          h('tr', null, [h('td', { colspan: '3', class: 'st-empty', text: 'لا توجد أشهر.' })]),
+        );
+      }
+      updateTotal();
+    }
+
+    const addMonth = h('input', { class: 'st-input st-num', type: 'month', 'aria-label': 'الشهر' });
+    const addNum = h('input', {
+      class: 'st-input st-num',
+      type: 'number',
+      min: '0',
+      step: '1',
+      placeholder: 'عدد الملغاة',
+      inputmode: 'numeric',
+    });
+    function addRow() {
+      const m = (addMonth.value || '').trim();
+      const n = toInt(addNum.value);
+      if (!MONTH_RE.test(m)) return toast('أدخل شهراً بصيغة YYYY-MM');
+      if (n == null || n < 0) return toast('أدخل عدداً صالحاً');
+      hc()[m] = n;
+      autosave();
+      addMonth.value = '';
+      addNum.value = '';
+      paint();
+    }
+    addNum.addEventListener('keydown', (e) => e.key === 'Enter' && addRow());
+
+    const table = h('table', { class: 'st-table' }, [
+      h('thead', null, [
+        h('tr', null, [
+          h('th', { text: 'الشهر (YYYY-MM)' }),
+          h('th', { class: 'st-th-num', text: 'عدد الملغاة' }),
+          h('th', { class: 'st-th-actions', text: '' }),
+        ]),
+      ]),
+      tbody,
+    ]);
+
+    root.appendChild(
+      h('div', { class: 'st-section' }, [
+        h('p', { class: 'st-help', text: 'ذاكرة ثابتة للطلبات الملغاة شهرياً؛ يدمجها المحرّك بأخذ الأكبر بين المخزّن والمحسوب.' }),
+        h('div', { class: 'st-toolbar' }, [totalEl]),
+        h('div', { class: 'st-addbar' }, [
+          addMonth,
+          addNum,
+          h('button', {
+            class: 'st-btn st-btn--primary',
+            type: 'button',
+            text: 'إضافة شهر',
+            onClick: addRow,
+          }),
+        ]),
+        tableWrap(table),
+      ]),
+    );
+
+    paint();
+  }
+
+  // ===========================================================================
+  // (d) لقطة التقرير السابق — snapshot
+  // ===========================================================================
+  function renderSnapshot(root) {
+    function snap() {
+      if (!S.doc.snapshot) S.doc.snapshot = { prevCompleted: 0, asOf: '' };
+      return S.doc.snapshot;
+    }
+
+    const prevInput = h('input', {
+      class: 'st-input st-num',
+      type: 'number',
+      min: '0',
+      step: '1',
+      value: String(snap().prevCompleted ?? 0),
+      inputmode: 'numeric',
+      'aria-label': 'المكتمل سابقاً',
+    });
+    prevInput.addEventListener('change', () => {
+      const v = toInt(prevInput.value);
+      snap().prevCompleted = v != null && v >= 0 ? v : 0;
+      prevInput.value = String(snap().prevCompleted);
+      autosave();
+    });
+
+    const asOfInput = h('input', {
+      class: 'st-input',
+      type: 'date',
+      value: snap().asOf || '',
+      'aria-label': 'حتى تاريخ',
+    });
+    asOfInput.addEventListener('change', () => {
+      snap().asOf = asOfInput.value;
+      autosave();
+    });
+
+    root.appendChild(
+      h('div', { class: 'st-section' }, [
+        h('p', { class: 'st-help', text: 'قيم آخر تقرير، تُستخدم لحساب فرق «+N» في التقرير القادم.' }),
+        h('div', { class: 'st-field' }, [
+          h('label', { class: 'st-label', text: 'عدد المكتمل في التقرير السابق' }),
+          prevInput,
+        ]),
+        h('div', { class: 'st-field' }, [
+          h('label', { class: 'st-label', text: 'حتى تاريخ' }),
+          asOfInput,
+        ]),
+        h('div', { class: 'st-addbar' }, [
+          h('button', {
+            class: 'st-btn',
+            type: 'button',
+            text: 'إعادة تعيين',
+            onClick: () => {
+              if (!confirm('إعادة اللقطة إلى القيم الافتراضية؟')) return;
+              S.doc.snapshot = { ...SNAPSHOT_SEED };
+              autosave();
+              prevInput.value = String(SNAPSHOT_SEED.prevCompleted);
+              asOfInput.value = SNAPSHOT_SEED.asOf;
+            },
+          }),
+        ]),
+      ]),
+    );
+  }
+
+  // ===========================================================================
+  // (e) نسخ احتياطي — backup / export / import
+  // ===========================================================================
+  function renderBackup(root) {
+    const importMsg = h('div', { class: 'st-import-msg' });
+
+    const section = h('div', { class: 'st-section' });
+
+    if (store.isEphemeral && store.isEphemeral()) {
+      section.appendChild(
+        h('div', { class: 'st-banner st-banner--warn' }, [
+          'التخزين غير متاح في هذا المتصفح؛ صدّر نسختك الآن للاحتفاظ بها، فالتغييرات لن تُحفظ تلقائياً.',
+        ]),
+      );
+    }
+
+    // Export.
+    const exportBtn = h('button', {
+      class: 'st-btn st-btn--primary',
+      type: 'button',
+      text: 'تصدير الإعدادات (JSON)',
+      onClick: () => {
+        const { filename, blob } = store.exportSettings();
+        const url = URL.createObjectURL(blob);
+        const a = h('a', { href: url, download: filename, style: { display: 'none' } });
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 0);
+        toast('تم التصدير');
+      },
+    });
+
+    // Import.
+    const importInput = h('input', { class: 'st-file', type: 'file', accept: '.json,application/json' });
+    importInput.addEventListener('change', () => {
+      const file = importInput.files && importInput.files[0];
+      importInput.value = '';
+      if (!file) return;
+      importMsg.className = 'st-import-msg';
+      importMsg.textContent = 'جارٍ الاستيراد…';
+      const done = (text) => {
+        try {
+          const summary = store.importSettings(text);
+          S.doc = store.loadSettings();
+          importMsg.className = 'st-import-msg st-import-msg--ok';
+          importMsg.textContent =
+            `تم الاستيراد — الفحوصات: +${summary.tatLookup.added} جديد، ` +
+            `${summary.tatLookup.updated} محدّث • ` +
+            `الأشهر: +${summary.cancelledByMonth.added} جديد، ` +
+            `${summary.cancelledByMonth.updated} محدّث • ` +
+            `المختبرات: ${summary.scorecard.after} صف` +
+            (summary.snapshotChanged ? ' • تم تحديث اللقطة' : '');
+          toast('تم الاستيراد');
+        } catch (err) {
+          importMsg.className = 'st-import-msg st-import-msg--err';
+          importMsg.textContent = 'فشل الاستيراد: ' + ((err && err.message) || err);
+        }
+      };
+      if (typeof file.text === 'function') {
+        file.text().then(done, (err) => {
+          importMsg.className = 'st-import-msg st-import-msg--err';
+          importMsg.textContent = 'تعذّر قراءة الملف: ' + ((err && err.message) || err);
+        });
+      } else {
+        const reader = new FileReader();
+        reader.onload = () => done(String(reader.result));
+        reader.onerror = () => {
+          importMsg.className = 'st-import-msg st-import-msg--err';
+          importMsg.textContent = 'تعذّر قراءة الملف.';
+        };
+        reader.readAsText(file);
+      }
+    });
+
+    section.appendChild(
+      h('div', { class: 'st-field' }, [
+        h('label', { class: 'st-label', text: 'تصدير' }),
+        h('p', { class: 'st-help', text: 'نزّل ملف JSON يحتوي كامل الإعدادات (بدون أي بيانات مرضى).' }),
+        exportBtn,
+      ]),
+    );
+    section.appendChild(
+      h('div', { class: 'st-field' }, [
+        h('label', { class: 'st-label', text: 'استيراد' }),
+        h('p', { class: 'st-help', text: 'اختر ملف JSON مُصدّراً سابقاً؛ تفوز قيم الملف عند التعارض.' }),
+        h('label', { class: 'st-file-label' }, [h('span', { text: 'اختيار ملف…' }), importInput]),
+        importMsg,
+      ]),
+    );
+
+    root.appendChild(section);
+  }
+
+  // ---- boot -----------------------------------------------------------------
+  renderTabs();
+  renderPanel();
+}

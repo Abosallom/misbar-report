@@ -1,0 +1,358 @@
+/* settings.css — Track C settings screen only. All selectors prefixed `st-`.
+   RTL-aware (document is dir=rtl). Uses shared CSS vars when defined, with
+   literal fallbacks so the file stands alone. */
+
+.st-root {
+  --st-navy: var(--navy, #1e3a8a);
+  --st-navy-dark: var(--navy-dark, #172554);
+  --st-border: var(--border, #e2e8f0);
+  --st-border-dark: var(--border-dark, #cbd5e1);
+  --st-bg: var(--bg-light, #f8fafc);
+  --st-bg-alt: var(--bg-lighter, #f1f5f9);
+  --st-text: var(--text, #1e293b);
+  --st-muted: var(--muted, #64748b);
+  --st-danger: var(--red, #dc2626);
+  --st-ok: var(--green, #16a34a);
+  --st-white: #ffffff;
+
+  box-sizing: border-box;
+  font-family: 'Cairo', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color: var(--st-text);
+  background: var(--st-bg);
+  padding: 16px;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.st-root *,
+.st-root *::before,
+.st-root *::after {
+  box-sizing: border-box;
+}
+
+/* ---- header ---- */
+.st-header {
+  margin-bottom: 12px;
+}
+.st-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--st-navy);
+  margin: 0;
+}
+
+/* ---- banner ---- */
+.st-banner {
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin: 8px 0 12px;
+  font-size: 15px;
+  line-height: 1.5;
+}
+.st-banner--warn {
+  background: #fef3c7;
+  border: 1px solid #fcd34d;
+  color: #92400e;
+}
+
+/* ---- tabs ---- */
+.st-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  border-bottom: 2px solid var(--st-border);
+  margin-bottom: 16px;
+}
+.st-tab {
+  appearance: none;
+  border: 1px solid transparent;
+  border-bottom: none;
+  background: transparent;
+  color: var(--st-muted);
+  font-family: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  padding: 8px 14px;
+  border-radius: 8px 8px 0 0;
+  cursor: pointer;
+  margin-bottom: -2px;
+}
+.st-tab:hover {
+  color: var(--st-navy);
+  background: var(--st-bg-alt);
+}
+.st-tab--active {
+  color: var(--st-navy);
+  background: var(--st-white);
+  border-color: var(--st-border);
+  border-bottom: 2px solid var(--st-white);
+}
+
+/* ---- panel / sections ---- */
+.st-panel {
+  background: var(--st-white);
+  border: 1px solid var(--st-border);
+  border-radius: 10px;
+  padding: 16px;
+}
+.st-section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.st-help {
+  margin: 0;
+  font-size: 14px;
+  color: var(--st-muted);
+  line-height: 1.6;
+}
+
+/* ---- toolbars / add bars ---- */
+.st-toolbar,
+.st-addbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.st-badge {
+  display: inline-block;
+  background: var(--st-navy);
+  color: var(--st-white);
+  font-size: 14px;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+/* ---- inputs (>=16px prevents iOS zoom) ---- */
+.st-input {
+  font-family: inherit;
+  font-size: 16px;
+  color: var(--st-text);
+  background: var(--st-white);
+  border: 1px solid var(--st-border-dark);
+  border-radius: 8px;
+  padding: 8px 10px;
+  min-height: 40px;
+}
+.st-input:focus {
+  outline: none;
+  border-color: var(--st-navy);
+  box-shadow: 0 0 0 3px rgba(30, 58, 138, 0.15);
+}
+.st-search {
+  flex: 1 1 220px;
+  min-width: 180px;
+}
+.st-grow {
+  flex: 1 1 220px;
+  width: 100%;
+  min-width: 140px;
+}
+.st-num {
+  width: 96px;
+  text-align: center;
+}
+.st-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 360px;
+}
+.st-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--st-text);
+}
+.st-check {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--st-navy);
+  cursor: pointer;
+}
+
+/* ---- buttons ---- */
+.st-btn {
+  appearance: none;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  border: 1px solid var(--st-border-dark);
+  background: var(--st-white);
+  color: var(--st-text);
+  border-radius: 8px;
+  padding: 8px 16px;
+  min-height: 40px;
+  cursor: pointer;
+}
+.st-btn:hover {
+  background: var(--st-bg-alt);
+}
+.st-btn--primary {
+  background: var(--st-navy);
+  border-color: var(--st-navy);
+  color: var(--st-white);
+}
+.st-btn--primary:hover {
+  background: var(--st-navy-dark);
+}
+.st-btn--danger {
+  color: var(--st-danger);
+  border-color: transparent;
+  background: transparent;
+}
+.st-btn--danger:hover {
+  background: #fef2f2;
+}
+.st-btn--icon {
+  min-height: 32px;
+  min-width: 32px;
+  padding: 0;
+  font-size: 22px;
+  line-height: 1;
+  border-radius: 6px;
+}
+
+/* ---- file inputs ---- */
+.st-file-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px dashed var(--st-border-dark);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--st-navy);
+  cursor: pointer;
+  background: var(--st-bg);
+}
+.st-file-label:hover {
+  background: var(--st-bg-alt);
+}
+.st-file {
+  font-size: 14px;
+  max-width: 200px;
+}
+.st-file-msg {
+  font-size: 14px;
+  color: var(--st-muted);
+}
+
+/* ---- tables ---- */
+.st-tablewrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--st-border);
+  border-radius: 10px;
+  -webkit-overflow-scrolling: touch;
+}
+.st-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 15px;
+  min-width: 520px;
+}
+.st-table th,
+.st-table td {
+  padding: 8px 10px;
+  text-align: right;
+  border-bottom: 1px solid var(--st-border);
+  vertical-align: middle;
+}
+.st-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--st-navy);
+  color: var(--st-white);
+  font-weight: 600;
+  white-space: nowrap;
+  z-index: 1;
+}
+.st-th-num,
+.st-td-num {
+  text-align: center;
+  white-space: nowrap;
+}
+.st-th-actions,
+.st-td-actions {
+  width: 44px;
+  text-align: center;
+}
+.st-td-check {
+  text-align: center;
+}
+.st-table tbody tr:nth-child(even) {
+  background: var(--st-bg);
+}
+.st-table tbody tr:hover {
+  background: var(--st-bg-alt);
+}
+.st-td-name {
+  max-width: 420px;
+  word-break: break-word;
+}
+.st-empty {
+  text-align: center;
+  color: var(--st-muted);
+  padding: 20px;
+}
+.st-table tfoot .st-td-total {
+  background: var(--st-bg-alt);
+  font-weight: 700;
+  color: var(--st-navy);
+  border-top: 2px solid var(--st-border-dark);
+}
+
+/* ---- import message ---- */
+.st-import-msg {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--st-muted);
+}
+.st-import-msg--ok {
+  color: var(--st-ok);
+  font-weight: 600;
+}
+.st-import-msg--err {
+  color: var(--st-danger);
+  font-weight: 600;
+}
+
+/* ---- toast ---- */
+.st-toast {
+  position: fixed;
+  bottom: 20px;
+  inset-inline-start: 50%;
+  transform: translate(-50%, 12px);
+  background: var(--st-navy);
+  color: var(--st-white);
+  font-size: 14px;
+  font-weight: 600;
+  padding: 8px 18px;
+  border-radius: 999px;
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.25);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+  z-index: 1000;
+}
+.st-toast--show {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+/* ---- mobile ---- */
+@media (max-width: 640px) {
+  .st-root {
+    padding: 12px;
+  }
+  .st-num {
+    width: 72px;
+  }
+  .st-field {
+    max-width: 100%;
+  }
+}

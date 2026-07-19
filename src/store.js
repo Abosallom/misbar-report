@@ -1,0 +1,279 @@
+// store.js — Track C persistence layer.
+// A single versioned config document persisted at SETTINGS_KEY in localStorage.
+// NO PHI EVER: this store holds configuration only (TAT lookup, display names,
+// lab scorecard, historical constants, previous-report snapshot). There is no
+// rows/orders API here by design, so patient data can never structurally land in
+// storage. All localStorage access is wrapped in try/catch because Safari private
+// mode throws on write; on failure we fall back to an in-memory doc and expose
+// isEphemeral() so the UI can warn the user their edits will not persist.
+
+import { SETTINGS_KEY } from './contracts.js';
+import { TAT_LOOKUP } from './seeds/tat-lookup.js';
+import { SCORECARD_SEED } from './seeds/scorecard.js';
+import { HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED } from './seeds/defaults.js';
+
+export const SCHEMA_VERSION = 1;
+
+// ---- module state -----------------------------------------------------------
+// _ephemeral: true once any localStorage op has thrown; drives isEphemeral().
+// _memDoc: the working document when we cannot touch localStorage.
+let _ephemeral = false;
+let _memDoc = null;
+
+/** For tests only: clear the in-memory fallback state between cases. */
+export function __resetForTests() {
+  _ephemeral = false;
+  _memDoc = null;
+}
+
+/** True when storage is unavailable and edits live only in memory this session. */
+export function isEphemeral() {
+  return _ephemeral;
+}
+
+// ---- helpers ----------------------------------------------------------------
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function clone(v) {
+  return v == null ? v : JSON.parse(JSON.stringify(v));
+}
+
+function isPlainObject(v) {
+  return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
+
+/** Build the first-run document straight from the frozen seeds. */
+function buildSeedDoc() {
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    updatedAt: nowIso(),
+    tatLookup: { ...TAT_LOOKUP },
+    displayNames: {},
+    scorecard: SCORECARD_SEED.map((r) => ({ ...r })),
+    historicalConstants: {
+      cancelledByMonth: { ...HISTORICAL_CONSTANTS_SEED.cancelledByMonth },
+    },
+    snapshot: { ...SNAPSHOT_SEED },
+  };
+}
+
+function tryGet(key) {
+  try {
+    return { ok: true, value: globalThis.localStorage.getItem(key) };
+  } catch (_e) {
+    return { ok: false, value: null };
+  }
+}
+
+function trySet(key, value) {
+  try {
+    globalThis.localStorage.setItem(key, value);
+    return true;
+  } catch (_e) {
+    return false;
+  }
+}
+
+/** Persist a doc; on failure drop into ephemeral in-memory mode. */
+function persist(doc) {
+  const ok = trySet(SETTINGS_KEY, JSON.stringify(doc));
+  if (!ok) {
+    _ephemeral = true;
+    _memDoc = doc;
+  } else {
+    _ephemeral = false;
+  }
+  return doc;
+}
+
+/** Version-check + migrate/reset. v1 is the first schema, so any mismatch resets. */
+function migrate(doc) {
+  if (!isPlainObject(doc)) {
+    console.warn('[misbar/store] settings root is not an object — resetting to seeds.');
+    return persist(buildSeedDoc());
+  }
+  if (doc.schemaVersion === SCHEMA_VERSION) return doc;
+  // Future schema bumps add forward-migration cases above this line.
+  console.warn(
+    `[misbar/store] unsupported schemaVersion ${doc.schemaVersion} ` +
+      `(expected ${SCHEMA_VERSION}) — resetting to seeds.`,
+  );
+  return persist(buildSeedDoc());
+}
+
+// ---- public API -------------------------------------------------------------
+
+/**
+ * Returns the Settings document. First run seeds + persists it. On a schema
+ * mismatch or corruption, migrates forward or resets with a console warning.
+ * @returns {import('./contracts.js').Settings}
+ */
+export function loadSettings() {
+  const r = tryGet(SETTINGS_KEY);
+
+  // Storage completely unreadable (e.g. private mode denies getItem too).
+  if (!r.ok) {
+    _ephemeral = true;
+    if (!_memDoc) _memDoc = buildSeedDoc();
+    return _memDoc;
+  }
+
+  // Nothing stored.
+  if (r.value == null) {
+    // If we already fell back to memory this session, keep those edits.
+    if (_ephemeral && _memDoc) return _memDoc;
+    return persist(buildSeedDoc());
+  }
+
+  // Parse what is stored.
+  let doc;
+  try {
+    doc = JSON.parse(r.value);
+  } catch (e) {
+    console.warn('[misbar/store] settings JSON is corrupt — resetting to seeds.', e);
+    return persist(buildSeedDoc());
+  }
+  _ephemeral = false;
+  return migrate(doc);
+}
+
+/**
+ * Stamps updatedAt (+ schemaVersion) and persists. Falls back to memory on
+ * storage failure.
+ * @param {import('./contracts.js').Settings} s
+ * @returns {import('./contracts.js').Settings} the stamped, persisted doc
+ */
+export function saveSettings(s) {
+  const doc = { ...s, schemaVersion: SCHEMA_VERSION, updatedAt: nowIso() };
+  return persist(doc);
+}
+
+/**
+ * Records the previous-report snapshot after a successful generation.
+ * @param {{prevCompleted:number, asOf:string}} snap
+ */
+export function updateSnapshot({ prevCompleted, asOf } = {}) {
+  const doc = loadSettings();
+  doc.snapshot = { prevCompleted: Number(prevCompleted), asOf: String(asOf) };
+  return saveSettings(doc);
+}
+
+/**
+ * Serialize the whole config doc for download.
+ * @returns {{filename:string, blob:Blob}}
+ */
+export function exportSettings() {
+  const doc = loadSettings();
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const filename = `misbar-settings-${yyyy}${mm}${dd}.json`;
+  const json = JSON.stringify(doc, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  return { filename, blob };
+}
+
+// ---- import -----------------------------------------------------------------
+
+function validateImport(doc) {
+  if (!isPlainObject(doc)) {
+    throw new Error('ملف الإعدادات غير صالح: الجذر ليس كائناً.');
+  }
+  if (doc.schemaVersion !== SCHEMA_VERSION) {
+    throw new Error(
+      `إصدار المخطط غير مدعوم: ${doc.schemaVersion == null ? 'مفقود' : doc.schemaVersion}` +
+        ` (المتوقع ${SCHEMA_VERSION}).`,
+    );
+  }
+  if ('tatLookup' in doc && !isPlainObject(doc.tatLookup)) {
+    throw new Error('حقل tatLookup غير صالح: يجب أن يكون كائناً.');
+  }
+  if ('displayNames' in doc && !isPlainObject(doc.displayNames)) {
+    throw new Error('حقل displayNames غير صالح: يجب أن يكون كائناً.');
+  }
+  if ('scorecard' in doc && !Array.isArray(doc.scorecard)) {
+    throw new Error('حقل scorecard غير صالح: يجب أن يكون مصفوفة.');
+  }
+  if ('historicalConstants' in doc) {
+    const hc = doc.historicalConstants;
+    if (!isPlainObject(hc)) {
+      throw new Error('حقل historicalConstants غير صالح.');
+    }
+    if ('cancelledByMonth' in hc && !isPlainObject(hc.cancelledByMonth)) {
+      throw new Error('حقل cancelledByMonth غير صالح: يجب أن يكون كائناً.');
+    }
+  }
+  if ('snapshot' in doc && !isPlainObject(doc.snapshot)) {
+    throw new Error('حقل snapshot غير صالح: يجب أن يكون كائناً.');
+  }
+}
+
+/** Deep-merge with the incoming (over) document winning on every leaf/array. */
+function deepMergeImportWins(base, over) {
+  if (!isPlainObject(base) || !isPlainObject(over)) return clone(over);
+  const out = { ...base };
+  for (const k of Object.keys(over)) {
+    if (isPlainObject(out[k]) && isPlainObject(over[k])) {
+      out[k] = deepMergeImportWins(out[k], over[k]);
+    } else {
+      out[k] = clone(over[k]);
+    }
+  }
+  return out;
+}
+
+function countMapChanges(base, incoming) {
+  const b = base || {};
+  const inc = incoming || {};
+  let added = 0;
+  let updated = 0;
+  for (const k of Object.keys(inc)) {
+    if (!(k in b)) added += 1;
+    else if (b[k] !== inc[k]) updated += 1;
+  }
+  return { added, updated };
+}
+
+/**
+ * Validate + deep-merge (import wins) + persist. Rejects unknown/malformed docs
+ * with a descriptive Error.
+ * @param {string} jsonText
+ * @returns {{tatLookup:{added:number,updated:number}, displayNames:{added:number,updated:number},
+ *   cancelledByMonth:{added:number,updated:number},
+ *   scorecard:{before:number,after:number,replaced:boolean}, snapshotChanged:boolean}} summary
+ */
+export function importSettings(jsonText) {
+  let incoming;
+  try {
+    incoming = JSON.parse(jsonText);
+  } catch (_e) {
+    throw new Error('ملف غير صالح: تعذّر قراءة JSON.');
+  }
+  validateImport(incoming);
+
+  const current = clone(loadSettings());
+  const merged = deepMergeImportWins(current, incoming);
+
+  const summary = {
+    tatLookup: countMapChanges(current.tatLookup, incoming.tatLookup),
+    displayNames: countMapChanges(current.displayNames, incoming.displayNames),
+    cancelledByMonth: countMapChanges(
+      current.historicalConstants && current.historicalConstants.cancelledByMonth,
+      incoming.historicalConstants && incoming.historicalConstants.cancelledByMonth,
+    ),
+    scorecard: {
+      before: Array.isArray(current.scorecard) ? current.scorecard.length : 0,
+      after: Array.isArray(merged.scorecard) ? merged.scorecard.length : 0,
+      replaced: Array.isArray(incoming.scorecard),
+    },
+    snapshotChanged:
+      !!incoming.snapshot &&
+      JSON.stringify(current.snapshot) !== JSON.stringify(merged.snapshot),
+  };
+
+  saveSettings(merged);
+  return summary;
+}
