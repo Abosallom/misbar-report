@@ -1,8 +1,9 @@
 name: KAMC live snapshot
 on:
-  schedule:
-    # every 30 min, 02:00-16:59 UTC = 05:00-19:59 Riyadh (working window)
-    - cron: '*/30 2-16 * * *'
+  # NOTE: the scheduled trigger is disabled — elab.seha.sa geo-blocks non-Saudi
+  # IPs (verified: 403 from GitHub-hosted runners). The scheduled export runs
+  # from a Saudi machine instead (scripts/fetch-kamc.mjs via launchd). Keep
+  # manual dispatch for the day network policy changes.
   workflow_dispatch: {}
 
 permissions:

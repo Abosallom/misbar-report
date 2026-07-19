@@ -45,6 +45,132 @@ export function yearStartMs(asOfIso) {
 }
 
 /**
+ * Aggregate-only summary over OrderRow[] (mirrors csv.js's summary block). No PII.
+ * @param {import('../contracts.js').OrderRow[]} rows
+ * @param {{source:string, fetchedAt:string}} meta
+ * @returns {Object}
+ */
+function buildSummary(rows, { source, fetchedAt }) {
+  const distinct = new Set();
+  const statusCounts = {};
+  let resultedCount = 0;
+  let min = null;
+  let max = null;
+  for (const x of rows) {
+    distinct.add(x.orderId);
+    statusCounts[x.rawStatus] = (statusCounts[x.rawStatus] || 0) + 1;
+    if (x.resulted) resultedCount++;
+    if (x.orderDate) {
+      if (min === null || x.orderDate < min) min = x.orderDate;
+      if (max === null || x.orderDate > max) max = x.orderDate;
+    }
+  }
+  return {
+    rowCount: rows.length,
+    distinctOrders: distinct.size,
+    dateRange: { min, max },
+    resultedCount,
+    statusCounts,
+    source,
+    fetchedAt,
+  };
+}
+
+// ---- crypto helpers for the encrypted live snapshot (WebCrypto; browser + Node 20+) ----
+function getSubtle() {
+  const c = globalThis.crypto;
+  if (!c || !c.subtle) {
+    throw new Error('واجهة التشفير WebCrypto غير متوفرة في هذه البيئة.');
+  }
+  return c.subtle;
+}
+
+/** 64-hex → 32-byte Uint8Array (AES-256 key). Assumes a validated hex string. */
+function hexToBytes(hex) {
+  const out = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < out.length; i++) {
+    out[i] = parseInt(hex.substr(i * 2, 2), 16);
+  }
+  return out;
+}
+
+/** base64 → Uint8Array. Throws on invalid base64 (caller maps to a decrypt error). */
+function base64ToBytes(b64) {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+/**
+ * Load + decrypt the server-published KAMC live snapshot (the automatic CORS
+ * fallback). The GitHub Action fetches KAMC server-side, strips ALL patient
+ * fields, and publishes base64( iv(12) || AES-GCM ciphertext+tag ) at a
+ * site-relative path. Same result contract as fetchKamcOrders, plus `fetchedAt`.
+ * @param {string} dataKeyHex - 64 hex chars (AES-256 key)
+ * @param {{url?:string, fetchImpl?:Function}} [opts]
+ * @returns {Promise<{rows: import('../contracts.js').OrderRow[], summary: Object, errors: string[], fetchedAt: string}>}
+ */
+export async function fetchKamcSnapshot(dataKeyHex, { url = 'data/kamc-live.enc', fetchImpl = fetch } = {}) {
+  // ---- validate the key (64 hex chars → AES-256) --------------------------
+  const keyHex = typeof dataKeyHex === 'string' ? dataKeyHex.trim() : '';
+  if (!/^[0-9a-fA-F]{64}$/.test(keyHex)) {
+    throw new Error('مفتاح فك تشفير البيانات غير صالح — يجب أن يكون 64 خانة ست عشرية (hex).');
+  }
+
+  // ---- fetch the encrypted file (relative URL → works under the Pages subpath) ----
+  const res = await fetchImpl(url, { cache: 'no-store' });
+  if (!res.ok) {
+    if (res.status === 404) {
+      throw new Error('ملف البيانات المشفر غير متوفر بعد — سيُنشأ بعد أول تشغيل للمزامنة الخلفية.');
+    }
+    throw new Error(`فشل تحميل ملف البيانات المشفر (HTTP ${res.status})`);
+  }
+
+  // ---- decode + decrypt (any corruption/wrong-key → one clear Arabic error) ----
+  let plainText;
+  try {
+    const raw = base64ToBytes((await res.text()).trim());
+    if (raw.length <= 12) throw new Error('ciphertext too short');
+    const iv = raw.slice(0, 12);
+    const cipher = raw.slice(12);
+    const key = await getSubtle().importKey('raw', hexToBytes(keyHex), 'AES-GCM', false, ['decrypt']);
+    const plainBuf = await getSubtle().decrypt({ name: 'AES-GCM', iv }, key, cipher);
+    plainText = new TextDecoder().decode(plainBuf);
+  } catch (_e) {
+    throw new Error('فشل فك التشفير — تحقق من مفتاح البيانات');
+  }
+
+  // ---- parse + trust-but-validate the plaintext JSON ----------------------
+  let payload;
+  try {
+    payload = JSON.parse(plainText);
+  } catch (_e) {
+    throw new Error('محتوى ملف البيانات المشفر غير صالح (JSON).');
+  }
+  const rows = payload && payload.rows;
+  if (!Array.isArray(rows)) {
+    throw new Error('محتوى ملف البيانات المشفر غير صالح: الحقل rows يجب أن يكون مصفوفة.');
+  }
+  // Sample a few rows: they must already be in OrderRow shape (orderId + testName).
+  const sampleN = Math.min(rows.length, 5);
+  for (let i = 0; i < sampleN; i++) {
+    const r = rows[i];
+    if (!r || typeof r !== 'object' || r.orderId == null || r.testName == null) {
+      throw new Error('محتوى ملف البيانات المشفر غير صالح: صف بلا orderId أو testName.');
+    }
+  }
+
+  const fetchedAt = typeof payload.fetchedAt === 'string' ? payload.fetchedAt : new Date().toISOString();
+  return {
+    rows,
+    summary: buildSummary(rows, { source: 'grafana-snapshot', fetchedAt }),
+    errors: [],
+    fetchedAt,
+  };
+}
+
+/**
  * Fetch the live KAMC orders from the Grafana public-dashboard query endpoint and
  * normalize to OrderRow[]. Same result contract as parseKamcCsv.
  * @param {{baseUrl:string, accessToken:string, panelId:number}} grafanaCfg
@@ -143,32 +269,9 @@ export async function fetchKamcOrders(grafanaCfg, { fromMs, toMs, fetchImpl = fe
   }
 
   // ---- summary (aggregate only; no PII) — same shape as csv.js + source/fetchedAt ----
-  const distinct = new Set();
-  const statusCounts = {};
-  let resultedCount = 0;
-  let min = null;
-  let max = null;
-  for (const x of rows) {
-    distinct.add(x.orderId);
-    statusCounts[x.rawStatus] = (statusCounts[x.rawStatus] || 0) + 1;
-    if (x.resulted) resultedCount++;
-    if (x.orderDate) {
-      if (min === null || x.orderDate < min) min = x.orderDate;
-      if (max === null || x.orderDate > max) max = x.orderDate;
-    }
-  }
-
   return {
     rows,
-    summary: {
-      rowCount: rows.length,
-      distinctOrders: distinct.size,
-      dateRange: { min, max },
-      resultedCount,
-      statusCounts,
-      source: 'grafana',
-      fetchedAt: new Date().toISOString(),
-    },
+    summary: buildSummary(rows, { source: 'grafana', fetchedAt: new Date().toISOString() }),
     errors,
   };
 }

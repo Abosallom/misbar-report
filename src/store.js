@@ -322,6 +322,9 @@ function validateImport(doc) {
     if ('panelId' in g && (typeof g.panelId !== 'number' || !Number.isFinite(g.panelId))) {
       throw new Error('حقل grafana.panelId غير صالح: يجب أن يكون رقماً.');
     }
+    if ('dataKey' in g && typeof g.dataKey !== 'string') {
+      throw new Error('حقل grafana.dataKey غير صالح: يجب أن يكون نصاً.');
+    }
     // enabled is coerce-tolerant: any truthy/falsy value is accepted and
     // normalized to a boolean in pickImportKeys — no validation error here.
   }
@@ -400,13 +403,14 @@ function pickImportKeys(doc) {
     out.snapshot = picked;
   }
   if (isPlainObject(out.grafana)) {
-    // Only the four known fields ever persist — unknown subkeys are discarded.
+    // Only the five known fields ever persist — unknown subkeys are discarded.
     const g = out.grafana;
     const picked = {};
     if (typeof g.baseUrl === 'string') picked.baseUrl = g.baseUrl;
     if (typeof g.accessToken === 'string') picked.accessToken = g.accessToken;
     if (typeof g.panelId === 'number' && Number.isFinite(g.panelId)) picked.panelId = g.panelId;
     if ('enabled' in g) picked.enabled = !!g.enabled; // coerce truthy/falsy → boolean
+    if (typeof g.dataKey === 'string') picked.dataKey = g.dataKey; // snapshot decrypt key
     out.grafana = picked;
   }
   if ('cachedTracker' in out) {

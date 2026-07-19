@@ -587,6 +587,7 @@ test('importSettings strips unknown grafana subkeys before persisting', () => {
         accessToken: 't',
         panelId: 3,
         enabled: true,
+        dataKey: 'ab'.repeat(32),
         secretExtra: 'nope',
         evil: { x: 1 },
       },
@@ -594,7 +595,8 @@ test('importSettings strips unknown grafana subkeys before persisting', () => {
   );
 
   const after = store.loadSettings();
-  assert.deepEqual(Object.keys(after.grafana).sort(), ['accessToken', 'baseUrl', 'enabled', 'panelId']);
+  assert.deepEqual(Object.keys(after.grafana).sort(), ['accessToken', 'baseUrl', 'dataKey', 'enabled', 'panelId']);
+  assert.equal(after.grafana.dataKey, 'ab'.repeat(32));
   assert.equal(after.grafana.secretExtra, undefined);
   assert.equal(after.grafana.evil, undefined);
 });

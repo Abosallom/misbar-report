@@ -2,7 +2,7 @@
 
 // Live Grafana source: disabled until the user enters the base URL + public-dashboard
 // token in Settings (never committed here — this repo is public).
-export const GRAFANA_SEED = { baseUrl: '', accessToken: '', panelId: 49, enabled: false };
+export const GRAFANA_SEED = { baseUrl: '', accessToken: '', panelId: 49, enabled: false, dataKey: '' };
 //
 // cancelledByMonth: MANUAL additive constants only (workbook "Prompt for Next
 // Report" C6). The engine now computes cancelled(m) = countedFromCsv(m) +

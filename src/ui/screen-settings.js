@@ -755,7 +755,7 @@ export function render(container, ctx) {
   function renderGrafana(root) {
     function grafana() {
       if (!S.doc.grafana || typeof S.doc.grafana !== 'object') {
-        S.doc.grafana = { baseUrl: '', accessToken: '', panelId: 49, enabled: false };
+        S.doc.grafana = { baseUrl: '', accessToken: '', panelId: 49, enabled: false, dataKey: '' };
       }
       return S.doc.grafana;
     }
@@ -800,6 +800,36 @@ export function render(container, ctx) {
         const hidden = tokenInput.getAttribute('type') === 'password';
         tokenInput.setAttribute('type', hidden ? 'text' : 'password');
         toggleBtn.setAttribute('aria-pressed', hidden ? 'true' : 'false');
+      },
+    });
+
+    // -- مفتاح فك تشفير البيانات (password + show/hide) -----------------------
+    // AES-256 key (64 hex) for the encrypted live snapshot published by the
+    // GitHub Action; used as the automatic fallback when a direct pull is CORS-blocked.
+    const dataKeyInput = h('input', {
+      class: 'st-input st-grow',
+      type: 'password',
+      dir: 'ltr',
+      autocomplete: 'off',
+      placeholder: '64 خانة hex',
+      value: g.dataKey || '',
+      'aria-label': 'مفتاح فك تشفير البيانات',
+    });
+    dataKeyInput.addEventListener('change', () => {
+      grafana().dataKey = dataKeyInput.value.trim();
+      autosave();
+    });
+    const dataKeyToggle = h('button', {
+      class: 'st-btn st-btn--icon',
+      type: 'button',
+      title: 'إظهار/إخفاء المفتاح',
+      'aria-label': 'إظهار أو إخفاء المفتاح',
+      'aria-pressed': 'false',
+      text: '👁',
+      onClick: () => {
+        const hidden = dataKeyInput.getAttribute('type') === 'password';
+        dataKeyInput.setAttribute('type', hidden ? 'text' : 'password');
+        dataKeyToggle.setAttribute('aria-pressed', hidden ? 'true' : 'false');
       },
     });
 
@@ -904,6 +934,10 @@ export function render(container, ctx) {
         h('div', { class: 'st-field' }, [
           h('label', { class: 'st-label', text: 'رمز الوصول العام' }),
           h('div', { class: 'st-addbar' }, [tokenInput, toggleBtn]),
+        ]),
+        h('div', { class: 'st-field' }, [
+          h('label', { class: 'st-label', text: 'مفتاح فك تشفير البيانات (hex)' }),
+          h('div', { class: 'st-addbar' }, [dataKeyInput, dataKeyToggle]),
         ]),
         h('div', { class: 'st-field' }, [
           h('label', { class: 'st-label', text: 'رقم اللوحة' }),

@@ -4,6 +4,14 @@ import { el, dropZone, fileSummaryCard, toast } from './components.js';
 import { normTest } from '../contracts.js';
 import { getPapa, getXLSX } from '../vendor-loader.js';
 
+/** Format an ISO timestamp as local 'HH:MM' for snapshot-freshness labels. */
+function fmtHHMM(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 /* ------------------------------------------------------------------ *
  * DEV / MOCK fixtures — conform to contracts.js so the app runs
  * standalone (?mock=1) and other screens can borrow them.
@@ -305,17 +313,41 @@ export async function render(container, ctx) {
     grafanaBtn.disabled = true;
     grafanaBtn.textContent = STR.upload.grafanaFetching;
     errorsByKind.csv = [];
+    const gcfg = (store.settings && store.settings.grafana) || {};
+    const dataKey = (gcfg.dataKey || '').trim();
     try {
       const mod = await import('../ingest/grafana.js');
       const asOf = state.reportDate || todayISO();
-      const res = await mod.fetchKamcOrders(store.settings.grafana, {
-        fromMs: mod.yearStartMs(asOf), toMs: Date.now(),
-      });
-      state.parsed.orders = res.rows;
-      errorsByKind.csv = res.errors || [];
-      state.files.csv = { name: `${STR.upload.grafanaSourceName} ${new Date().toLocaleString('en-GB')}` };
-      csvZone.setLoaded(state.files.csv.name);
-      toast(STR.upload.grafanaOk.replace('{n}', String(res.rows.length)), 'ok');
+      try {
+        // Preferred path: direct browser → Grafana query.
+        const res = await mod.fetchKamcOrders(gcfg, {
+          fromMs: mod.yearStartMs(asOf), toMs: Date.now(),
+        });
+        state.parsed.orders = res.rows;
+        errorsByKind.csv = res.errors || [];
+        state.files.csv = { name: `${STR.upload.grafanaSourceName} ${new Date().toLocaleString('en-GB')}` };
+        csvZone.setLoaded(state.files.csv.name);
+        toast(STR.upload.grafanaOk.replace('{n}', String(res.rows.length)), 'ok');
+      } catch (direct) {
+        // A CORS/network failure surfaces as TypeError. If a data key is set, fall
+        // back to the encrypted snapshot the GitHub Action publishes server-side.
+        if (direct instanceof TypeError && dataKey) {
+          const snap = await mod.fetchKamcSnapshot(dataKey);
+          state.parsed.orders = snap.rows;
+          errorsByKind.csv = snap.errors || [];
+          const t = fmtHHMM(snap.fetchedAt);
+          state.files.csv = { name: `${STR.upload.grafanaSnapshotName} ${t}`.trim() };
+          csvZone.setLoaded(state.files.csv.name);
+          toast(
+            STR.upload.grafanaSnapshotOk
+              .replace('{n}', String(snap.rows.length))
+              .replace('{t}', t),
+            'ok', 9000,
+          );
+        } else {
+          throw direct;
+        }
+      }
     } catch (e) {
       console.error('[upload] grafana fetch failed', e);
       const isCors = e instanceof TypeError; // fetch network/CORS failures surface as TypeError

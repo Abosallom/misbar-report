@@ -38,6 +38,8 @@ export const STR = {
     grafanaOk: 'تم سحب {n} سجلاً من Grafana بنجاح',
     grafanaFail: 'فشل السحب المباشر',
     grafanaCors: 'تعذر الاتصال بـ Grafana من هذا النطاق (CORS) — اطلب من مسؤول Grafana السماح للنطاق https://abosallom.github.io أو استخدم ملف CSV',
+    grafanaSnapshotOk: 'تم تحميل لقطة البيانات ({n} سجلاً، محدثة {t})',
+    grafanaSnapshotName: 'Grafana (لقطة)',
     grafanaSourceName: 'Grafana (مباشر)',
     cachedTrackerName: 'المتتبع المحفوظ',
     csvZoneTitle: 'ملف الطلبات (CSV)',

@@ -3,8 +3,9 @@
 // Grafana live-ingest path (columnar frames → OrderRow[]) with an injected fetch stub.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { webcrypto } from 'node:crypto';
 
-import { fetchKamcOrders, yearStartMs } from '../src/ingest/grafana.js';
+import { fetchKamcOrders, fetchKamcSnapshot, yearStartMs } from '../src/ingest/grafana.js';
 
 // ---- 30-field schema, EXACT names/types matching the real public-dashboard panel ----
 const FIELDS = [
@@ -250,4 +251,151 @@ test('yearStartMs — Jan-1 00:00 Asia/Riyadh (UTC+3) for the year', () => {
   assert.equal(yearStartMs('2026-07-19'), 1767214800000);
   assert.equal(yearStartMs('2025-12-31'), Date.UTC(2025, 0, 1) - 10_800_000);
   assert.throws(() => yearStartMs('not-a-date'), /السنة/);
+});
+
+// ===========================================================================
+// fetchKamcSnapshot — encrypted server-published live snapshot (CORS fallback).
+// Builds a REAL encrypted fixture in-test with WebCrypto so the decrypt path is
+// exercised end-to-end (same file format the GitHub Action produces).
+// ===========================================================================
+
+const subtle = webcrypto.subtle;
+const KEY_HEX = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'; // 64 hex → 32 bytes
+const WRONG_KEY_HEX = 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff';
+
+function hexToBytes(hex) {
+  const out = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.substr(i * 2, 2), 16);
+  return out;
+}
+
+// Produce base64( iv(12) || AES-GCM ciphertext+tag ) for a plaintext object.
+async function makeEncFile(plaintextObj, keyHex = KEY_HEX) {
+  const key = await subtle.importKey('raw', hexToBytes(keyHex), 'AES-GCM', false, ['encrypt']);
+  const iv = webcrypto.getRandomValues(new Uint8Array(12));
+  const data = new TextEncoder().encode(JSON.stringify(plaintextObj));
+  const cipher = new Uint8Array(await subtle.encrypt({ name: 'AES-GCM', iv }, key, data));
+  const combined = new Uint8Array(iv.length + cipher.length);
+  combined.set(iv, 0);
+  combined.set(cipher, iv.length);
+  return Buffer.from(combined).toString('base64');
+}
+
+// Injectable fetch stub returning text (records calls for URL/init assertions).
+function stubTextFetch(b64, { ok = true, status = 200 } = {}) {
+  const impl = async (url, init) => {
+    impl.calls.push({ url, init });
+    return { ok, status, text: async () => b64 };
+  };
+  impl.calls = [];
+  return impl;
+}
+
+// Two already-OrderRow-shaped rows (no patient fields; Riyadh-local date strings).
+const SNAP_ROWS = [
+  {
+    orderDate: '2026-04-23', facility: 'KAMC Lab', orderId: '00990000000463', lineNo: 0,
+    loinc: '48378-4', testName: 'Vitamin D', collected: '2026-04-23 10:15:34',
+    dispatched: null, received: null, resulted: '2026-04-23 10:15:34',
+    rawStatus: 'Result Approved', tatDaysCsv: 3,
+  },
+  {
+    orderDate: '2026-05-01', facility: 'KAMC Lab', orderId: '00990000000999', lineNo: 1,
+    loinc: null, testName: 'CBC', collected: null, dispatched: null,
+    received: '2026-04-23 10:15:34', resulted: null, rawStatus: 'Received', tatDaysCsv: null,
+  },
+];
+const SNAP_PAYLOAD = { fetchedAt: '2026-07-19T07:15:00.000Z', source: 'grafana', rows: SNAP_ROWS };
+
+test('fetchKamcSnapshot — happy path: rows + fetchedAt round-trip, snapshot summary', async () => {
+  const b64 = await makeEncFile(SNAP_PAYLOAD);
+  const fetchImpl = stubTextFetch(b64);
+  const out = await fetchKamcSnapshot(KEY_HEX, { fetchImpl });
+
+  assert.deepEqual(out.rows, SNAP_ROWS); // exact round-trip
+  assert.equal(out.fetchedAt, '2026-07-19T07:15:00.000Z');
+  assert.deepEqual(out.errors, []);
+
+  // Summary matches the module's shared shape, tagged as the snapshot source.
+  assert.equal(out.summary.source, 'grafana-snapshot');
+  assert.equal(out.summary.fetchedAt, '2026-07-19T07:15:00.000Z');
+  assert.equal(out.summary.rowCount, 2);
+  assert.equal(out.summary.distinctOrders, 2);
+  assert.equal(out.summary.resultedCount, 1); // only row 0 has `resulted`
+  assert.deepEqual(out.summary.dateRange, { min: '2026-04-23', max: '2026-05-01' });
+  assert.deepEqual(out.summary.statusCounts, { 'Result Approved': 1, Received: 1 });
+
+  // Fetched the relative Pages path with no-store caching.
+  assert.equal(fetchImpl.calls.length, 1);
+  assert.equal(fetchImpl.calls[0].url, 'data/kamc-live.enc');
+  assert.equal(fetchImpl.calls[0].init.cache, 'no-store');
+});
+
+test('fetchKamcSnapshot — custom url is honored', async () => {
+  const b64 = await makeEncFile(SNAP_PAYLOAD);
+  const fetchImpl = stubTextFetch(b64);
+  await fetchKamcSnapshot(KEY_HEX, { url: 'sub/path/kamc-live.enc', fetchImpl });
+  assert.equal(fetchImpl.calls[0].url, 'sub/path/kamc-live.enc');
+});
+
+test('fetchKamcSnapshot — wrong key → decrypt error', async () => {
+  const b64 = await makeEncFile(SNAP_PAYLOAD, KEY_HEX); // encrypted with the RIGHT key
+  const fetchImpl = stubTextFetch(b64);
+  await assert.rejects(
+    fetchKamcSnapshot(WRONG_KEY_HEX, { fetchImpl }), // decrypt with the WRONG key
+    /فشل فك التشفير — تحقق من مفتاح البيانات/,
+  );
+});
+
+test('fetchKamcSnapshot — corrupt base64 → decrypt error', async () => {
+  const fetchImpl = stubTextFetch('@@@ this is not valid base64 @@@');
+  await assert.rejects(
+    fetchKamcSnapshot(KEY_HEX, { fetchImpl }),
+    /فشل فك التشفير — تحقق من مفتاح البيانات/,
+  );
+});
+
+test('fetchKamcSnapshot — 404 → "not published yet" Arabic message', async () => {
+  const fetchImpl = stubTextFetch('', { ok: false, status: 404 });
+  await assert.rejects(
+    fetchKamcSnapshot(KEY_HEX, { fetchImpl }),
+    /ملف البيانات المشفر غير متوفر بعد/,
+  );
+});
+
+test('fetchKamcSnapshot — non-404 HTTP → generic Arabic HTTP error', async () => {
+  const fetchImpl = stubTextFetch('', { ok: false, status: 503 });
+  await assert.rejects(
+    fetchKamcSnapshot(KEY_HEX, { fetchImpl }),
+    /فشل تحميل ملف البيانات المشفر \(HTTP 503\)/,
+  );
+});
+
+test('fetchKamcSnapshot — invalid key format → error before any fetch', async () => {
+  const guard = () => {
+    throw new Error('fetch must not be called for an invalid key');
+  };
+  await assert.rejects(fetchKamcSnapshot('too-short', { fetchImpl: guard }), /مفتاح|hex/);
+  await assert.rejects(fetchKamcSnapshot('', { fetchImpl: guard }), /مفتاح|hex/);
+  await assert.rejects(fetchKamcSnapshot('g'.repeat(64), { fetchImpl: guard }), /مفتاح|hex/); // non-hex chars
+  await assert.rejects(fetchKamcSnapshot(null, { fetchImpl: guard }), /مفتاح|hex/);
+});
+
+test('fetchKamcSnapshot — decrypts but rows is not an array → validation error', async () => {
+  const b64 = await makeEncFile({ fetchedAt: '2026-07-19T07:15:00.000Z', source: 'grafana', rows: 'nope' });
+  await assert.rejects(
+    fetchKamcSnapshot(KEY_HEX, { fetchImpl: stubTextFetch(b64) }),
+    /rows/,
+  );
+});
+
+test('fetchKamcSnapshot — decrypts but a sampled row lacks orderId/testName → validation error', async () => {
+  const b64 = await makeEncFile({
+    fetchedAt: '2026-07-19T07:15:00.000Z', source: 'grafana',
+    rows: [{ orderId: '1', testName: 'X' }, { orderId: null, testName: 'Y' }],
+  });
+  await assert.rejects(
+    fetchKamcSnapshot(KEY_HEX, { fetchImpl: stubTextFetch(b64) }),
+    /orderId أو testName/,
+  );
 });
