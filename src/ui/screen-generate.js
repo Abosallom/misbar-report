@@ -23,6 +23,30 @@ function withTimeout(promise, ms, label) {
   return Promise.race([promise, guard]).finally(() => clearTimeout(timer));
 }
 
+// Hidden/background tabs clamp setTimeout to >=1s, which stretches JSZip's and
+// html2canvas's chunked loops from seconds to minutes. During generation we route
+// short timeouts through a MessageChannel (not throttled), then restore.
+function installFastTimers() {
+  if (window.__misbarFastTimers) return () => {};
+  const orig = window.setTimeout;
+  const mc = new MessageChannel();
+  const q = [];
+  mc.port1.onmessage = () => {
+    const fn = q.shift();
+    if (fn) { try { fn(); } catch (e) { console.error('[fast-timer]', e); } }
+  };
+  window.setTimeout = function (fn, ms, ...args) {
+    if (typeof fn === 'function' && (ms == null || ms <= 50)) {
+      q.push(() => fn(...args));
+      mc.port2.postMessage(0);
+      return -1;
+    }
+    return orig.call(window, fn, ms, ...args);
+  };
+  window.__misbarFastTimers = true;
+  return () => { window.setTimeout = orig; window.__misbarFastTimers = false; };
+}
+
 function fallbackModel(state, store) {
   const kpi = state.engineOutput || buildMockEngineOutput(store.settings);
   const tracker = state.parsed.tracker || buildMockTracker();
@@ -145,6 +169,7 @@ export async function render(container, ctx) {
 
   const produced = []; // {def, blob, url}
   let hadError = false;
+  const restoreTimers = installFastTimers();
 
   try {
     const libs = await getGenLibs();
@@ -188,6 +213,8 @@ export async function render(container, ctx) {
   } catch (e) {
     console.error('[generate] gen libs failed', e);
     hadError = true;
+  } finally {
+    restoreTimers();
   }
 
   host.innerHTML = '';
