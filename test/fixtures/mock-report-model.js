@@ -58,37 +58,38 @@ const BY_LAB = [
   { lab: 'Anwa  Medical Company',                 total: 7,   awaitingResult: 7,  late: 0,  latePct: 0 },
 ];
 
-// slide 7 — current (external) tasks.
+// slide 7 — current (external) tasks. PLACEHOLDER content (public repo):
+// same row counts, statuses, and date shapes as the reference deck, but names
+// and task texts are generic — real content comes from the dropped Tracker.
 const TASKS_CURRENT = [
-  { num: 1, status: 'مستمر',      dueDate: 'يومي',       owner: 'طلال الدوسري',             responsible: 'لين',        task: 'ارسال تنبيه لعدد من الفحوصات المتأخرة والتي قاربت من نطاق التأخر للمختبرات', category: '', hidden: false },
-  { num: 2, status: 'مستمر',      dueDate: 'يومي',       owner: 'أمجد العمري',             responsible: 'نوبكو',      task: 'التواصل مع المختبرات لتوفير الدعم المطلوب لرفع النتائج على المنصة',           category: '', hidden: false },
-  { num: 3, status: 'متأخر',      dueDate: '02-07-2026', owner: 'ماهر الشهري / جميل الحربي', responsible: 'لين/نوبكو',  task: 'إعداد خطة Roll-out  إطلاق مسبار خلال 2026',                                  category: '', hidden: false },
-  { num: 4, status: 'قيد التنفيذ', dueDate: '20-07-2026', owner: 'أحمد الشنقيطي',            responsible: 'لين',        task: 'مشاركة جاهزية تطبيق الهوية البصرية',                                        category: '', hidden: false },
-  { num: 5, status: 'قيد التنفيذ', dueDate: '31-08-2026', owner: 'جميل الحربي / يوسف العنزي', responsible: 'نوبكو/ لين', task: 'تطبيق الهوية البصرية على المنصة',                                           category: '', hidden: false },
-  { num: 6, status: 'قيد التنفيذ', dueDate: '12-07-2026', owner: 'جميل الحربي / يوسف العنزي', responsible: 'نوبكو/ لين', task: 'مراجعة الاتفاقية مع فريق القانونية',                                        category: '', hidden: false },
-  { num: 7, status: 'قيد التنفيذ', dueDate: '14-07-2026', owner: 'أحمد الشنقيطي',            responsible: 'لين',        task: 'اعداد دليل مستخدم للمختبرات والمستخدمين',                                     category: '', hidden: false },
-  { num: 8, status: 'قيد التنفيذ', dueDate: '16-07-2026', owner: 'نوف بن طياش / فهد الحمود',  responsible: 'نوبكو/ لين', task: 'اعتماد شعار المنصة',                                                        category: '', hidden: false },
+  { num: 1, status: 'مستمر',      dueDate: 'يومي',       owner: 'مسؤول أ',        responsible: 'لين',        task: 'مهمة تشغيلية يومية تجريبية للمعاينة', category: '', hidden: false },
+  { num: 2, status: 'مستمر',      dueDate: 'يومي',       owner: 'مسؤول ب',        responsible: 'نوبكو',      task: 'مهمة تشغيلية يومية تجريبية ثانية',    category: '', hidden: false },
+  { num: 3, status: 'متأخر',      dueDate: '02-07-2026', owner: 'مسؤول ج / مسؤول د', responsible: 'لين/نوبكو',  task: 'مهمة تجريبية متأخرة عن موعدها',       category: '', hidden: false },
+  { num: 4, status: 'قيد التنفيذ', dueDate: '20-07-2026', owner: 'مسؤول هـ',       responsible: 'لين',        task: 'مهمة تجريبية قيد التنفيذ ١',          category: '', hidden: false },
+  { num: 5, status: 'قيد التنفيذ', dueDate: '31-08-2026', owner: 'مسؤول د / مسؤول و', responsible: 'نوبكو/ لين', task: 'مهمة تجريبية قيد التنفيذ ٢',          category: '', hidden: false },
+  { num: 6, status: 'قيد التنفيذ', dueDate: '12-07-2026', owner: 'مسؤول د / مسؤول و', responsible: 'نوبكو/ لين', task: 'مهمة تجريبية قيد التنفيذ ٣',          category: '', hidden: false },
+  { num: 7, status: 'قيد التنفيذ', dueDate: '14-07-2026', owner: 'مسؤول هـ',       responsible: 'لين',        task: 'مهمة تجريبية قيد التنفيذ ٤',          category: '', hidden: false },
+  { num: 8, status: 'قيد التنفيذ', dueDate: '16-07-2026', owner: 'مسؤول ز / مسؤول ح', responsible: 'نوبكو/ لين', task: 'مهمة تجريبية قيد التنفيذ ٥',          category: '', hidden: false },
 ];
 
-// slide 8 — internal tasks (internalOnly; dropped in the NUPCO variant).
-// Deck showed revised due dates struck over originals; we keep the current (revised) date.
+// slide 8 — internal tasks (internalOnly; dropped in the NUPCO variant). PLACEHOLDER.
 const TASKS_INTERNAL = [
-  { num: 1, status: 'قيد التنفيذ', dueDate: '16-07-2026', owner: 'عبدالعزيز السلوم', responsible: 'لين', task: 'فصل البنية التحتية التابعة لمسبار عن عيناتي - BE',                        category: 'داخلي', hidden: false },
-  { num: 2, status: 'قيد التنفيذ', dueDate: '10-07-2026', owner: 'عبدالعزيز السلوم', responsible: 'لين', task: 'اغلاق الثغرات لنظام عينتي',                                              category: 'داخلي', hidden: false },
-  { num: 3, status: 'قيد التنفيذ', dueDate: '09-07-2026', owner: 'عهد القحطاني',     responsible: 'لين', task: 'تحديث أدوار عينتي ومسبار للمختبرات على صحة',                             category: 'داخلي', hidden: false },
-  { num: 4, status: 'قيد التنفيذ', dueDate: '09-07-2026', owner: 'عهد القحطاني',     responsible: 'لين', task: 'اعداد قائمة المتطلبات لمنشأة جديدة',                                     category: 'داخلي', hidden: false },
-  { num: 5, status: 'قيد التنفيذ', dueDate: '16-07-2026', owner: 'عبدالعزيز السلوم', responsible: 'لين', task: 'اكمال تجهيز API لربط مع المختبرات الخارجية (International Lab)',           category: 'داخلي', hidden: false },
+  { num: 1, status: 'قيد التنفيذ', dueDate: '16-07-2026', owner: 'مسؤول أ', responsible: 'لين', task: 'مهمة داخلية تجريبية ١', category: 'داخلي', hidden: false },
+  { num: 2, status: 'قيد التنفيذ', dueDate: '10-07-2026', owner: 'مسؤول أ', responsible: 'لين', task: 'مهمة داخلية تجريبية ٢', category: 'داخلي', hidden: false },
+  { num: 3, status: 'قيد التنفيذ', dueDate: '09-07-2026', owner: 'مسؤول ب', responsible: 'لين', task: 'مهمة داخلية تجريبية ٣', category: 'داخلي', hidden: false },
+  { num: 4, status: 'قيد التنفيذ', dueDate: '09-07-2026', owner: 'مسؤول ب', responsible: 'لين', task: 'مهمة داخلية تجريبية ٤', category: 'داخلي', hidden: false },
+  { num: 5, status: 'قيد التنفيذ', dueDate: '16-07-2026', owner: 'مسؤول أ', responsible: 'لين', task: 'مهمة داخلية تجريبية ٥', category: 'داخلي', hidden: false },
 ];
 
-// slide 9 — challenges & risks.
+// slide 9 — challenges & risks. PLACEHOLDER.
 const CHALLENGES = [
-  { id: 'c1', title: '', desc: 'تأخر في اصدار نتائج من قبل مختبر ALSC', impact: 'متوسط', owner: 'ALSC',                status: '', solution: 'تسريع عملية اصدار النتائج' },
-  { id: 'c2', title: '', desc: 'إصدار عدة نتائج خارج نظام مسبار (تم إدخالها في بوابة المختبر المرجعية)', impact: 'حرج', owner: 'المختبرات المرجعية', status: '', solution: 'إلزام المختبرات المرجعية على إدخال النتائج على نظام مسبار' },
-  { id: 'c3', title: '', desc: 'عدم التزام GENALIVE و SMC بإنشاء العقود', impact: 'عالي', owner: 'GENALIVE / SMC',      status: '', solution: 'إلزام المختبرات بإنشاء العقود' },
+  { id: 'c1', title: '', desc: 'تحدٍ تجريبي أول للمعاينة',  impact: 'متوسط', owner: 'جهة أ', status: '', solution: 'إجراء وقائي تجريبي أول' },
+  { id: 'c2', title: '', desc: 'تحدٍ تجريبي ثانٍ للمعاينة', impact: 'حرج',   owner: 'جهة ب', status: '', solution: 'إجراء وقائي تجريبي ثانٍ' },
+  { id: 'c3', title: '', desc: 'تحدٍ تجريبي ثالث للمعاينة', impact: 'عالي',  owner: 'جهة ج', status: '', solution: 'إجراء وقائي تجريبي ثالث' },
 ];
 
 const RISKS = [
-  { id: 'r1', title: '', desc: 'تأخر في اكتمال دورة كاملة في مسبار', probability: 'عالي', impact: 'عالي', owner: 'نوبكو/لين', status: '' },
+  { id: 'r1', title: '', desc: 'خطر تجريبي للمعاينة', probability: 'عالي', impact: 'عالي', owner: 'نوبكو/لين', status: '' },
 ];
 
 /** @type {import('../../src/contracts.js').ReportModel} */
@@ -113,19 +114,19 @@ export const MOCK_REPORT_MODEL = {
     unmatchedTests: [],
     deltas: { completed: 47 },     // +47 vs previous snapshot
   },
-  panels: {
+  panels: { // PLACEHOLDER bullets (public repo) — real content is auto-drafted from the Tracker
     completedTasks: [
-      'إنهاء شعار مسبار على المنصة',
-      'ضمان إشراك ZATCA و PHA كأصحاب مصلحة رئيسيين من خلال EA-MOH',
-      'تم إشعار المختبرات بالفحوصات المتأخرة',
+      'بند منجز تجريبي أول للمعاينة',
+      'بند منجز تجريبي ثانٍ للمعاينة',
+      'بند منجز تجريبي ثالث للمعاينة',
     ],
     plannedTasks: [
-      'المتابعة إكمال رحلة طلب مسبار لبقية الطلبات مع مختبر مدينة الملك عبدالله والمختبرات المرجعية',
+      'بند مخطط له تجريبي للمعاينة يمتد على سطرٍ كامل تقريباً',
     ],
     supportRequired: [
-      'الزام GENALIVE و SMC برفع العقود وذلك لتمكين KAMC للقيام بطلب الفحوصات',
-      'الزام المختبرات المرجعية بتسجيل العينات في نظام مسبار فور استلامها من KAMC',
-      'الزام المختبرات المرجعية بإدخال النتائج المكتملة في نظام مسبار',
+      'بند دعم مطلوب تجريبي أول للمعاينة',
+      'بند دعم مطلوب تجريبي ثانٍ للمعاينة',
+      'بند دعم مطلوب تجريبي ثالث للمعاينة',
     ],
   },
   tasksCurrent: TASKS_CURRENT,
