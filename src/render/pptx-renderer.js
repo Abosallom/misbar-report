@@ -148,6 +148,7 @@ function addElement(slide, P, e) {
  */
 export async function renderPptx(spec, { variant = 'internal', PptxGenJS }) {
   const P = new PptxGenJS();
+  P.rtlMode = true; // deck-level rtl="1" like the original (numeric runs stay LTR)
   P.defineLayout({ name: 'LAYOUT_WIDE', width: 13.333, height: 7.5 });
   P.layout = 'LAYOUT_WIDE';
   spec.forEach((sd) => {
