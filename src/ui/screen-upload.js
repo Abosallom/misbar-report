@@ -260,6 +260,18 @@ export async function render(container, ctx) {
   });
   const dropgrid = el('div', { class: 'dropgrid' }, [csvZone.el, trackerZone.el]);
 
+  // Live Grafana source (enabled + configured in Settings → الاتصال المباشر)
+  const gcfg = (store.settings && store.settings.grafana) || {};
+  const grafanaReady = !!(gcfg.enabled && gcfg.baseUrl && gcfg.accessToken);
+  const grafanaBtn = grafanaReady ? el('button', {
+    class: 'btn btn--primary', text: STR.upload.grafanaFetch, onClick: fetchLive,
+  }) : null;
+  const grafanaBar = grafanaReady ? el('div', { class: 'card' }, [
+    el('div', { class: 'card__title', text: STR.upload.grafanaTitle }),
+    grafanaBtn,
+    el('span', { class: 'small muted', style: 'margin-inline-start:10px', text: STR.upload.grafanaHint }),
+  ]) : null;
+
   const summaryHost = el('div');
   const unmatchedHost = el('div');
   const actionsHost = el('div', { class: 'sticky-actions' });
@@ -271,12 +283,49 @@ export async function render(container, ctx) {
   ]) : null;
 
   container.appendChild(el('div', { class: 'screen' }, [
-    head, dropgrid, devBar, summaryHost, unmatchedHost, actionsHost,
+    head, grafanaBar, dropgrid, devBar, summaryHost, unmatchedHost, actionsHost,
   ]));
+
+  // Reuse the last-parsed Project Tracker when no fresh file was dropped —
+  // it changes rarely, so with the live Grafana source generate needs no files.
+  if (!state.parsed.tracker) {
+    const ct = store.settings && store.settings.cachedTracker;
+    if (ct && ct.model) {
+      state.parsed.tracker = ct.model;
+      state.files.tracker = state.files.tracker || { name: STR.upload.cachedTrackerName };
+      trackerZone.setLoaded(`${STR.upload.cachedTrackerName} (${String(ct.updatedAt || '').slice(0, 10)})`);
+    }
+  }
 
   // Restore visual state if returning to this screen with data already parsed.
   if (state.files.csv) csvZone.setLoaded(state.files.csv.name);
   if (state.files.tracker) trackerZone.setLoaded(state.files.tracker.name);
+
+  async function fetchLive() {
+    grafanaBtn.disabled = true;
+    grafanaBtn.textContent = STR.upload.grafanaFetching;
+    errorsByKind.csv = [];
+    try {
+      const mod = await import('../ingest/grafana.js');
+      const asOf = state.reportDate || todayISO();
+      const res = await mod.fetchKamcOrders(store.settings.grafana, {
+        fromMs: mod.yearStartMs(asOf), toMs: Date.now(),
+      });
+      state.parsed.orders = res.rows;
+      errorsByKind.csv = res.errors || [];
+      state.files.csv = { name: `${STR.upload.grafanaSourceName} ${new Date().toLocaleString('en-GB')}` };
+      csvZone.setLoaded(state.files.csv.name);
+      toast(STR.upload.grafanaOk.replace('{n}', String(res.rows.length)), 'ok');
+    } catch (e) {
+      console.error('[upload] grafana fetch failed', e);
+      const isCors = e instanceof TypeError; // fetch network/CORS failures surface as TypeError
+      toast(isCors ? STR.upload.grafanaCors : `${STR.upload.grafanaFail}: ${(e && e.message) || e}`, 'warn', 9000);
+    } finally {
+      grafanaBtn.disabled = false;
+      grafanaBtn.textContent = STR.upload.grafanaFetch;
+      paint();
+    }
+  }
 
   async function handleFile(kind, file) {
     state.files[kind] = file;
@@ -302,6 +351,10 @@ export async function render(container, ctx) {
         } else {
           state.parsed.tracker = res.tracker;
           errorsByKind.tracker = res.errors || [];
+          // Persist for file-less runs (project content only — never patient data).
+          try {
+            if (typeof store.updateCachedTracker === 'function') store.updateCachedTracker(res.tracker);
+          } catch (err) { console.warn('[upload] tracker cache failed', err); }
         }
       }
       (kind === 'csv' ? csvZone : trackerZone).setLoaded(file.name);

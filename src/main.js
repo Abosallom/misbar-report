@@ -5,7 +5,7 @@ import { el, toast } from './ui/components.js';
 import { SETTINGS_KEY } from './contracts.js';
 import { TAT_LOOKUP } from './seeds/tat-lookup.js';
 import { SCORECARD_SEED } from './seeds/scorecard.js';
-import { HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED } from './seeds/defaults.js';
+import { HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED, GRAFANA_SEED } from './seeds/defaults.js';
 
 /* ------------------------------------------------------------------ *
  * Settings store — prefers Track C's src/store.js, falls back to a
@@ -22,6 +22,8 @@ function seedSettings() {
     scorecard: SCORECARD_SEED.map((x) => ({ ...x })),
     historicalConstants: { cancelledByMonth: { ...HISTORICAL_CONSTANTS_SEED.cancelledByMonth } },
     snapshot: JSON.parse(JSON.stringify(SNAPSHOT_SEED)), // nested {asOf, numbers}
+    grafana: { ...GRAFANA_SEED },
+    cachedTracker: null,
   };
 }
 
@@ -66,6 +68,8 @@ function readLocalSettings() {
         },
       },
       snapshot: migrateLocalSnapshot(s.snapshot, seed.snapshot),
+      grafana: { ...seed.grafana, ...(s.grafana || {}) },
+      cachedTracker: s.cachedTracker || null,
       scorecard: Array.isArray(s.scorecard) && s.scorecard.length ? s.scorecard : seed.scorecard,
     };
   } catch { return seed; }
@@ -124,6 +128,14 @@ function makeAdapter(backend, local) {
     saveSettings: (s) => { try { return call('saveSettings', s); } catch (e) { console.warn('[store] saveSettings failed; local', e); return local.saveSettings(s); } },
     updateSnapshot: (snap) => { try { return call('updateSnapshot', snap); } catch (e) { console.warn('[store] updateSnapshot failed; local', e); return local.updateSnapshot(snap); } },
     isEphemeral: () => (has('isEphemeral') ? backend.isEphemeral() : local.isEphemeral()),
+    updateCachedTracker(model) {
+      try { return call('updateCachedTracker', model); } catch (e) {
+        console.warn('[store] updateCachedTracker failed; local', e);
+        const d = this.loadSettings();
+        d.cachedTracker = model ? { model, updatedAt: new Date().toISOString() } : null;
+        return this.saveSettings(d);
+      }
+    },
     exportSettings: () => call('exportSettings'),
     importSettings: (t) => call('importSettings', t),
     // Convenience for this track's screens
@@ -272,6 +284,19 @@ async function boot() {
     store.saveSettings(doc);
     state.settings = store.settings;
     return { added, updated };
+  };
+
+  // Connection test consumed by the settings screen's اختبار الاتصال button.
+  state.onGrafanaTest = async () => {
+    try {
+      const mod = await import('./ingest/grafana.js');
+      const g = store.loadSettings().grafana || {};
+      const now = Date.now();
+      const res = await mod.fetchKamcOrders(g, { fromMs: now - 7 * 86400000, toMs: now });
+      return { ok: true, rows: res.rows.length };
+    } catch (e) {
+      return { ok: false, error: String((e && e.message) || e) };
+    }
   };
 
   ctx = { state, store, navigate, rerender };

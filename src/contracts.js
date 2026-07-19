@@ -107,6 +107,15 @@
  *   - the previous report's published numbers (keys = deltas keys above);
  *     written after each successful generation. Legacy {prevCompleted} docs are
  *     migrated on load (numbers.completed = prevCompleted).
+ * @property {{baseUrl:string, accessToken:string, panelId:number, enabled:boolean}} grafana
+ *   - live data source (Grafana PUBLIC-dashboard query API). baseUrl like
+ *     'https://elab.seha.sa/hpapm'. Empty/disabled → CSV drop only. The access
+ *     token is the public-dashboard token (view-only, server-side-masked data);
+ *     it is NEVER seeded in the repo — the user enters it once in Settings.
+ * @property {{model:TrackerModel, updatedAt:string}|null} cachedTracker
+ *   - last successfully parsed Project Tracker, reused when no fresh file is
+ *     dropped. NOTE on the no-PHI invariant: this is PROJECT-management content
+ *     (tasks/challenges/risks), not patient data — patient rows remain memory-only.
  */
 
 /** Screen module contract: each ui/screen-*.js exports render(containerEl, ctx)

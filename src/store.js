@@ -1,16 +1,20 @@
 // store.js — Track C persistence layer.
 // A single versioned config document persisted at SETTINGS_KEY in localStorage.
-// NO PHI EVER: this store holds configuration only (TAT lookup, display names,
-// lab scorecard, historical constants, previous-report snapshot). There is no
-// rows/orders API here by design, so patient data can never structurally land in
-// storage. All localStorage access is wrapped in try/catch because Safari private
-// mode throws on write; on failure we fall back to an in-memory doc and expose
+// NO PATIENT DATA EVER: patient/order rows stay memory-only — there is no
+// rows/orders API here by design, so PHI can never structurally land in storage.
+// What IS stored is configuration plus two integration fields:
+//   • grafana — live-source config. grafana.accessToken is a Grafana PUBLIC-
+//     dashboard token: view-only, server-side-masked data, never a login/PHI key.
+//   • cachedTracker — the last parsed Project Tracker (PROJECT-management content:
+//     tasks/challenges/risks). This is explicitly allowed; it is NOT patient data.
+// All localStorage access is wrapped in try/catch because Safari private mode
+// throws on write; on failure we fall back to an in-memory doc and expose
 // isEphemeral() so the UI can warn the user their edits will not persist.
 
 import { SETTINGS_KEY } from './contracts.js';
 import { TAT_LOOKUP } from './seeds/tat-lookup.js';
 import { SCORECARD_SEED } from './seeds/scorecard.js';
-import { HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED } from './seeds/defaults.js';
+import { HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED, GRAFANA_SEED } from './seeds/defaults.js';
 
 export const SCHEMA_VERSION = 1;
 
@@ -56,8 +60,15 @@ function buildSeedDoc() {
       cancelledByMonth: { ...HISTORICAL_CONSTANTS_SEED.cancelledByMonth },
     },
     snapshot: clone(SNAPSHOT_SEED), // deep clone: SNAPSHOT_SEED.numbers is nested
+    grafana: { ...GRAFANA_SEED },
+    cachedTracker: null,
   };
 }
+
+// Defensive cap on the serialized cachedTracker model (chars). Keeps a single
+// oversized parse from bloating localStorage and tripping the quota for everything
+// else. The Project Tracker is small in practice; this only guards pathologies.
+const CACHED_TRACKER_MAX = 300_000;
 
 function tryGet(key) {
   try {
@@ -89,10 +100,13 @@ function persist(doc) {
 }
 
 /**
- * In-place snapshot-shape migration (schemaVersion stays 1). A legacy snapshot
- * shaped {prevCompleted, asOf} widens to {asOf, numbers} — numbers seeded from
- * SNAPSHOT_SEED with completed overridden by the old prevCompleted. Docs already
- * carrying {numbers} are left untouched.
+ * In-place softening for a same-schema (v1) doc. Two backfills, no schemaVersion
+ * bump:
+ *  1. Legacy snapshot shaped {prevCompleted, asOf} widens to {asOf, numbers} —
+ *     numbers seeded from SNAPSHOT_SEED with completed overridden by the old
+ *     prevCompleted. Docs already carrying {numbers} are left untouched.
+ *  2. Docs predating the live-source work get the missing `grafana`
+ *     (from GRAFANA_SEED) and `cachedTracker` (null) keys added.
  */
 function migrateSnapshotShape(doc) {
   const s = doc.snapshot;
@@ -105,6 +119,8 @@ function migrateSnapshotShape(doc) {
       },
     };
   }
+  if (!isPlainObject(doc.grafana)) doc.grafana = { ...GRAFANA_SEED };
+  if (!('cachedTracker' in doc)) doc.cachedTracker = null;
   return doc;
 }
 
@@ -193,6 +209,31 @@ export function updateSnapshot({ asOf, numbers } = {}) {
 }
 
 /**
+ * Stores (or clears) the last successfully parsed Project Tracker. Pass a
+ * TrackerModel to cache it as {model, updatedAt}; pass null to clear it. This is
+ * project-management content (tasks/challenges/risks), NOT patient data.
+ * Guard: the serialized model must be under CACHED_TRACKER_MAX chars, else we
+ * throw rather than risk exhausting the localStorage quota.
+ * @param {import('./contracts.js').TrackerModel|null} model
+ */
+export function updateCachedTracker(model) {
+  const doc = loadSettings();
+  if (model == null) {
+    doc.cachedTracker = null;
+    return saveSettings(doc);
+  }
+  const serialized = JSON.stringify(model);
+  if (serialized.length >= CACHED_TRACKER_MAX) {
+    throw new Error(
+      `نموذج المتتبع كبير جداً للتخزين (${serialized.length} حرفاً، الحد ${CACHED_TRACKER_MAX}). ` +
+        'لن يُحفظ للحفاظ على سلامة التخزين المحلي.',
+    );
+  }
+  doc.cachedTracker = { model: clone(model), updatedAt: nowIso() };
+  return saveSettings(doc);
+}
+
+/**
  * Serialize the whole config doc for download.
  * @returns {{filename:string, blob:Blob}}
  */
@@ -246,6 +287,37 @@ function validateImport(doc) {
       throw new Error('حقل snapshot.numbers غير صالح: يجب أن يكون كائناً.');
     }
   }
+  if ('grafana' in doc) {
+    const g = doc.grafana;
+    if (!isPlainObject(g)) {
+      throw new Error('حقل grafana غير صالح: يجب أن يكون كائناً.');
+    }
+    if ('baseUrl' in g && typeof g.baseUrl !== 'string') {
+      throw new Error('حقل grafana.baseUrl غير صالح: يجب أن يكون نصاً.');
+    }
+    if ('accessToken' in g && typeof g.accessToken !== 'string') {
+      throw new Error('حقل grafana.accessToken غير صالح: يجب أن يكون نصاً.');
+    }
+    if ('panelId' in g && (typeof g.panelId !== 'number' || !Number.isFinite(g.panelId))) {
+      throw new Error('حقل grafana.panelId غير صالح: يجب أن يكون رقماً.');
+    }
+    // enabled is coerce-tolerant: any truthy/falsy value is accepted and
+    // normalized to a boolean in pickImportKeys — no validation error here.
+  }
+  if ('cachedTracker' in doc) {
+    const ct = doc.cachedTracker;
+    if (ct !== null) {
+      if (!isPlainObject(ct)) {
+        throw new Error('حقل cachedTracker غير صالح: يجب أن يكون null أو كائناً.');
+      }
+      if (!isPlainObject(ct.model)) {
+        throw new Error('حقل cachedTracker.model غير صالح: يجب أن يكون كائناً.');
+      }
+      if (typeof ct.updatedAt !== 'string') {
+        throw new Error('حقل cachedTracker.updatedAt غير صالح: يجب أن يكون نصاً.');
+      }
+    }
+  }
   // Element-level checks: a malformed backup must fail here, not crash the
   // settings screen or report generation later.
   const finiteMap = (m, label) => {
@@ -279,7 +351,7 @@ function validateImport(doc) {
 
 // Only these top-level keys may ever be persisted — the "no PHI in storage"
 // invariant depends on unknown keys being discarded before the merge.
-const IMPORT_KEYS = ['schemaVersion', 'tatLookup', 'displayNames', 'scorecard', 'historicalConstants', 'snapshot'];
+const IMPORT_KEYS = ['schemaVersion', 'tatLookup', 'displayNames', 'scorecard', 'historicalConstants', 'snapshot', 'grafana', 'cachedTracker'];
 
 function pickImportKeys(doc) {
   const out = {};
@@ -304,6 +376,27 @@ function pickImportKeys(doc) {
       picked.numbers = { completed: Number(snap.prevCompleted) };
     }
     out.snapshot = picked;
+  }
+  if (isPlainObject(out.grafana)) {
+    // Only the four known fields ever persist — unknown subkeys are discarded.
+    const g = out.grafana;
+    const picked = {};
+    if (typeof g.baseUrl === 'string') picked.baseUrl = g.baseUrl;
+    if (typeof g.accessToken === 'string') picked.accessToken = g.accessToken;
+    if (typeof g.panelId === 'number' && Number.isFinite(g.panelId)) picked.panelId = g.panelId;
+    if ('enabled' in g) picked.enabled = !!g.enabled; // coerce truthy/falsy → boolean
+    out.grafana = picked;
+  }
+  if ('cachedTracker' in out) {
+    const ct = out.cachedTracker;
+    if (ct === null) {
+      out.cachedTracker = null;
+    } else if (isPlainObject(ct) && isPlainObject(ct.model) && typeof ct.updatedAt === 'string') {
+      out.cachedTracker = { model: ct.model, updatedAt: ct.updatedAt };
+    } else {
+      // Anything else is not a valid cache — drop it rather than persist junk.
+      delete out.cachedTracker;
+    }
   }
   return out;
 }

@@ -2,8 +2,9 @@
 // Screen-module contract: export render(container, ctx) where
 //   ctx = { state, store, navigate(screenId), rerender() }.
 // Every edit autosaves immediately through ctx.store.saveSettings and flashes a
-// subtle 'تم الحفظ' toast. Five tabs: TAT durations, lab readiness scorecard,
-// historical constants, previous-report snapshot, and backup (export/import).
+// subtle 'تم الحفظ' toast. Six tabs: TAT durations, lab readiness scorecard,
+// historical constants, previous-report snapshot, live source (Grafana +
+// cached-tracker), and backup (export/import).
 
 import { SNAPSHOT_SEED } from '../seeds/defaults.js';
 
@@ -12,8 +13,23 @@ const TABS = [
   { id: 'labs', label: 'جاهزية المختبرات' },
   { id: 'const', label: 'ثوابت تاريخية' },
   { id: 'snapshot', label: 'لقطة التقرير السابق' },
+  { id: 'grafana', label: 'الاتصال المباشر' },
   { id: 'backup', label: 'نسخ احتياطي' },
 ];
+
+// Shown after any failed live-connection test. The public GitHub Pages origin the
+// dashboard is served from must be allow-listed by the Grafana admin for CORS.
+const CORS_HINT =
+  'إذا كان الخطأ بسبب CORS فيجب على مسؤول Grafana السماح للنطاق https://abosallom.github.io';
+
+// Deterministic 'YYYY-MM-DD HH:MM' formatter — avoids locale drift across browsers.
+function fmtDateTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(iso);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
 
 // Editable snapshot numbers (E6): the full previous-report figure set, in the
 // order EngineOutput.deltas exposes them. Labels are Arabic, RTL-friendly.
@@ -141,6 +157,7 @@ export function render(container, ctx) {
     else if (ui.tab === 'labs') renderLabs(panel);
     else if (ui.tab === 'const') renderConst(panel);
     else if (ui.tab === 'snapshot') renderSnapshot(panel);
+    else if (ui.tab === 'grafana') renderGrafana(panel);
     else if (ui.tab === 'backup') renderBackup(panel);
   }
 
@@ -729,7 +746,183 @@ export function render(container, ctx) {
   }
 
   // ===========================================================================
-  // (e) نسخ احتياطي — backup / export / import
+  // (e) الاتصال المباشر — Grafana live source + cached tracker
+  // ===========================================================================
+  function renderGrafana(root) {
+    function grafana() {
+      if (!S.doc.grafana || typeof S.doc.grafana !== 'object') {
+        S.doc.grafana = { baseUrl: '', accessToken: '', panelId: 49, enabled: false };
+      }
+      return S.doc.grafana;
+    }
+    const g = grafana();
+
+    // -- عنوان Grafana --------------------------------------------------------
+    const urlInput = h('input', {
+      class: 'st-input st-grow',
+      type: 'text',
+      dir: 'ltr',
+      inputmode: 'url',
+      placeholder: 'https://elab.seha.sa/hpapm',
+      value: g.baseUrl || '',
+      'aria-label': 'عنوان Grafana',
+    });
+    urlInput.addEventListener('change', () => {
+      grafana().baseUrl = urlInput.value.trim();
+      autosave();
+    });
+
+    // -- رمز الوصول العام (password + show/hide) ------------------------------
+    const tokenInput = h('input', {
+      class: 'st-input st-grow',
+      type: 'password',
+      dir: 'ltr',
+      autocomplete: 'off',
+      value: g.accessToken || '',
+      'aria-label': 'رمز الوصول العام',
+    });
+    tokenInput.addEventListener('change', () => {
+      grafana().accessToken = tokenInput.value.trim();
+      autosave();
+    });
+    const toggleBtn = h('button', {
+      class: 'st-btn st-btn--icon',
+      type: 'button',
+      title: 'إظهار/إخفاء الرمز',
+      'aria-label': 'إظهار أو إخفاء الرمز',
+      'aria-pressed': 'false',
+      text: '👁',
+      onClick: () => {
+        const hidden = tokenInput.getAttribute('type') === 'password';
+        tokenInput.setAttribute('type', hidden ? 'text' : 'password');
+        toggleBtn.setAttribute('aria-pressed', hidden ? 'true' : 'false');
+      },
+    });
+
+    // -- رقم اللوحة -----------------------------------------------------------
+    const panelIdInput = h('input', {
+      class: 'st-input st-num',
+      type: 'number',
+      min: '0',
+      step: '1',
+      value: String(g.panelId ?? 49),
+      inputmode: 'numeric',
+      'aria-label': 'رقم اللوحة',
+    });
+    panelIdInput.addEventListener('change', () => {
+      const v = toInt(panelIdInput.value);
+      grafana().panelId = v != null && v >= 0 ? v : 49;
+      panelIdInput.value = String(grafana().panelId);
+      autosave();
+    });
+
+    // -- تفعيل السحب المباشر --------------------------------------------------
+    const enabledCheck = h('input', { type: 'checkbox', class: 'st-check' });
+    enabledCheck.checked = !!g.enabled;
+    enabledCheck.addEventListener('change', () => {
+      grafana().enabled = enabledCheck.checked;
+      autosave();
+    });
+
+    // -- اختبار الاتصال -------------------------------------------------------
+    const testMsg = h('div', { class: 'st-import-msg' });
+    const testBtn = h('button', {
+      class: 'st-btn st-btn--primary',
+      type: 'button',
+      text: 'اختبار الاتصال',
+      onClick: () => {
+        const handler = state.onGrafanaTest;
+        if (typeof handler !== 'function') {
+          testMsg.className = 'st-import-msg';
+          testMsg.textContent = 'متاح بعد التكامل';
+          return;
+        }
+        testMsg.className = 'st-import-msg';
+        testMsg.textContent = 'جارٍ الاختبار…';
+        testBtn.disabled = true;
+        const fail = (err) => {
+          testMsg.className = 'st-import-msg st-import-msg--err';
+          testMsg.textContent = 'فشل الاتصال: ' + err + ' — ' + CORS_HINT;
+        };
+        Promise.resolve(handler())
+          .then((res) => {
+            if (res && res.ok) {
+              testMsg.className = 'st-import-msg st-import-msg--ok';
+              const rows = res.rows != null ? res.rows : 0;
+              testMsg.textContent = `نجح الاتصال — ${rows} صف`;
+            } else {
+              fail((res && res.error) || 'خطأ غير معروف');
+            }
+          })
+          .catch((err) => fail((err && err.message) || err))
+          .finally(() => {
+            testBtn.disabled = false;
+          });
+      },
+    });
+
+    // -- الملف المتتبع المحفوظ (cached tracker) -------------------------------
+    const cachedInfo = h('span', { class: 'st-badge' });
+    const clearCachedBtn = h('button', {
+      class: 'st-btn st-btn--danger',
+      type: 'button',
+      text: 'مسح',
+      onClick: () => {
+        if (!confirm('مسح آخر ملف متتبع محفوظ؟')) return;
+        store.updateCachedTracker(null);
+        S.doc = store.loadSettings();
+        paintCached();
+        toast('تم المسح');
+      },
+    });
+    function paintCached() {
+      const ct = S.doc.cachedTracker;
+      if (ct && ct.model) {
+        const count = Array.isArray(ct.model.tasks) ? ct.model.tasks.length : 0;
+        cachedInfo.textContent = `${fmtDateTime(ct.updatedAt)} — ${count} مهمة`;
+        clearCachedBtn.style.display = '';
+      } else {
+        cachedInfo.textContent = 'لا يوجد';
+        clearCachedBtn.style.display = 'none';
+      }
+    }
+
+    root.appendChild(
+      h('div', { class: 'st-section' }, [
+        h('p', {
+          class: 'st-help',
+          text: 'مصدر البيانات المباشر عبر واجهة اللوحة العامة في Grafana. رمز الوصول هو رمز اللوحة العامة (للعرض فقط) ولا يُحفظ في المستودع.',
+        }),
+        h('div', { class: 'st-field' }, [
+          h('label', { class: 'st-label', text: 'عنوان Grafana' }),
+          urlInput,
+        ]),
+        h('div', { class: 'st-field' }, [
+          h('label', { class: 'st-label', text: 'رمز الوصول العام' }),
+          h('div', { class: 'st-addbar' }, [tokenInput, toggleBtn]),
+        ]),
+        h('div', { class: 'st-field' }, [
+          h('label', { class: 'st-label', text: 'رقم اللوحة' }),
+          panelIdInput,
+        ]),
+        h('label', { class: 'st-field st-field--check' }, [
+          enabledCheck,
+          h('span', { class: 'st-label', text: 'تفعيل السحب المباشر' }),
+        ]),
+        h('div', { class: 'st-addbar' }, [testBtn]),
+        testMsg,
+        h('div', { class: 'st-field' }, [
+          h('label', { class: 'st-label', text: 'آخر ملف متتبع محفوظ' }),
+          h('div', { class: 'st-toolbar' }, [cachedInfo, clearCachedBtn]),
+        ]),
+      ]),
+    );
+
+    paintCached();
+  }
+
+  // ===========================================================================
+  // (f) نسخ احتياطي — backup / export / import
   // ===========================================================================
   function renderBackup(root) {
     const importMsg = h('div', { class: 'st-import-msg' });

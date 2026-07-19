@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { SETTINGS_KEY } from '../src/contracts.js';
 import { TAT_LOOKUP } from '../src/seeds/tat-lookup.js';
 import { SCORECARD_SEED } from '../src/seeds/scorecard.js';
-import { HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED } from '../src/seeds/defaults.js';
+import { HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED, GRAFANA_SEED } from '../src/seeds/defaults.js';
 import * as store from '../src/store.js';
 
 // ---- localStorage mocks -----------------------------------------------------
@@ -331,4 +331,152 @@ test('ephemeral fallback when localStorage is fully denied', () => {
   s.snapshot.numbers.completed = 111;
   store.saveSettings(s);
   assert.equal(store.loadSettings().snapshot.numbers.completed, 111);
+});
+
+// ---- grafana + cachedTracker seeding ----------------------------------------
+test('first run seeds grafana defaults (enabled false, panelId 49) and null cachedTracker', () => {
+  fresh();
+  const s = store.loadSettings();
+  assert.deepEqual(s.grafana, { baseUrl: '', accessToken: '', panelId: 49, enabled: false });
+  assert.equal(s.grafana.enabled, false);
+  assert.equal(s.grafana.panelId, 49);
+  assert.equal(s.cachedTracker, null);
+  // Seed is copied, not the frozen module object.
+  assert.notEqual(s.grafana, GRAFANA_SEED);
+});
+
+// ---- load-time softening backfills the new keys -----------------------------
+test('load adds missing grafana/cachedTracker to an old stored doc (no schema bump)', () => {
+  const mock = fresh();
+  mock.setItem(
+    SETTINGS_KEY,
+    JSON.stringify({
+      schemaVersion: 1,
+      tatLookup: { X: 1 },
+      snapshot: { asOf: '2026-06-01', numbers: { completed: 400 } },
+    }),
+  );
+
+  const s = store.loadSettings();
+  assert.equal(s.schemaVersion, 1); // no bump
+  assert.deepEqual(s.grafana, { baseUrl: '', accessToken: '', panelId: 49, enabled: false });
+  assert.equal(s.cachedTracker, null);
+  // Existing fields untouched.
+  assert.equal(s.snapshot.numbers.completed, 400);
+});
+
+// ---- updateCachedTracker ----------------------------------------------------
+test('updateCachedTracker stores, clears, and enforces the size cap', () => {
+  fresh();
+  store.loadSettings();
+
+  const model = { tasks: [{ task: 'a' }, { task: 'b' }], challenges: [], risks: [] };
+  const out = store.updateCachedTracker(model);
+  assert.ok(out.cachedTracker);
+  assert.deepEqual(out.cachedTracker.model, model);
+  assert.ok(typeof out.cachedTracker.updatedAt === 'string' && out.cachedTracker.updatedAt.length > 0);
+
+  // Persisted across a reload.
+  store.__resetForTests();
+  const reloaded = store.loadSettings();
+  assert.equal(reloaded.cachedTracker.model.tasks.length, 2);
+
+  // Clearing with null.
+  const cleared = store.updateCachedTracker(null);
+  assert.equal(cleared.cachedTracker, null);
+  store.__resetForTests();
+  assert.equal(store.loadSettings().cachedTracker, null);
+
+  // Size cap: a model serializing to >= 300k chars must throw and not persist.
+  const huge = { tasks: [{ task: 'x'.repeat(300000) }] };
+  assert.throws(() => store.updateCachedTracker(huge), /كبير|الحد|300000/);
+  assert.equal(store.loadSettings().cachedTracker, null);
+});
+
+// ---- import validation for the new shapes -----------------------------------
+test('importSettings validates grafana and cachedTracker shapes', () => {
+  fresh();
+  store.loadSettings();
+
+  // grafana: must be an object; typed leaves enforced.
+  assert.throws(
+    () => store.importSettings(JSON.stringify({ schemaVersion: 1, grafana: [] })),
+    /grafana/,
+  );
+  assert.throws(
+    () => store.importSettings(JSON.stringify({ schemaVersion: 1, grafana: { baseUrl: 5 } })),
+    /baseUrl/,
+  );
+  assert.throws(
+    () => store.importSettings(JSON.stringify({ schemaVersion: 1, grafana: { accessToken: 5 } })),
+    /accessToken/,
+  );
+  assert.throws(
+    () => store.importSettings(JSON.stringify({ schemaVersion: 1, grafana: { panelId: 'x' } })),
+    /panelId/,
+  );
+
+  // cachedTracker: null OR {model:object, updatedAt:string}.
+  assert.throws(
+    () => store.importSettings(JSON.stringify({ schemaVersion: 1, cachedTracker: 5 })),
+    /cachedTracker/,
+  );
+  assert.throws(
+    () => store.importSettings(JSON.stringify({ schemaVersion: 1, cachedTracker: { model: 'x', updatedAt: 'y' } })),
+    /cachedTracker\.model/,
+  );
+  assert.throws(
+    () => store.importSettings(JSON.stringify({ schemaVersion: 1, cachedTracker: { model: {}, updatedAt: 5 } })),
+    /cachedTracker\.updatedAt/,
+  );
+});
+
+test('importSettings accepts valid grafana/cachedTracker and coerces enabled', () => {
+  fresh();
+  store.loadSettings();
+
+  store.importSettings(
+    JSON.stringify({
+      schemaVersion: 1,
+      grafana: { baseUrl: 'https://x/y', accessToken: 'tok', panelId: 7, enabled: 1 },
+      cachedTracker: { model: { tasks: [{ task: 'a' }] }, updatedAt: '2026-07-01T00:00:00.000Z' },
+    }),
+  );
+
+  const after = store.loadSettings();
+  assert.equal(after.grafana.baseUrl, 'https://x/y');
+  assert.equal(after.grafana.accessToken, 'tok');
+  assert.equal(after.grafana.panelId, 7);
+  assert.equal(after.grafana.enabled, true); // coerced from 1
+  assert.equal(after.cachedTracker.model.tasks.length, 1);
+  assert.equal(after.cachedTracker.updatedAt, '2026-07-01T00:00:00.000Z');
+
+  // A null cachedTracker import clears it.
+  store.importSettings(JSON.stringify({ schemaVersion: 1, cachedTracker: null }));
+  assert.equal(store.loadSettings().cachedTracker, null);
+});
+
+// ---- pickImportKeys strips unknown grafana subkeys --------------------------
+test('importSettings strips unknown grafana subkeys before persisting', () => {
+  fresh();
+  store.loadSettings();
+
+  store.importSettings(
+    JSON.stringify({
+      schemaVersion: 1,
+      grafana: {
+        baseUrl: 'https://a/b',
+        accessToken: 't',
+        panelId: 3,
+        enabled: true,
+        secretExtra: 'nope',
+        evil: { x: 1 },
+      },
+    }),
+  );
+
+  const after = store.loadSettings();
+  assert.deepEqual(Object.keys(after.grafana).sort(), ['accessToken', 'baseUrl', 'enabled', 'panelId']);
+  assert.equal(after.grafana.secretExtra, undefined);
+  assert.equal(after.grafana.evil, undefined);
 });
