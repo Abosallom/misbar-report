@@ -270,7 +270,9 @@ export async function render(container, ctx) {
 
   // Live Grafana source (enabled + configured in Settings → الاتصال المباشر)
   const gcfg = (store.settings && store.settings.grafana) || {};
-  const grafanaReady = !!(gcfg.enabled && gcfg.baseUrl && gcfg.accessToken);
+  // Live-fetch is usable with EITHER the direct connection (baseUrl+token) or
+  // just the snapshot decrypt key — don't gate the button on the direct fields.
+  const grafanaReady = !!(gcfg.enabled && ((gcfg.baseUrl && gcfg.accessToken) || (gcfg.dataKey || '').trim()));
   const grafanaBtn = grafanaReady ? el('button', {
     class: 'btn btn--primary', text: STR.upload.grafanaFetch, onClick: fetchLive,
   }) : null;
@@ -318,8 +320,10 @@ export async function render(container, ctx) {
     try {
       const mod = await import('../ingest/grafana.js');
       const asOf = state.reportDate || todayISO();
+      const directConfigured = !!(gcfg.baseUrl && gcfg.accessToken);
       try {
-        // Preferred path: direct browser → Grafana query.
+        // Preferred path: direct browser → Grafana query (when configured).
+        if (!directConfigured) throw new TypeError('direct source not configured');
         const res = await mod.fetchKamcOrders(gcfg, {
           fromMs: mod.yearStartMs(asOf), toMs: Date.now(),
         });

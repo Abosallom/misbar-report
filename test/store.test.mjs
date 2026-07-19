@@ -455,7 +455,7 @@ test('ephemeral fallback when localStorage is fully denied', () => {
 test('first run seeds grafana defaults (enabled false, panelId 49) and null cachedTracker', () => {
   fresh();
   const s = store.loadSettings();
-  assert.deepEqual(s.grafana, { baseUrl: '', accessToken: '', panelId: 49, enabled: false, dataKey: '' });
+  assert.deepEqual(s.grafana, { baseUrl: 'https://elab.seha.sa/hpapm', accessToken: '', panelId: 49, enabled: false, dataKey: '' });
   assert.equal(s.grafana.enabled, false);
   assert.equal(s.grafana.panelId, 49);
   assert.equal(s.cachedTracker, null);
@@ -477,7 +477,7 @@ test('load backfills missing grafana/cachedTracker on an old (v1) stored doc dur
 
   const s = store.loadSettings();
   assert.equal(s.schemaVersion, 2); // v1 → v2 migration stamps the bump
-  assert.deepEqual(s.grafana, { baseUrl: '', accessToken: '', panelId: 49, enabled: false, dataKey: '' });
+  assert.deepEqual(s.grafana, { baseUrl: 'https://elab.seha.sa/hpapm', accessToken: '', panelId: 49, enabled: false, dataKey: '' });
   assert.equal(s.cachedTracker, null);
   // Existing fields untouched.
   assert.equal(s.snapshot.numbers.completed, 400);

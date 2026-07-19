@@ -119,7 +119,16 @@ function migrateSnapshotShape(doc) {
       },
     };
   }
-  if (!isPlainObject(doc.grafana)) doc.grafana = { ...GRAFANA_SEED };
+  if (!isPlainObject(doc.grafana)) {
+    doc.grafana = { ...GRAFANA_SEED };
+  } else {
+    // Backfill gaps in stored configs: an empty baseUrl is never useful (the
+    // settings field's placeholder made it easy to leave blank), and older docs
+    // predate panelId/dataKey.
+    if (!doc.grafana.baseUrl) doc.grafana.baseUrl = GRAFANA_SEED.baseUrl;
+    if (doc.grafana.panelId == null) doc.grafana.panelId = GRAFANA_SEED.panelId;
+    if (typeof doc.grafana.dataKey !== 'string') doc.grafana.dataKey = '';
+  }
   if (!('cachedTracker' in doc)) doc.cachedTracker = null;
   return doc;
 }

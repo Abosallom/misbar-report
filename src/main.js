@@ -70,7 +70,11 @@ function readLocalSettings() {
           : { ...seed.historicalConstants.cancelledByMonth },
       },
       snapshot: migrateLocalSnapshot(s.snapshot, seed.snapshot),
-      grafana: { ...seed.grafana, ...(s.grafana || {}) },
+      grafana: (() => {
+        const g = { ...seed.grafana, ...(s.grafana || {}) };
+        if (!g.baseUrl) g.baseUrl = seed.grafana.baseUrl; // empty URL is never useful
+        return g;
+      })(),
       cachedTracker: s.cachedTracker || null,
       scorecard: Array.isArray(s.scorecard) && s.scorecard.length ? s.scorecard : seed.scorecard,
     };

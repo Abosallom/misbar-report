@@ -1,8 +1,9 @@
 // seeds/defaults.js — first-run settings seeds (no PHI).
 
-// Live Grafana source: disabled until the user enters the base URL + public-dashboard
-// token in Settings (never committed here — this repo is public).
-export const GRAFANA_SEED = { baseUrl: '', accessToken: '', panelId: 49, enabled: false, dataKey: '' };
+// Live Grafana source: the base URL is prefilled (it already appears in this
+// public repo's exporter script — no new exposure); the token and data key are
+// entered once in Settings and never committed here.
+export const GRAFANA_SEED = { baseUrl: 'https://elab.seha.sa/hpapm', accessToken: '', panelId: 49, enabled: false, dataKey: '' };
 //
 // cancelledByMonth: MANUAL additive constants only (workbook "Prompt for Next
 // Report" C6). The engine now computes cancelled(m) = countedFromCsv(m) +
