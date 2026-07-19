@@ -1,0 +1,132 @@
+// test/assertions.js — golden assertions shared by node:test and the browser
+// selftest page. Pure ES module: no node:test, no DOM. Give it a compute fn and
+// it returns { pass, failures[] } where each failure is {name, expected, actual}.
+
+import { GOLDEN_ORDERS } from './fixtures/golden-orders.js';
+import { TAT_LOOKUP } from '../src/seeds/tat-lookup.js';
+import {
+  GOLDEN_EXPECTED, GOLDEN_ASOF, GOLDEN_CANCELLED_BY_MONTH, GOLDEN_PREV_COMPLETED,
+} from './fixtures/golden-expected.js';
+
+/** Options for the published golden run. */
+export function goldenOpts() {
+  return {
+    asOf: GOLDEN_ASOF,
+    cancelledByMonth: { ...GOLDEN_CANCELLED_BY_MONTH },
+    tatFallbackFromCsv: true,
+    prevCompleted: GOLDEN_PREV_COMPLETED,
+  };
+}
+
+function isObj(x) { return x !== null && typeof x === 'object'; }
+
+/** Deep structural equality for the plain data the engine emits. */
+export function deepEqual(a, b) {
+  if (a === b) return true;
+  if (typeof a === 'number' && typeof b === 'number') return Object.is(a, b);
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    return a.every((v, i) => deepEqual(v, b[i]));
+  }
+  if (isObj(a) && isObj(b)) {
+    const ka = Object.keys(a), kb = Object.keys(b);
+    if (ka.length !== kb.length) return false;
+    return ka.every((k) => deepEqual(a[k], b[k]));
+  }
+  return false;
+}
+
+/**
+ * Run every golden assertion against a compute implementation.
+ * @param {(rows:any[], tatLookup:object, opts:object)=>object} computeFn
+ * @returns {{pass:boolean, failures:{name:string, expected:any, actual:any}[], checks:number}}
+ */
+export function runGoldenAssertions(computeFn) {
+  const failures = [];
+  let checks = 0;
+  const check = (name, expected, actual) => {
+    checks++;
+    if (!deepEqual(expected, actual)) failures.push({ name, expected, actual });
+  };
+
+  let out;
+  try {
+    out = computeFn(GOLDEN_ORDERS, TAT_LOOKUP, goldenOpts());
+  } catch (err) {
+    return { pass: false, checks: 1, failures: [{ name: 'compute() threw', expected: 'EngineOutput', actual: String(err && err.stack || err) }] };
+  }
+  const G = GOLDEN_EXPECTED;
+
+  // 1. totals
+  check('totals', G.totals, out.totals);
+
+  // 2. funnel
+  check('funnel', G.funnel, out.funnel);
+
+  // 3. buckets
+  check('buckets', G.buckets, out.buckets);
+
+  // 4. monthly
+  check('monthly[] length', G.monthly.length, out.monthly.length);
+  for (const exp of G.monthly) {
+    const got = (out.monthly || []).find((m) => m.month === exp.month);
+    check(`monthly ${exp.month}`, exp, got);
+  }
+  // derived monthly totals
+  const mt = (out.monthly || []).reduce(
+    (a, m) => ({
+      orders: a.orders + m.orders,
+      results: a.results + m.results,
+      incomplete: a.incomplete + m.incomplete,
+    }),
+    { orders: 0, results: 0, incomplete: 0 },
+  );
+  check('monthly totals: orders', G.monthlyTotals.orders, mt.orders);
+  check('monthly totals: results', G.monthlyTotals.results, mt.results);
+  check('monthly totals: incomplete', G.monthlyTotals.incomplete, mt.incomplete);
+  check(
+    'monthly totals: completionPct',
+    G.monthlyTotals.completionPct,
+    mt.orders ? Math.round((mt.results / mt.orders) * 1000) / 10 : null,
+  );
+  check('cancelledNote', G.cancelledNote, out.cancelledNote);
+
+  // 5. turnaround
+  check('turnaround.overallActual', G.turnaround.overallActual, out.turnaround.overallActual);
+  check('turnaround.overallExpected', G.turnaround.overallExpected, out.turnaround.overallExpected);
+  check('turnaround.measuredCount', G.turnaround.measuredCount, out.turnaround.measuredCount);
+  check('turnaround.perMonth[] length', G.turnaround.perMonth.length, (out.turnaround.perMonth || []).length);
+  for (const exp of G.turnaround.perMonth) {
+    const got = (out.turnaround.perMonth || []).find((m) => m.month === exp.month);
+    check(`turnaround ${exp.month}`, exp, got);
+  }
+
+  // 6. byLab
+  check('byLab (ordered array)', G.byLab, out.byLab);
+  const lt = (out.byLab || []).reduce(
+    (a, l) => ({ total: a.total + l.total, awaitingResult: a.awaitingResult + l.awaitingResult, late: a.late + l.late }),
+    { total: 0, awaitingResult: 0, late: 0 },
+  );
+  check('byLab totals: total', G.byLabTotals.total, lt.total);
+  check('byLab totals: awaitingResult', G.byLabTotals.awaitingResult, lt.awaitingResult);
+  check('byLab totals: late', G.byLabTotals.late, lt.late);
+  check(
+    'byLab totals: latePct',
+    G.byLabTotals.latePct,
+    lt.awaitingResult ? Math.round((lt.late / lt.awaitingResult) * 1000) / 10 : 0,
+  );
+
+  // 7. byTest (exact ordered array + sum)
+  check('byTest (ordered array)', G.byTest, out.byTest);
+  check('byTest sum', G.byTestSum, (out.byTest || []).reduce((s, t) => s + t.late, 0));
+
+  // 8. unmatchedTests
+  check('unmatchedTests', G.unmatchedTests, out.unmatchedTests);
+
+  // 9. deltas
+  check('deltas', G.deltas, out.deltas);
+
+  return { pass: failures.length === 0, failures, checks };
+}
+
+export default runGoldenAssertions;

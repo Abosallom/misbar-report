@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Misbar engine · self-test</title>
+  <style>
+    :root { color-scheme: light dark; --ok: #1a7f37; --bad: #cf222e; --bd: #8884; }
+    body { font: 15px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 2rem; }
+    h1 { font-size: 1.25rem; margin: 0 0 .25rem; }
+    #summary { font-size: 1.1rem; font-weight: 600; padding: .6rem .9rem; border-radius: .5rem; margin: 1rem 0; }
+    #summary.ok { background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok); }
+    #summary.bad { background: color-mix(in srgb, var(--bad) 15%, transparent); color: var(--bad); }
+    table { border-collapse: collapse; width: 100%; max-width: 1100px; }
+    th, td { border: 1px solid var(--bd); padding: .35rem .6rem; text-align: left; vertical-align: top; }
+    th { background: #8881; }
+    td.status { font-weight: 700; white-space: nowrap; }
+    td.status.ok { color: var(--ok); } td.status.bad { color: var(--bad); }
+    code { font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word; }
+    .muted { opacity: .7; }
+  </style>
+</head>
+<body>
+  <h1>Misbar computation engine — golden self-test</h1>
+  <div class="muted">Reproduces the published 09-07-2026 KAMC Order-Summary report from <code>test/fixtures/golden-orders.js</code>.</div>
+  <div id="summary">Running…</div>
+  <table id="results" hidden>
+    <thead><tr><th>#</th><th>Check</th><th>Status</th><th>Expected</th><th>Actual</th></tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <script type="module">
+    import { compute } from '../src/engine/engine.js';
+    import { runGoldenAssertions } from './assertions.js';
+    import { GOLDEN_EXPECTED } from './fixtures/golden-expected.js';
+
+    const summary = document.getElementById('summary');
+    const table = document.getElementById('results');
+    const tbody = table.querySelector('tbody');
+    const fmt = (v) => JSON.stringify(v, null, 1);
+
+    try {
+      const { pass, failures, checks } = runGoldenAssertions(compute);
+      summary.textContent = pass
+        ? `PASS — all ${checks} golden checks reproduce exactly`
+        : `FAIL — ${failures.length} of ${checks} checks failed`;
+      summary.className = pass ? 'ok' : 'bad';
+
+      table.hidden = false;
+      // Show every top-level section as an at-a-glance PASS row, plus any failures.
+      const failByName = new Map(failures.map((f) => [f.name, f]));
+      const sections = [
+        ['totals', GOLDEN_EXPECTED.totals], ['funnel', GOLDEN_EXPECTED.funnel],
+        ['buckets', GOLDEN_EXPECTED.buckets], ['cancelledNote', GOLDEN_EXPECTED.cancelledNote],
+        ['byLab (ordered array)', GOLDEN_EXPECTED.byLab], ['byTest (ordered array)', GOLDEN_EXPECTED.byTest],
+        ['byTest sum', GOLDEN_EXPECTED.byTestSum], ['unmatchedTests', GOLDEN_EXPECTED.unmatchedTests],
+        ['deltas', GOLDEN_EXPECTED.deltas],
+      ];
+      let n = 0;
+      const addRow = (name, ok, expected, actual) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${++n}</td><td>${name}</td>`
+          + `<td class="status ${ok ? 'ok' : 'bad'}">${ok ? 'PASS' : 'FAIL'}</td>`
+          + `<td><code>${ok ? '' : fmt(expected)}</code></td>`
+          + `<td><code>${ok ? '' : fmt(actual)}</code></td>`;
+        tbody.appendChild(tr);
+      };
+      for (const [name, exp] of sections) {
+        const f = failByName.get(name);
+        addRow(name, !f, exp, f ? f.actual : exp);
+        failByName.delete(name);
+      }
+      // any remaining failures (monthly/turnaround per-row etc.)
+      for (const f of failByName.values()) addRow(f.name, false, f.expected, f.actual);
+    } catch (err) {
+      summary.textContent = `ERROR — ${err && err.message || err}`;
+      summary.className = 'bad';
+      const pre = document.createElement('pre');
+      pre.innerHTML = `<code>${(err && err.stack) || err}</code>`;
+      document.body.appendChild(pre);
+    }
+  </script>
+</body>
+</html>
