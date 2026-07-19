@@ -4,7 +4,8 @@
 // (÷914400) from the original deck OOXML (تقرير مسبار 09072026.pptx).
 // SIX-slide deck (both variants): cover · execFunnel · monthly · compliance · action · thanks.
 // The variant no longer changes slide PRESENCE — it changes slide-5 (action) task ROWS:
-// nupco shows tasksCurrent only; internal appends tasksInternal. No slide is internalOnly.
+// nupco shows tasksCurrent (non-لين actions); internal shows tasksInternal ONLY (لين-category
+// actions — user decision 2026-07-19). No slide is internalOnly.
 import { COLORS as C, GEOM } from '../theme.js';
 
 // Colors present in the deck charts/cards but not in theme.js:
@@ -344,7 +345,8 @@ const crNote = (x, hidden) => text(
 
 function buildAction(m, variant) {
   // Block 1 — tasks table. nupco = current only; internal appends the internal rows.
-  const taskRows = variant === 'nupco' ? m.tasksCurrent : [...m.tasksCurrent, ...m.tasksInternal];
+  // Internal report = لين-category actions only; NUPCO = the remaining actions.
+  const taskRows = variant === 'nupco' ? m.tasksCurrent : m.tasksInternal;
   const n = taskRows.length;
   const CAP = 15;
   const shown = Math.min(n, CAP);
