@@ -277,11 +277,40 @@ export async function render(container, ctx) {
   const grafanaBtn = grafanaReady ? el('button', {
     class: 'btn btn--primary', text: STR.upload.grafanaFetch, onClick: fetchLive,
   }) : null;
+  const freshnessEl = grafanaReady ? el('p', { class: 'small muted', style: 'margin:8px 0 0' }) : null;
   const grafanaBar = grafanaReady ? el('div', { class: 'card' }, [
     el('div', { class: 'card__title', text: STR.upload.grafanaTitle }),
     grafanaBtn,
     el('span', { class: 'small muted', style: 'margin-inline-start:10px', text: STR.upload.grafanaHint }),
+    freshnessEl,
   ]) : null;
+
+  // Surface the available snapshot's age BEFORE the user fetches: the exporter
+  // publishes a tiny plaintext meta file next to the encrypted snapshot.
+  async function paintFreshness() {
+    if (!freshnessEl) return;
+    try {
+      const r = await fetch('data/kamc-live.meta.json', { cache: 'no-store' });
+      if (!r.ok) return;
+      const meta = await r.json();
+      const at = new Date(meta.fetchedAt);
+      if (Number.isNaN(at.getTime())) return;
+      const now = new Date();
+      const sameDay = at.toDateString() === now.toDateString();
+      const when = (sameDay ? '' : `${String(at.getDate()).padStart(2, '0')}/${String(at.getMonth() + 1).padStart(2, '0')} `) + fmtHHMM(meta.fetchedAt);
+      const ageH = (now - at) / 3600000;
+      if (ageH > 2) {
+        freshnessEl.textContent = STR.upload.snapshotStale.replace('{t}', when);
+        freshnessEl.style.color = '#B45309';
+        freshnessEl.style.fontWeight = '600';
+      } else {
+        freshnessEl.textContent = STR.upload.snapshotFreshness.replace('{t}', when);
+        freshnessEl.style.color = '';
+        freshnessEl.style.fontWeight = '';
+      }
+    } catch { /* offline or file absent — leave the line empty */ }
+  }
+  paintFreshness();
 
   const summaryHost = el('div');
   const unmatchedHost = el('div');

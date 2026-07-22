@@ -39,6 +39,8 @@ export const STR = {
     grafanaFail: 'فشل السحب المباشر',
     grafanaCors: 'تعذر الاتصال بـ Grafana من هذا النطاق (CORS) — اطلب من مسؤول Grafana السماح للنطاق https://abosallom.github.io أو استخدم ملف CSV',
     grafanaSnapshotOk: 'تم تحميل لقطة البيانات ({n} سجلاً، محدثة {t})',
+    snapshotFreshness: 'آخر تحديث متوفر للبيانات: {t}',
+    snapshotStale: '⚠ البيانات غير محدثة (آخر تحديث {t}) — تأكد أن جهاز التصدير (الماك) يعمل وغير مغلق',
     grafanaSnapshotName: 'Grafana (لقطة)',
     grafanaSourceName: 'Grafana (مباشر)',
     cachedTrackerName: 'المتتبع المحفوظ',
