@@ -1,8 +1,8 @@
 // ui/screen-review.js — review/edit report content with a live slide preview (Track E).
-import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-07-22.9';
-import { el, editableTable, textareaField, toast } from './components.js?v=v2026-07-22.9';
-import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-07-22.9';
-import { autoDraft } from '../model/drafts.js?v=v2026-07-22.9';
+import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-07-22.10';
+import { el, editableTable, textareaField, toast } from './components.js?v=v2026-07-22.10';
+import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-07-22.10';
+import { autoDraft } from '../model/drafts.js?v=v2026-07-22.10';
 
 /* small local module helpers (kept local to avoid cross-screen coupling) */
 async function tryImport(path) { try { return await import(path); } catch { return null; } }
@@ -238,9 +238,9 @@ export async function render(container, ctx) {
   async function renderPreview() {
     const token = ++renderToken;
     model.reportDate = state.reportDate;
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-07-22.9');
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-07-22.10');
     const buildSpec = pickFn(specMod, ['buildSpec', 'build', 'makeSpec', 'toSpec']);
-    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-07-22.9');
+    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-07-22.10');
     const renderFn = pickFn(rendMod, ['renderSpec', 'renderSlides', 'renderHtml', 'render']);
 
     if (!buildSpec || !renderFn) {
@@ -592,7 +592,7 @@ export async function render(container, ctx) {
     el('summary', { class: 'card__title', style: 'cursor:pointer', text: STR.review.labelsCardTitle }),
   ]);
   (async () => {
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-07-22.9');
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-07-22.10');
     const LABEL_NAMES = specMod && specMod.LABEL_NAMES;
     const DEFAULT_LABELS = (specMod && specMod.DEFAULT_LABELS) || {};
     if (!LABEL_NAMES || typeof LABEL_NAMES !== 'object') {
