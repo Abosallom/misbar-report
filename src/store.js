@@ -14,7 +14,9 @@
 import { SETTINGS_KEY } from './contracts.js';
 import { TAT_LOOKUP } from './seeds/tat-lookup.js';
 import { SCORECARD_SEED } from './seeds/scorecard.js';
-import { HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED, GRAFANA_SEED } from './seeds/defaults.js';
+import {
+  HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED, GRAFANA_SEED, REPORT_OPTIONS_SEED,
+} from './seeds/defaults.js';
 
 export const SCHEMA_VERSION = 2;
 
@@ -48,6 +50,31 @@ function isPlainObject(v) {
   return v !== null && typeof v === 'object' && !Array.isArray(v);
 }
 
+/**
+ * In-place backfill of doc.reportOptions from REPORT_OPTIONS_SEED. A missing
+ * reportOptions is deep-copied from the seed; a partial one gets any missing
+ * subkeys (including slide/card keys added in future versions) filled with their
+ * seed default. Present user values (any boolean, any labels map) are preserved.
+ */
+function backfillReportOptions(doc) {
+  const seed = REPORT_OPTIONS_SEED;
+  if (!isPlainObject(doc.reportOptions)) {
+    doc.reportOptions = clone(seed);
+    return;
+  }
+  const ro = doc.reportOptions;
+  if (typeof ro.excludeNoTat !== 'boolean') ro.excludeNoTat = seed.excludeNoTat;
+  if (!isPlainObject(ro.slides)) ro.slides = { ...seed.slides };
+  else for (const k of Object.keys(seed.slides)) {
+    if (typeof ro.slides[k] !== 'boolean') ro.slides[k] = seed.slides[k];
+  }
+  if (!isPlainObject(ro.kpiCards)) ro.kpiCards = { ...seed.kpiCards };
+  else for (const k of Object.keys(seed.kpiCards)) {
+    if (typeof ro.kpiCards[k] !== 'boolean') ro.kpiCards[k] = seed.kpiCards[k];
+  }
+  if (!isPlainObject(ro.labels)) ro.labels = {};
+}
+
 /** Build the first-run document straight from the frozen seeds. */
 function buildSeedDoc() {
   return {
@@ -61,6 +88,7 @@ function buildSeedDoc() {
     },
     snapshot: clone(SNAPSHOT_SEED), // deep clone: SNAPSHOT_SEED.numbers is nested
     grafana: { ...GRAFANA_SEED },
+    reportOptions: clone(REPORT_OPTIONS_SEED), // deep clone: nested slides/kpiCards/labels
     cachedTracker: null,
   };
 }
@@ -130,6 +158,7 @@ function migrateSnapshotShape(doc) {
     if (typeof doc.grafana.dataKey !== 'string') doc.grafana.dataKey = '';
   }
   if (!('cachedTracker' in doc)) doc.cachedTracker = null;
+  backfillReportOptions(doc); // add reportOptions + any new slide/card subkeys
   return doc;
 }
 
@@ -351,6 +380,30 @@ function validateImport(doc) {
       }
     }
   }
+  if ('reportOptions' in doc) {
+    const ro = doc.reportOptions;
+    if (!isPlainObject(ro)) {
+      throw new Error('حقل reportOptions غير صالح: يجب أن يكون كائناً.');
+    }
+    // excludeNoTat and the slide/card flags are coerce-tolerant (normalized to
+    // booleans in pickImportKeys); only the container shapes are enforced here.
+    if ('slides' in ro && !isPlainObject(ro.slides)) {
+      throw new Error('حقل reportOptions.slides غير صالح: يجب أن يكون كائناً.');
+    }
+    if ('kpiCards' in ro && !isPlainObject(ro.kpiCards)) {
+      throw new Error('حقل reportOptions.kpiCards غير صالح: يجب أن يكون كائناً.');
+    }
+    if ('labels' in ro) {
+      if (!isPlainObject(ro.labels)) {
+        throw new Error('حقل reportOptions.labels غير صالح: يجب أن يكون كائناً.');
+      }
+      for (const [k, v] of Object.entries(ro.labels)) {
+        if (typeof v !== 'string') {
+          throw new Error(`قيمة غير نصية في reportOptions.labels: "${k}".`);
+        }
+      }
+    }
+  }
   // Element-level checks: a malformed backup must fail here, not crash the
   // settings screen or report generation later.
   const finiteMap = (m, label) => {
@@ -384,7 +437,14 @@ function validateImport(doc) {
 
 // Only these top-level keys may ever be persisted — the "no PHI in storage"
 // invariant depends on unknown keys being discarded before the merge.
-const IMPORT_KEYS = ['schemaVersion', 'tatLookup', 'displayNames', 'scorecard', 'historicalConstants', 'snapshot', 'grafana', 'cachedTracker'];
+const IMPORT_KEYS = ['schemaVersion', 'tatLookup', 'displayNames', 'scorecard', 'historicalConstants', 'snapshot', 'grafana', 'reportOptions', 'cachedTracker'];
+
+// The exact reportOptions subkeys that may be imported. Unknown slide/card keys
+// are dropped; label values must be strings. Keys mirror REPORT_OPTIONS_SEED.
+const REPORT_OPTION_SLIDE_KEYS = ['execFunnel', 'monthly', 'compliance', 'action'];
+const REPORT_OPTION_CARD_KEYS = [
+  'total', 'awaitingDispatch', 'awaitingResults', 'completed', 'rejected', 'lateNoResult', 'shippedNotReceived',
+];
 
 function pickImportKeys(doc) {
   const out = {};
@@ -421,6 +481,30 @@ function pickImportKeys(doc) {
     if ('enabled' in g) picked.enabled = !!g.enabled; // coerce truthy/falsy → boolean
     if (typeof g.dataKey === 'string') picked.dataKey = g.dataKey; // snapshot decrypt key
     out.grafana = picked;
+  }
+  if (isPlainObject(out.reportOptions)) {
+    // Whitelist exactly {excludeNoTat, slides(4 keys), kpiCards(7 keys), labels}.
+    // Flags coerce to booleans; only string label values survive; unknown
+    // slide/card subkeys are discarded.
+    const ro = out.reportOptions;
+    const picked = {};
+    if ('excludeNoTat' in ro) picked.excludeNoTat = !!ro.excludeNoTat;
+    if (isPlainObject(ro.slides)) {
+      const s = {};
+      for (const k of REPORT_OPTION_SLIDE_KEYS) if (k in ro.slides) s[k] = !!ro.slides[k];
+      picked.slides = s;
+    }
+    if (isPlainObject(ro.kpiCards)) {
+      const c = {};
+      for (const k of REPORT_OPTION_CARD_KEYS) if (k in ro.kpiCards) c[k] = !!ro.kpiCards[k];
+      picked.kpiCards = c;
+    }
+    if (isPlainObject(ro.labels)) {
+      const l = {};
+      for (const [k, v] of Object.entries(ro.labels)) if (typeof v === 'string') l[k] = v;
+      picked.labels = l;
+    }
+    out.reportOptions = picked;
   }
   if ('cachedTracker' in out) {
     const ct = out.cachedTracker;

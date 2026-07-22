@@ -20,6 +20,70 @@ const STATUS_OPTIONS = [
   STR.review.status.late, STR.review.status.inProgress, STR.review.status.closed,
 ];
 
+/* All-on presentation defaults for a doc that predates reportOptions. slides keys
+ * drive the middle-slide toggles; kpiCards mirror the deltas keys; labels overrides
+ * the DEFAULT_LABELS registry (empty = built-in text). See Settings.reportOptions. */
+function defaultReportOptions() {
+  return {
+    excludeNoTat: false,
+    slides: { execFunnel: true, monthly: true, compliance: true, action: true },
+    kpiCards: {
+      total: true, awaitingDispatch: true, awaitingResults: true, completed: true,
+      rejected: true, lateNoResult: true, shippedNotReceived: true,
+      collected: true, dispatched: true, received: true,
+    },
+    labels: {},
+  };
+}
+
+/* Deep-copy settings.reportOptions over the all-on defaults so every key exists. */
+function reportOptionsFromSettings(settings) {
+  const base = defaultReportOptions();
+  const ro = settings && settings.reportOptions;
+  if (!ro || typeof ro !== 'object') return base;
+  return {
+    excludeNoTat: ro.excludeNoTat != null ? !!ro.excludeNoTat : base.excludeNoTat,
+    slides: { ...base.slides, ...(ro.slides || {}) },
+    kpiCards: { ...base.kpiCards, ...(ro.kpiCards || {}) },
+    labels: { ...(ro.labels || {}) },
+  };
+}
+
+// Editable KPI override registry. key === the ReportModel.overrides key build-spec
+// reads as `override ?? computed`; get() pulls the computed value out of EngineOutput.
+const OVERRIDE_FIELDS = [
+  { key: 'total', get: (k) => k.totals && k.totals.total },
+  { key: 'awaitingDispatch', get: (k) => k.buckets && k.buckets.awaitingDispatch },
+  { key: 'awaitingResults', get: (k) => k.buckets && k.buckets.awaitingResults },
+  { key: 'completed', get: (k) => k.buckets && k.buckets.completed },
+  { key: 'rejected', get: (k) => k.buckets && k.buckets.rejected },
+  { key: 'lateNoResult', get: (k) => k.buckets && k.buckets.lateNoResult },
+  { key: 'shippedNotReceived', get: (k) => k.buckets && k.buckets.shippedNotReceived },
+  { key: 'funnel.created', get: (k) => k.funnel && k.funnel.created },
+  { key: 'funnel.collected', get: (k) => k.funnel && k.funnel.collected },
+  { key: 'funnel.dispatched', get: (k) => k.funnel && k.funnel.dispatched },
+  { key: 'funnel.received', get: (k) => k.funnel && k.funnel.received },
+  { key: 'funnel.resulted', get: (k) => k.funnel && k.funnel.resulted },
+  { key: 'cancelledNote', get: (k) => k.cancelledNote },
+  { key: 'turnaround.actual', get: (k) => k.turnaround && k.turnaround.overallActual },
+  { key: 'turnaround.expected', get: (k) => k.turnaround && k.turnaround.overallExpected },
+];
+
+const SLIDE_TOGGLES = [
+  { key: 'execFunnel', label: STR.review.slideToggles.execFunnel },
+  { key: 'monthly', label: STR.review.slideToggles.monthly },
+  { key: 'compliance', label: STR.review.slideToggles.compliance },
+  { key: 'action', label: STR.review.slideToggles.action },
+];
+
+const OV_INPUT_STYLE = 'flex:1;min-width:0;border:1px solid var(--border-dark);border-radius:6px;padding:6px 8px;min-height:36px;background:var(--white);color:var(--slate-900);font-weight:700;text-align:right';
+const OV_BADGE_STYLE = 'align-items:center;background:#FEF3C7;color:#92400E;border:1px solid var(--amber);font-size:.68rem;font-weight:700;padding:1px 8px;border-radius:999px;white-space:nowrap';
+const OV_RESET_STYLE = 'align-items:center;justify-content:center;flex:0 0 auto;width:32px;height:32px;border:1px solid var(--border-dark);background:var(--white);color:var(--slate-600);border-radius:6px;cursor:pointer;font-size:1rem;line-height:1';
+const chipStyle = (on) => 'border-radius:999px;padding:6px 14px;font-weight:700;font-size:.85rem;cursor:pointer;min-height:36px;'
+  + (on
+    ? 'background:var(--navy);color:#fff;border:1px solid var(--navy);'
+    : 'background:var(--white);color:var(--slate-500);border:1px solid var(--border-dark);text-decoration:line-through;opacity:.75;');
+
 /* Assemble an editable ReportModel from engineOutput + tracker + settings. */
 function buildDraftReportModel(state, store) {
   const kpi = state.engineOutput || buildMockEngineOutput(store.settings);
@@ -43,11 +107,11 @@ function buildDraftReportModel(state, store) {
     risks: (tracker.risks || []).map((r) => ({ ...r })),
     scorecard: (store.settings && store.settings.scorecard) || [],
     displayNames: (store.settings && store.settings.displayNames) || {},
+    // Presentation options (persisted defaults) + per-run manual number overrides.
+    reportOptions: reportOptionsFromSettings(store.settings),
+    overrides: {},
   };
 }
-
-// engine emits percentages as 0-100 numbers (1 decimal), not fractions.
-function fmtPct(x) { return x == null ? '—' : (Math.round(x * 10) / 10) + '%'; }
 
 export async function render(container, ctx) {
   const { state, store, navigate } = ctx;
@@ -60,7 +124,22 @@ export async function render(container, ctx) {
     if (s.scorecard) model.scorecard = s.scorecard;
     if (s.displayNames) model.displayNames = s.displayNames;
   }
+  // Backfill for a model drafted by older code (before reportOptions/overrides).
+  if (!model.reportOptions) model.reportOptions = reportOptionsFromSettings(store.settings);
+  if (!model.reportOptions.labels) model.reportOptions.labels = {};
+  if (!model.overrides) model.overrides = {};
   const kpi = model.kpi;
+
+  // Persist reportOptions (slides + labels) to settings as the new defaults.
+  // store.settings is a fresh clone each read → load, mutate, save. Overrides are
+  // per-run and are NEVER written here.
+  const persistReportOptions = () => {
+    try {
+      const doc = store.loadSettings();
+      doc.reportOptions = JSON.parse(JSON.stringify(model.reportOptions));
+      store.saveSettings(doc);
+    } catch (e) { console.warn('[review] persist reportOptions failed', e); }
+  };
 
   /* ---------- Preview machinery ---------- */
   const scaleEl = el('div', { class: 'preview-scale' });
@@ -219,29 +298,120 @@ export async function render(container, ctx) {
     }),
   ]);
 
-  // KPI readout (read-only)
-  const b = kpi.buckets || {};
-  const ta = kpi.turnaround || {};
-  const delta = (kpi.deltas && kpi.deltas.completed) || 0;
-  const kpiItems = [
-    { label: STR.review.kpi.total, value: (kpi.totals && kpi.totals.total) ?? '—' },
-    { label: STR.review.kpi.completed, value: b.completed ?? '—', delta: delta > 0 ? '+' + delta : '' },
-    { label: STR.review.kpi.awaitingResults, value: b.awaitingResults ?? '—' },
-    { label: STR.review.kpi.rejected, value: b.rejected ?? '—' },
-    { label: STR.review.kpi.late, value: b.lateNoResult ?? '—' },
-    { label: STR.review.kpi.latePct, value: fmtPct(b.latePct) },
-    { label: STR.review.kpi.turnaround, value: `${ta.overallActual ?? '—'} / ${ta.overallExpected ?? '—'} ${STR.review.kpi.days}` },
-  ];
-  const kpiCard = el('div', { class: 'card' }, [
-    el('div', { class: 'card__title', text: STR.review.kpiTitle }),
-    el('div', { class: 'kpi-list' }, kpiItems.map((k) => el('div', { class: 'kpi-item' }, [
-      el('div', { class: 'kpi-item__label', text: k.label }),
-      el('div', { class: 'kpi-item__value' }, [
-        document.createTextNode(String(k.value)),
-        k.delta ? el('span', { class: 'delta', text: k.delta }) : null,
+  // KPI overrides (editable). Each row prefills the computed value; editing sets a
+  // per-run override (model.overrides[key]) + shows a 'يدوي' badge + a ↺ reset. Grid
+  // reuses .kpi-list (two columns desktop, single column ≤420px).
+  function overrideRow(field) {
+    const label = STR.review.overrideLabels[field.key] || field.key;
+    const computed = field.get(kpi);
+    const compStr = computed == null ? '' : String(computed);
+    const hasOv = Object.prototype.hasOwnProperty.call(model.overrides, field.key);
+
+    const input = el('input', {
+      type: 'number', step: 'any', inputmode: 'decimal', style: OV_INPUT_STYLE,
+      value: hasOv ? String(model.overrides[field.key]) : compStr,
+    });
+    const badge = el('span', { text: STR.review.manualBadge, style: OV_BADGE_STYLE });
+    const reset = el('button', { type: 'button', title: STR.review.resetOverride, text: '↺', style: OV_RESET_STYLE });
+
+    const paintState = (on) => {
+      badge.style.display = on ? 'inline-flex' : 'none';
+      reset.style.display = on ? 'inline-flex' : 'none';
+    };
+    input.addEventListener('input', () => {
+      const raw = input.value.trim();
+      const n = Number(raw);
+      if (raw !== '' && Number.isFinite(n)) { model.overrides[field.key] = n; paintState(true); }
+      else { delete model.overrides[field.key]; paintState(false); }
+      schedulePreview();
+    });
+    reset.addEventListener('click', () => {
+      delete model.overrides[field.key];
+      input.value = compStr;
+      paintState(false);
+      schedulePreview();
+    });
+    paintState(hasOv);
+
+    // min-width:0 clamps the grid item's auto-minimum so the reused .kpi-list
+    // `1fr 1fr` columns stay equal — without it the wide number inputs force the
+    // columns past the card and the left column spills under the preview.
+    return el('div', { class: 'kpi-item', style: 'min-width:0' }, [
+      el('div', { style: 'display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:4px' }, [
+        el('span', { class: 'kpi-item__label', text: label }),
+        badge,
       ]),
-    ]))),
+      el('div', { style: 'display:flex;align-items:center;gap:6px' }, [input, reset]),
+    ]);
+  }
+  const kpiCard = el('div', { class: 'card' }, [
+    el('div', { class: 'card__title', text: STR.review.kpiEditTitle }),
+    el('p', { class: 'small muted', style: 'margin:-4px 0 10px', text: STR.review.kpiEditHint }),
+    el('div', { class: 'kpi-list' }, OVERRIDE_FIELDS.map(overrideRow)),
   ]);
+
+  // Slide-toggle chips (bound to reportOptions.slides.*). Toggling updates the model,
+  // persists to settings as the new default, and live-refreshes the preview.
+  function slideChip(t) {
+    const btn = el('button', { type: 'button' });
+    const paint = () => {
+      const on = model.reportOptions.slides[t.key] !== false;
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      btn.textContent = (on ? '✓ ' : '') + t.label;
+      btn.style.cssText = chipStyle(on);
+    };
+    btn.addEventListener('click', () => {
+      model.reportOptions.slides[t.key] = model.reportOptions.slides[t.key] === false;
+      paint();
+      persistReportOptions();
+      schedulePreview();
+    });
+    paint();
+    return btn;
+  }
+  const slideToggleRow = el('div', {
+    class: 'slide-toggles',
+    style: 'display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px',
+  }, [
+    el('span', { class: 'small muted', style: 'margin-inline-end:2px', text: STR.review.slideTogglesTitle }),
+    ...SLIDE_TOGGLES.map(slideChip),
+  ]);
+
+  // Labels editor (collapsible, collapsed by default). One field per LABEL_NAMES key,
+  // placeholder = DEFAULT_LABELS[key], value = reportOptions.labels[key] (empty =
+  // default). Registry lives in build-spec.js — graceful if not exported yet.
+  const labelsHost = el('details', { class: 'card' }, [
+    el('summary', { class: 'card__title', style: 'cursor:pointer', text: STR.review.labelsCardTitle }),
+  ]);
+  (async () => {
+    const specMod = await tryImport('../slidespec/build-spec.js');
+    const LABEL_NAMES = specMod && specMod.LABEL_NAMES;
+    const DEFAULT_LABELS = (specMod && specMod.DEFAULT_LABELS) || {};
+    if (!LABEL_NAMES || typeof LABEL_NAMES !== 'object') {
+      labelsHost.appendChild(el('p', { class: 'small muted', text: STR.review.labelsUnavailable }));
+      return;
+    }
+    const labels = model.reportOptions.labels;
+    labelsHost.appendChild(el('p', { class: 'small muted', style: 'margin:2px 0 10px', text: STR.review.labelsCardHint }));
+    for (const key of Object.keys(LABEL_NAMES)) {
+      const def = DEFAULT_LABELS[key] != null ? String(DEFAULT_LABELS[key]) : '';
+      const input = el('input', { type: 'text', value: labels[key] || '', placeholder: def });
+      input.addEventListener('input', () => {
+        if (input.value.trim() === '') delete labels[key];
+        else labels[key] = input.value;
+        persistReportOptions();
+        schedulePreview();
+      });
+      const restore = el('button', {
+        class: 'btn btn--ghost btn--sm', type: 'button', text: STR.review.restoreDefault,
+        onClick: () => { delete labels[key]; input.value = ''; persistReportOptions(); schedulePreview(); },
+      });
+      labelsHost.appendChild(el('div', { class: 'field' }, [
+        el('label', { text: LABEL_NAMES[key] }),
+        el('div', { style: 'display:flex;gap:8px;align-items:center' }, [input, restore]),
+      ]));
+    }
+  })();
 
   const generateBtn = el('div', { class: 'sticky-actions' }, [
     el('button', {
@@ -260,9 +430,9 @@ export async function render(container, ctx) {
   ]);
 
   const controls = el('div', { class: 'review-controls' }, [
-    dateField, kpiCard, panelsCard, tasksCurrentCard, tasksInternalCard, challengesCard, risksCard, generateBtn,
+    dateField, kpiCard, panelsCard, tasksCurrentCard, tasksInternalCard, challengesCard, risksCard, labelsHost, generateBtn,
   ]);
-  const preview = el('div', { class: 'review-preview' }, [previewFrame]);
+  const preview = el('div', { class: 'review-preview' }, [slideToggleRow, previewFrame]);
 
   const head = el('div', { class: 'screen__head' }, [
     el('h1', { text: STR.review.title }),

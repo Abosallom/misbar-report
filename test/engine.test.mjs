@@ -153,6 +153,53 @@ test('deltas: a lower current value never goes negative (clamped at 0)', () => {
   assert.equal(out.deltas.completed, 0);
 });
 
+// ---- excludeNoTat (drop 'No Match' rows before aggregation) -----------------
+const SYN_TAT = { 'KNOWN TEST': 3 };
+// Four synthetic lines: one matched+resulted, two no-TAT (No Match), one no-TAT
+// but CANCELLED (must survive as cancelled, never treated as No Match).
+function synRows() {
+  return [
+    { orderDate: '2026-07-01', facility: 'Lab A', orderId: '1', lineNo: 1, loinc: 'X', testName: 'KNOWN TEST', collected: '2026-07-01', dispatched: '2026-07-01', received: '2026-07-02', resulted: '2026-07-03', rawStatus: 'Result Available', tatDaysCsv: null },
+    { orderDate: '2026-07-01', facility: 'Lab A', orderId: '2', lineNo: 1, loinc: null, testName: 'MYSTERY A', collected: '2026-07-01', dispatched: '2026-07-01', received: '2026-07-02', resulted: null, rawStatus: 'In Progress', tatDaysCsv: null },
+    { orderDate: '2026-07-01', facility: 'Lab B', orderId: '3', lineNo: 1, loinc: null, testName: 'MYSTERY B', collected: '2026-07-01', dispatched: '2026-07-01', received: '2026-07-02', resulted: null, rawStatus: 'In Progress', tatDaysCsv: '' },
+    { orderDate: '2026-07-01', facility: 'Lab A', orderId: '4', lineNo: 1, loinc: null, testName: 'MYSTERY C', collected: null, dispatched: null, received: null, resulted: null, rawStatus: 'Order Cancelled', tatDaysCsv: null },
+  ];
+}
+
+test('excludeNoTat off (default): golden output unchanged and excludedNoTat = 0', () => {
+  const out = compute(GOLDEN_ORDERS, TAT_LOOKUP, goldenOpts());
+  assert.equal(out.excludedNoTat, 0);
+  assert.deepEqual(out.totals, GOLDEN_EXPECTED.totals);
+  // Explicit false behaves identically to the default (off).
+  const off = compute(GOLDEN_ORDERS, TAT_LOOKUP, { ...goldenOpts(), excludeNoTat: false });
+  assert.equal(off.excludedNoTat, 0);
+  assert.deepEqual(off.totals, GOLDEN_EXPECTED.totals);
+});
+
+test('excludeNoTat on: drops the 2 No-Match rows; totals shrink by 2; excludedNoTat = 2', () => {
+  const off = compute(synRows(), SYN_TAT, { asOf: '2026-07-09' });
+  assert.equal(off.excludedNoTat, 0);
+  assert.deepEqual(off.totals, { lines: 4, cancelledInData: 1, total: 3 });
+
+  const on = compute(synRows(), SYN_TAT, { asOf: '2026-07-09', excludeNoTat: true });
+  assert.equal(on.excludedNoTat, 2);
+  assert.deepEqual(on.totals, { lines: 2, cancelledInData: 1, total: 1 });
+  // Totals shrank by exactly the 2 dropped rows.
+  assert.equal(on.totals.lines, off.totals.lines - 2);
+  assert.equal(on.totals.total, off.totals.total - 2);
+  // unmatchedTests still reports the dropped tests (pre-exclusion warning).
+  assert.ok(on.unmatchedTests.includes('MYSTERY A'));
+  assert.ok(on.unmatchedTests.includes('MYSTERY B'));
+});
+
+test('excludeNoTat never drops a no-TAT CANCELLED row from cancelled counting', () => {
+  const on = compute(synRows(), SYN_TAT, { asOf: '2026-07-09', excludeNoTat: true });
+  // The cancelled MYSTERY C line has no TAT but is 'Cancelled', not 'No Match'.
+  assert.equal(on.totals.cancelledInData, 1);
+  // Only the 2 non-cancelled No-Match rows were excluded.
+  assert.equal(on.excludedNoTat, 2);
+});
+
 // ---- additive cancelled (C6) ------------------------------------------------
 test('manual-only cancelled month surfaces (orders 0, cancelled = manual)', () => {
   // 2026-01 has no orders and no in-data cancels; it appears solely from the

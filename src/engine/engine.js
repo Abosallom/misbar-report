@@ -274,6 +274,10 @@ function buildByTest(nonCancelled, chartTests) {
  * @param {number}  [opts.prevCompleted]      LEGACY baseline for deltas.completed
  *   (used only when opts.snapshot.numbers is absent)
  * @param {boolean} [opts.dedupe=false]       collapse duplicate order-lines first
+ * @param {boolean} [opts.excludeNoTat=false] drop rows whose status is 'No Match'
+ *   (no StdTAT from lookup OR CSV fallback) BEFORE aggregation. Cancelled/rejected
+ *   rows are never 'No Match', so cancelled counting is untouched. The count of
+ *   dropped rows surfaces as EngineOutput.excludedNoTat.
  * @returns {import('../contracts.js').EngineOutput}
  */
 export function compute(rows, tatLookup, opts = {}) {
@@ -285,15 +289,27 @@ export function compute(rows, tatLookup, opts = {}) {
   const cancelledByMonth = opts.cancelledByMonth || {};
 
   const source = opts.dedupe === true ? dedupeRows(rows) : rows;
-  const enriched = source.map((r) => enrichRow(r, tatIndex, asOfMs, opts));
+  // enrichedAll keeps EVERY row; unmatchedTests reporting reads from it so the
+  // upload warning still lists no-TAT tests even when they are excluded below.
+  const enrichedAll = source.map((r) => enrichRow(r, tatIndex, asOfMs, opts));
+
+  // opts.excludeNoTat drops 'No Match' rows (received present, StdTAT null from
+  // both lookup and CSV) before ANY aggregation. Cancelled rows resolve to
+  // 'Cancelled' in the cascade, never 'No Match', so cancelled counting is safe.
+  let enriched = enrichedAll;
+  let excludedNoTat = 0;
+  if (opts.excludeNoTat === true) {
+    enriched = enrichedAll.filter((e) => e.status !== STATUS.NO_MATCH);
+    excludedNoTat = enrichedAll.length - enriched.length;
+  }
 
   const nonCancelled = enriched.filter((e) => !e.cancelled);
   const cancelledEnriched = enriched.filter((e) => e.cancelled);
 
   const totals = {
-    lines: source.length,
+    lines: enriched.length,
     cancelledInData: cancelledEnriched.length,
-    total: source.length - cancelledEnriched.length,
+    total: enriched.length - cancelledEnriched.length,
   };
 
   const funnel = buildFunnel(nonCancelled);
@@ -311,9 +327,11 @@ export function compute(rows, tatLookup, opts = {}) {
   const byLab = buildByLab(nonCancelled);
   const byTest = buildByTest(nonCancelled, chartTests);
 
-  // tests present in the data but absent from the TAT lookup (flagged for review)
+  // tests present in the data but absent from the TAT lookup (flagged for review).
+  // Computed over enrichedAll (pre-exclusion) so excludeNoTat never hides the
+  // upload warning for the very rows it drops.
   const unmatchedSet = new Set();
-  for (const e of enriched) if (!tatIndex.has(normTest(e.testName))) unmatchedSet.add(e.testName);
+  for (const e of enrichedAll) if (!tatIndex.has(normTest(e.testName))) unmatchedSet.add(e.testName);
   const unmatchedTests = [...unmatchedSet].sort();
 
   // Full deltas set (E6): INCREASE of each published number vs the previous
@@ -347,7 +365,7 @@ export function compute(rows, tatLookup, opts = {}) {
 
   return {
     totals, funnel, buckets, monthly, cancelledNote, turnaround,
-    byLab, byTest, unmatchedTests, deltas,
+    byLab, byTest, unmatchedTests, excludedNoTat, deltas,
   };
 }
 

@@ -8,7 +8,9 @@ import assert from 'node:assert/strict';
 import { SETTINGS_KEY } from '../src/contracts.js';
 import { TAT_LOOKUP } from '../src/seeds/tat-lookup.js';
 import { SCORECARD_SEED } from '../src/seeds/scorecard.js';
-import { HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED, GRAFANA_SEED } from '../src/seeds/defaults.js';
+import {
+  HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED, GRAFANA_SEED, REPORT_OPTIONS_SEED,
+} from '../src/seeds/defaults.js';
 import * as store from '../src/store.js';
 
 // ---- localStorage mocks -----------------------------------------------------
@@ -511,6 +513,52 @@ test('updateCachedTracker stores, clears, and enforces the size cap', () => {
   assert.equal(store.loadSettings().cachedTracker, null);
 });
 
+// ---- reportOptions seeding + backfill ---------------------------------------
+test('first run seeds reportOptions from the seed (deep-copied)', () => {
+  fresh();
+  const s = store.loadSettings();
+  assert.deepEqual(s.reportOptions, REPORT_OPTIONS_SEED);
+  // Copied, not the frozen seed object (top-level + nested).
+  assert.notEqual(s.reportOptions, REPORT_OPTIONS_SEED);
+  assert.notEqual(s.reportOptions.slides, REPORT_OPTIONS_SEED.slides);
+  assert.notEqual(s.reportOptions.kpiCards, REPORT_OPTIONS_SEED.kpiCards);
+  assert.equal(s.reportOptions.excludeNoTat, false);
+  assert.equal(s.reportOptions.slides.execFunnel, true);
+  assert.equal(Object.keys(s.reportOptions.kpiCards).length, 7);
+  assert.deepEqual(s.reportOptions.labels, {});
+});
+
+test('load backfills a fully missing reportOptions from the seed', () => {
+  const mock = fresh();
+  mock.setItem(SETTINGS_KEY, JSON.stringify({ schemaVersion: 2, tatLookup: { X: 1 } }));
+  const s = store.loadSettings();
+  assert.deepEqual(s.reportOptions, REPORT_OPTIONS_SEED);
+});
+
+test('load backfills missing reportOptions subkeys while preserving user values', () => {
+  const mock = fresh();
+  mock.setItem(
+    SETTINGS_KEY,
+    JSON.stringify({
+      schemaVersion: 2,
+      tatLookup: { X: 1 },
+      // partial reportOptions: an on excludeNoTat, one slide flag, nothing else.
+      reportOptions: { excludeNoTat: true, slides: { execFunnel: false } },
+    }),
+  );
+  const s = store.loadSettings();
+  // User values preserved.
+  assert.equal(s.reportOptions.excludeNoTat, true);
+  assert.equal(s.reportOptions.slides.execFunnel, false);
+  // Missing slide subkeys backfilled from the seed (future-key resilience).
+  assert.equal(s.reportOptions.slides.monthly, true);
+  assert.equal(s.reportOptions.slides.compliance, true);
+  assert.equal(s.reportOptions.slides.action, true);
+  // Missing kpiCards + labels fully backfilled.
+  assert.deepEqual(s.reportOptions.kpiCards, REPORT_OPTIONS_SEED.kpiCards);
+  assert.deepEqual(s.reportOptions.labels, {});
+});
+
 // ---- import validation for the new shapes -----------------------------------
 test('importSettings validates grafana and cachedTracker shapes', () => {
   fresh();
@@ -599,4 +647,63 @@ test('importSettings strips unknown grafana subkeys before persisting', () => {
   assert.equal(after.grafana.dataKey, 'ab'.repeat(32));
   assert.equal(after.grafana.secretExtra, undefined);
   assert.equal(after.grafana.evil, undefined);
+});
+
+// ---- import validation + whitelisting for reportOptions ---------------------
+test('importSettings validates reportOptions container shapes and label types', () => {
+  fresh();
+  store.loadSettings();
+
+  assert.throws(
+    () => store.importSettings(JSON.stringify({ schemaVersion: 2, reportOptions: [] })),
+    /reportOptions/,
+  );
+  assert.throws(
+    () => store.importSettings(JSON.stringify({ schemaVersion: 2, reportOptions: { slides: 5 } })),
+    /reportOptions\.slides/,
+  );
+  assert.throws(
+    () => store.importSettings(JSON.stringify({ schemaVersion: 2, reportOptions: { kpiCards: 5 } })),
+    /reportOptions\.kpiCards/,
+  );
+  assert.throws(
+    () => store.importSettings(JSON.stringify({ schemaVersion: 2, reportOptions: { labels: 5 } })),
+    /reportOptions\.labels/,
+  );
+  // Non-string label value is rejected.
+  assert.throws(
+    () => store.importSettings(JSON.stringify({ schemaVersion: 2, reportOptions: { labels: { total: 5 } } })),
+    /reportOptions\.labels/,
+  );
+});
+
+test('importSettings whitelists reportOptions keys, coerces flags, drops unknown subkeys', () => {
+  fresh();
+  store.loadSettings();
+
+  store.importSettings(
+    JSON.stringify({
+      schemaVersion: 2,
+      reportOptions: {
+        excludeNoTat: 1, // coerce → true
+        slides: { execFunnel: 0, monthly: 1, bogusSlide: true }, // bogus dropped
+        kpiCards: { total: 0, evilCard: 1 }, // evil dropped
+        labels: { total: 'الإجمالي' }, // string kept
+        unknownSub: { x: 1 }, // whole key dropped
+      },
+    }),
+  );
+
+  const ro = store.loadSettings().reportOptions;
+  assert.equal(ro.excludeNoTat, true); // coerced from 1
+  assert.equal(ro.slides.execFunnel, false); // coerced from 0
+  assert.equal(ro.slides.monthly, true); // coerced from 1
+  assert.equal(ro.slides.bogusSlide, undefined); // unknown slide dropped
+  assert.equal(ro.slides.compliance, true); // untouched seed key survives the merge
+  assert.equal(ro.slides.action, true);
+  assert.equal(ro.kpiCards.total, false); // coerced from 0
+  assert.equal(ro.kpiCards.evilCard, undefined); // unknown card dropped
+  assert.equal(ro.kpiCards.completed, true); // untouched seed key survives
+  assert.equal(ro.labels.total, 'الإجمالي');
+  assert.equal(ro.unknownSub, undefined); // unknown top-level reportOptions key dropped
 });

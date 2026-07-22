@@ -2,19 +2,39 @@
 // Screen-module contract: export render(container, ctx) where
 //   ctx = { state, store, navigate(screenId), rerender() }.
 // Every edit autosaves immediately through ctx.store.saveSettings and flashes a
-// subtle 'تم الحفظ' toast. Six tabs: TAT durations, lab readiness scorecard,
-// historical constants, previous-report snapshot, live source (Grafana +
-// cached-tracker), and backup (export/import).
+// subtle 'تم الحفظ' toast. Seven tabs: TAT durations, lab readiness scorecard,
+// historical constants, previous-report snapshot, report options (exclude no-TAT
+// + included slides/KPI cards), live source (Grafana + cached-tracker), and
+// backup (export/import).
 
-import { SNAPSHOT_SEED } from '../seeds/defaults.js';
+import { SNAPSHOT_SEED, REPORT_OPTIONS_SEED } from '../seeds/defaults.js';
 
 const TABS = [
   { id: 'tat', label: 'مدة الفحوصات' },
   { id: 'labs', label: 'جاهزية المختبرات' },
   { id: 'const', label: 'ثوابت تاريخية' },
   { id: 'snapshot', label: 'لقطة التقرير السابق' },
+  { id: 'report', label: 'خيارات التقرير' },
   { id: 'grafana', label: 'الاتصال المباشر' },
   { id: 'backup', label: 'نسخ احتياطي' },
+];
+
+// Report-options tab field lists. Slide keys toggle the middle slides; card keys
+// mirror EngineOutput.deltas / exec-slide KPI cards. Order is display order.
+const REPORT_SLIDE_FIELDS = [
+  { key: 'execFunnel', label: 'الملخص التنفيذي ورحلة الطلب' },
+  { key: 'monthly', label: 'الطلبات الشهرية' },
+  { key: 'compliance', label: 'مقياس الالتزام' },
+  { key: 'action', label: 'المهام والتحديات' },
+];
+const REPORT_CARD_FIELDS = [
+  { key: 'total', label: 'إجمالي الطلبات' },
+  { key: 'awaitingDispatch', label: 'في انتظار الشحن' },
+  { key: 'awaitingResults', label: 'في انتظار النتائج' },
+  { key: 'completed', label: 'نتائج مكتملة' },
+  { key: 'rejected', label: 'النتائج المرفوضة' },
+  { key: 'lateNoResult', label: 'الطلبات المتأخرة' },
+  { key: 'shippedNotReceived', label: 'شُحنت ولم تُستلم' },
 ];
 
 // Shown after any failed live-connection test. The public GitHub Pages origin the
@@ -158,6 +178,7 @@ export function render(container, ctx) {
     else if (ui.tab === 'labs') renderLabs(panel);
     else if (ui.tab === 'const') renderConst(panel);
     else if (ui.tab === 'snapshot') renderSnapshot(panel);
+    else if (ui.tab === 'report') renderReportOptions(panel);
     else if (ui.tab === 'grafana') renderGrafana(panel);
     else if (ui.tab === 'backup') renderBackup(panel);
   }
@@ -752,7 +773,79 @@ export function render(container, ctx) {
   }
 
   // ===========================================================================
-  // (e) الاتصال المباشر — Grafana live source + cached tracker
+  // (e) خيارات التقرير — report presentation options (reportOptions)
+  // ===========================================================================
+  function renderReportOptions(root) {
+    // Defensive shape guard (the store backfills this on load; this keeps the tab
+    // safe if a caller hands us a bare doc). Reads S.doc live so it stays fresh
+    // after each autosave() reload.
+    function ro() {
+      if (!S.doc.reportOptions || typeof S.doc.reportOptions !== 'object') {
+        S.doc.reportOptions = {
+          excludeNoTat: false,
+          slides: { ...REPORT_OPTIONS_SEED.slides },
+          kpiCards: { ...REPORT_OPTIONS_SEED.kpiCards },
+          labels: {},
+        };
+      }
+      const r = S.doc.reportOptions;
+      if (!r.slides || typeof r.slides !== 'object') r.slides = { ...REPORT_OPTIONS_SEED.slides };
+      if (!r.kpiCards || typeof r.kpiCards !== 'object') r.kpiCards = { ...REPORT_OPTIONS_SEED.kpiCards };
+      if (!r.labels || typeof r.labels !== 'object') r.labels = {};
+      return r;
+    }
+
+    // Checkbox field bound to a getter/setter; autosaves like the sibling tabs.
+    function checkField(labelText, get, set) {
+      const cb = h('input', { type: 'checkbox', class: 'st-check' });
+      cb.checked = !!get();
+      cb.addEventListener('change', () => {
+        set(cb.checked);
+        autosave();
+      });
+      return h('label', { class: 'st-field st-field--check' }, [
+        cb,
+        h('span', { class: 'st-label', text: labelText }),
+      ]);
+    }
+
+    const groupHead = (text) =>
+      h('div', {
+        class: 'st-label',
+        style: { fontSize: '16px', color: 'var(--st-navy)', marginTop: '6px' },
+        text,
+      });
+
+    root.appendChild(
+      h('div', { class: 'st-section' }, [
+        h('p', {
+          class: 'st-help',
+          text: 'تتحكّم هذه الخيارات في محتوى التقرير المُولَّد: استبعاد الصفوف بلا مدة معيارية، والشرائح المضمّنة، وبطاقات المؤشرات الظاهرة.',
+        }),
+        // (a) exclude no-TAT rows
+        checkField(
+          'استبعاد الفحوصات بدون مدة معيارية (TAT) من التقرير',
+          () => ro().excludeNoTat,
+          (v) => { ro().excludeNoTat = v; },
+        ),
+        // (b) included slides
+        groupHead('الشرائح المضمّنة'),
+        ...REPORT_SLIDE_FIELDS.map((f) =>
+          checkField(f.label, () => ro().slides[f.key], (v) => { ro().slides[f.key] = v; })),
+        // (c) KPI cards
+        groupHead('بطاقات المؤشرات'),
+        ...REPORT_CARD_FIELDS.map((f) =>
+          checkField(f.label, () => ro().kpiCards[f.key], (v) => { ro().kpiCards[f.key] = v; })),
+        h('p', {
+          class: 'st-help',
+          text: 'تُحرَّر تسميات الشرائح والبطاقات من شاشة مراجعة التقرير قبل التوليد.',
+        }),
+      ]),
+    );
+  }
+
+  // ===========================================================================
+  // (f) الاتصال المباشر — Grafana live source + cached tracker
   // ===========================================================================
   function renderGrafana(root) {
     function grafana() {
@@ -962,7 +1055,7 @@ export function render(container, ctx) {
   }
 
   // ===========================================================================
-  // (f) نسخ احتياطي — backup / export / import
+  // (g) نسخ احتياطي — backup / export / import
   // ===========================================================================
   function renderBackup(root) {
     const importMsg = h('div', { class: 'st-import-msg' });

@@ -64,6 +64,8 @@ function fallbackModel(state, store) {
     risks: tracker.risks || [],
     scorecard: (store.settings && store.settings.scorecard) || [],
     displayNames: (store.settings && store.settings.displayNames) || {},
+    reportOptions: (store.settings && store.settings.reportOptions) || undefined,
+    overrides: {},
   };
 }
 

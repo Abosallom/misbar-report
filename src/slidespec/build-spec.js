@@ -6,7 +6,123 @@
 // The variant no longer changes slide PRESENCE — it changes slide-5 (action) task ROWS:
 // nupco shows tasksCurrent (non-لين actions); internal shows tasksInternal ONLY (لين-category
 // actions — user decision 2026-07-19). No slide is internalOnly.
+//
+// PRESENTATION OPTIONS (all read from the model, safe defaults when absent):
+//   m.reportOptions.labels[key]   overrides DEFAULT_LABELS static text (byte-stable when absent)
+//   m.reportOptions.slides[key]   toggles the 4 middle slides (cover/thanks always render)
+//   m.reportOptions.kpiCards[key] toggles the 7 exec KPI cards (row geometry repacks)
+//   m.overrides[key]              per-run manual NUMBER overrides (suppresses that delta chip)
 import { COLORS as C, GEOM } from '../theme.js';
+
+// ============================================================================
+// LABELS REGISTRY — user-facing STATIC strings. DEFAULT_LABELS holds the built-in
+// Arabic text (identical to the historic hardcodes, so the default render is
+// byte-stable); LABEL_NAMES holds a short Arabic description per key for the
+// labels-editor UI. Runtime lookup: L(key) = m.reportOptions.labels[key] ?? default.
+// ============================================================================
+export const DEFAULT_LABELS = {
+  // Slide titles (top-bar section headers)
+  titleExec: 'الملخص التنفيذي  •  رحلة الطلب',
+  titleMonthly: 'الطلبات والنتائج الشهرية',
+  titleCompliance: 'مقياس الالتزام',
+  titleAction: 'المهام والتحديات والمخاطر',
+  // Cover + thanks
+  coverTitle: 'تقرير مسبار اليومي',
+  coverSubtitle: 'متابعة تقدم الطلبات وقياس جاهزية المختبرات',
+  coverPreparedBy: 'إعداد: لين لخدمات الأعمال',
+  thanks: 'شكرا لكم',
+  // Exec KPI card labels (keys mirror the deltas/overrides keys)
+  kpiTotal: 'إجمالي الطلبات',
+  kpiAwaitingDispatch: 'في انتظار شحن العينة (المستشفى)',
+  kpiAwaitingResults: 'في انتظار نتائج العينة (المختبر)',
+  kpiCompleted: 'نتائج مكتملة',
+  kpiRejected: 'النتائج المرفوضة',
+  kpiLate: 'الطلبات المتأخرة',
+  kpiShipped: 'شُحنت ولم تُستلم',
+  // Monthly table row labels (also reused as the monthly bar-chart series names)
+  monthlyRowOrders: 'الطلبات',
+  monthlyRowResults: 'النتائج المستلمة',
+  monthlyRowRejected: 'النتائج المرفوضة',
+  monthlyRowIncomplete: 'النتائج غير المكتملة',
+  monthlyRowCompletion: 'نسبة الاكتمال',
+  // Compliance (byLab) table headers
+  compHash: '#',
+  compLab: 'المختبر',
+  compTotal: 'مجموع الطلبات',
+  compAwaiting: 'طلبات مستلمة بانتظار نتيجة',
+  compRejected: 'مرفوضة',
+  compLate: 'الطلبات المتأخرة',
+  compLatePct: 'نسبة الطلبات المتأخرة',
+  // Tasks table headers
+  taskStatus: 'الحالة',
+  taskDue: 'تاريخ الإكتمال',
+  taskOwner: 'المالك',
+  taskResponsible: 'المسؤول',
+  taskAction: 'الإجراء',
+  taskHash: '#',
+  // Support-required panel title
+  supportTitle: 'الدعم المطلوب:',
+  // Funnel column headers
+  funnelStage: 'المرحلة',
+  funnelCount: 'العدد',
+  funnelDesc: 'الوصف',
+  // Chart series / titles that are static text
+  chartActual: 'الفعلي',            // turnaround line — actual series
+  chartExpected: 'المتوقع',         // turnaround line — expected series
+  chartDaysAxis: 'الأيام',          // turnaround line — value-axis title
+  chartLateSeries: 'الطلبات المتأخرة', // late-by-test bar series
+  overallAvgTitle: 'المتوسط العام لزمن الإنجاز', // overall-average card title
+};
+
+export const LABEL_NAMES = {
+  titleExec: 'عنوان شريحة الملخص التنفيذي',
+  titleMonthly: 'عنوان شريحة الطلبات الشهرية',
+  titleCompliance: 'عنوان شريحة مقياس الالتزام',
+  titleAction: 'عنوان شريحة المهام والتحديات',
+  coverTitle: 'عنوان الغلاف',
+  coverSubtitle: 'العنوان الفرعي للغلاف',
+  coverPreparedBy: 'سطر جهة الإعداد في الغلاف',
+  thanks: 'نص شريحة الشكر',
+  kpiTotal: 'بطاقة: إجمالي الطلبات',
+  kpiAwaitingDispatch: 'بطاقة: في انتظار شحن العينة',
+  kpiAwaitingResults: 'بطاقة: في انتظار النتائج',
+  kpiCompleted: 'بطاقة: نتائج مكتملة',
+  kpiRejected: 'بطاقة: النتائج المرفوضة',
+  kpiLate: 'بطاقة: الطلبات المتأخرة',
+  kpiShipped: 'بطاقة: شُحنت ولم تُستلم',
+  monthlyRowOrders: 'صف الجدول الشهري: الطلبات',
+  monthlyRowResults: 'صف الجدول الشهري: النتائج المستلمة',
+  monthlyRowRejected: 'صف الجدول الشهري: النتائج المرفوضة',
+  monthlyRowIncomplete: 'صف الجدول الشهري: النتائج غير المكتملة',
+  monthlyRowCompletion: 'صف الجدول الشهري: نسبة الاكتمال',
+  compHash: 'عمود الالتزام: الرقم',
+  compLab: 'عمود الالتزام: المختبر',
+  compTotal: 'عمود الالتزام: مجموع الطلبات',
+  compAwaiting: 'عمود الالتزام: مستلمة بانتظار نتيجة',
+  compRejected: 'عمود الالتزام: مرفوضة',
+  compLate: 'عمود الالتزام: الطلبات المتأخرة',
+  compLatePct: 'عمود الالتزام: نسبة الطلبات المتأخرة',
+  taskStatus: 'عمود المهام: الحالة',
+  taskDue: 'عمود المهام: تاريخ الإكتمال',
+  taskOwner: 'عمود المهام: المالك',
+  taskResponsible: 'عمود المهام: المسؤول',
+  taskAction: 'عمود المهام: الإجراء',
+  taskHash: 'عمود المهام: الرقم',
+  supportTitle: 'عنوان لوحة الدعم المطلوب',
+  funnelStage: 'ترويسة القمع: المرحلة',
+  funnelCount: 'ترويسة القمع: العدد',
+  funnelDesc: 'ترويسة القمع: الوصف',
+  chartActual: 'سلسلة زمن الإنجاز: الفعلي',
+  chartExpected: 'سلسلة زمن الإنجاز: المتوقع',
+  chartDaysAxis: 'عنوان محور الأيام',
+  chartLateSeries: 'سلسلة الطلبات المتأخرة',
+  overallAvgTitle: 'عنوان بطاقة متوسط زمن الإنجاز',
+};
+
+// Per-model label lookup: user override wins, else the built-in default.
+const labelOf = (m) => (key) => (m.reportOptions?.labels?.[key] ?? DEFAULT_LABELS[key]);
+// Per-model value lookup: a finite manual override wins, else the computed number.
+const valueOf = (m) => (key, computed) => (Number.isFinite(m.overrides?.[key]) ? m.overrides[key] : computed);
 
 // Colors present in the deck charts/cards but not in theme.js:
 const CHART_BLUE = '#4472C4';   // chart1 series "الطلبات" (accent1)
@@ -33,32 +149,38 @@ const pctLab = (n) => (n === 0 ? '0%' : n.toFixed(1) + '%');           // late-%
 const pctMonthly = (n) => (n == null ? '-' : n === 100 ? '100%' : n.toFixed(1) + '%');
 const bullets = (items) => items.map((s) => '•  ' + s).join('\n');
 
-// ---- repeated chrome (top bar, section title, corner tags, footer) ----------
-function chrome(title, pageNo) {
+// ---- repeated chrome (top bar, section title, corner tags, footer border) ---
+// Page numbers are NOT emitted here — buildSpec assigns them AFTER slide filtering
+// so they renumber 1..n over the INCLUDED content slides (see pageFooter).
+function chrome(title) {
   return [
     rect(0, 0, GEOM.slideW, 0.08, C.navy),
     text(0.5, 0.25, 12.3, 0.55, title, 22, { bold: true, color: C.navy, align: 'center', valign: 'middle', rtl: true }),
     text(10.9, 0.3, 2.0, 0.4, 'NUPCO  |  Lean', 10, { color: C.slate500, align: 'right', valign: 'middle' }),
     text(0.4, 0.3, 3.5, 0.4, 'مسبار  •  مدينة الملك عبدالله الطبية', 10, { color: C.slate500, align: 'left', valign: 'middle', rtl: true }),
     rect(0.5, 7.1, 12.3, 0.012, C.border),
-    text(0.5, 7.15, 0.8, 0.3, String(pageNo), 9, { color: C.slate500, align: 'left', valign: 'middle' }),
   ];
 }
+
+// Sequential page-number footer, appended post-filter (y/size are the historic
+// footer coordinates the checkspec locates by).
+const pageFooter = (pageNo) => text(0.5, 7.15, 0.8, 0.3, String(pageNo), 9, { color: C.slate500, align: 'left', valign: 'middle' });
 
 // ============================================================================
 // Slide 1 — Cover
 // ============================================================================
 function buildCover(m) {
+  const L = labelOf(m);
   return {
     id: 'cover', bg: C.navy, elements: [
       rect(0, 0, 0.15, 7.5, C.purple),
       rect(13.15, 0, 0.15, 7.5, C.orange),
       text(8.7, 0.5, 4.0, 0.5, 'NUPCO  |  Lean', 18, { bold: true, color: C.white, align: 'right', valign: 'middle' }),
-      text(0.6, 2.6, 11.9, 1.3, 'تقرير مسبار اليومي', 60, { bold: true, color: C.white, align: 'right', valign: 'middle', rtl: true }),
-      text(0.6, 4.0, 11.9, 0.6, 'متابعة تقدم الطلبات وقياس جاهزية المختبرات', 22, { color: CARD_TITLE, align: 'right', valign: 'middle', rtl: true }),
+      text(0.6, 2.6, 11.9, 1.3, L('coverTitle'), 60, { bold: true, color: C.white, align: 'right', valign: 'middle', rtl: true }),
+      text(0.6, 4.0, 11.9, 0.6, L('coverSubtitle'), 22, { color: CARD_TITLE, align: 'right', valign: 'middle', rtl: true }),
       text(0.6, 5.6, 11.9, 0.5, 'مدينة الملك عبدالله الطبية', 20, { color: C.white, align: 'right', valign: 'middle', rtl: true }),
       text(0.6, 6.15, 11.9, 0.4, 'تاريخ التقرير: ' + fmtDate(m.reportDate), 12, { color: CARD_TITLE, align: 'right', valign: 'middle', rtl: true }),
-      text(0.6, 6.55, 11.9, 0.4, 'إعداد: لين لخدمات الأعمال', 12, { color: CARD_TITLE, align: 'right', valign: 'middle', rtl: true }),
+      text(0.6, 6.55, 11.9, 0.4, L('coverPreparedBy'), 12, { color: CARD_TITLE, align: 'right', valign: 'middle', rtl: true }),
     ],
   };
 }
@@ -66,16 +188,16 @@ function buildCover(m) {
 // ============================================================================
 // Slide 2 — Executive summary + order-journey funnel (merged)
 // ============================================================================
-// KPI card factory. Width is a param (the row packs 7 cards now); height/y and the
-// inner layout proportions are fixed. Number font 34pt — the narrower 1.639in card
-// leaves ~1.40in of ink box, which still fits a 4-char worst case ('1234') at 34pt
-// (was 40pt when cards were 1.903in wide).
-function kpiCard({ x, w, v, vc, lab, sub, ac, delta }) {
+// KPI card factory. Width AND number-font are params (the row repacks for N cards);
+// height/y and the inner layout proportions are fixed. Number font is 34pt for the
+// narrow 7-card layout (1.639in card, ~1.40in ink box fits '1234' at 34pt) and 40pt
+// when the card is >=1.9in wide (the original single-card size).
+function kpiCard({ x, w, nf = 34, v, vc, lab, sub, ac, delta }) {
   const y = 0.93, h = 1.6;
   const els = [
     rect(x, y, w, h, C.white, { radius: 0.05, line: { color: C.border, w: 0.75 } }),
     rect(x + w - 0.063, y, 0.063, h, ac),
-    text(x + 0.08, y + 0.13, w - 0.24, 0.72, v, 34, { bold: true, color: vc, align: 'right', valign: 'middle' }),
+    text(x + 0.08, y + 0.13, w - 0.24, 0.72, v, nf, { bold: true, color: vc, align: 'right', valign: 'middle' }),
     text(x + 0.08, y + 0.9, w - 0.16, 0.42, lab, 11.5, { bold: true, color: C.slate900, align: 'right', valign: 'top', rtl: true }),
   ];
   if (sub) els.push(text(x + 0.08, y + 1.28, w - 0.16, 0.28, sub, 9.5, { color: C.slate500, align: 'right', valign: 'top', rtl: true }));
@@ -86,40 +208,71 @@ function kpiCard({ x, w, v, vc, lab, sub, ac, delta }) {
 // The KPI cards own these metrics' delta chips; the funnel must not duplicate them.
 const KPI_DELTA_KEYS = new Set(['total', 'awaitingDispatch', 'awaitingResults', 'completed', 'rejected', 'lateNoResult', 'shippedNotReceived']);
 
-// KPI row geometry: 7 cards between x 0.500 and 12.818 (span 12.318in), gap 0.140.
-// cardW = (12.318 − 6×0.140) / 7 = 1.639in; step = cardW + gap = 1.779in.
-// Rightmost card (total) at x = 12.818 − 1.639 = 11.179; each card to its left is
-// one step lower. Leftmost (shippedNotReceived) lands at 0.505 (≈ the 0.500 edge).
-const KPI_CARD_W = 1.639;
-const KPI_X = (i) => Math.round((11.179 - i * 1.779) * 1000) / 1000; // i=0 rightmost
+// KPI row geometry (canonical 7-card layout): cards between x 0.500 and 12.818
+// (span 12.318in), gap 0.140. cardW = (12.318 − (N−1)×0.140)/N, capped at the
+// original 1.903in and TRUNCATED to 3 decimals so N=7 reproduces 1.639 exactly.
+// The row is right-aligned: the rightmost card's right edge stays at 12.818 and
+// cards fill leftward (RTL-natural), so dropping a card never shifts the right edge.
+const KPI_SPAN = 12.318, KPI_GAP = 0.140, KPI_CAP_W = 1.903, KPI_RIGHT = 12.818;
+function kpiRowGeom(n) {
+  const N = Math.max(n, 1);
+  let cardW = Math.min((KPI_SPAN - (N - 1) * KPI_GAP) / N, KPI_CAP_W);
+  cardW = Math.floor(cardW * 1000) / 1000;          // N=7 => 1.639 (byte-stable)
+  const step = cardW + KPI_GAP;
+  const xOf = (i) => Math.round((KPI_RIGHT - cardW - i * step) * 1000) / 1000; // i=0 rightmost
+  const numFont = cardW >= 1.9 ? 40 : 34;           // N=7 => 34, fewer cards => 40
+  return { cardW, xOf, numFont };
+}
 
 function buildExecFunnel(m) {
+  const L = labelOf(m);
+  const V = valueOf(m);
   const b = m.kpi.buckets;
   const f = m.kpi.funnel;
   const d = m.kpi.deltas || {};
+  const isOv = (k) => Number.isFinite(m.overrides?.[k]);
 
-  // -- ZONE A: 7 KPI cards in one row, right-to-left (total rightmost). المرفوضة
-  // sits between المكتملة and المتأخرة. Each card shows a green "+N" chip when its
-  // own delta key > 0.
-  const cards = [
-    { x: KPI_X(0), v: String(m.kpi.totals.total), vc: C.blue, lab: 'إجمالي الطلبات', sub: 'يناير – يوليو', ac: C.blue, dk: 'total' },
-    { x: KPI_X(1), v: String(b.awaitingDispatch), vc: C.greenSoft, lab: 'في انتظار شحن العينة (المستشفى)', sub: 'قبل الـ Dispatch', ac: C.greenSoft, dk: 'awaitingDispatch' },
-    { x: KPI_X(2), v: String(b.awaitingResults), vc: C.amber, lab: 'في انتظار نتائج العينة (المختبر)', sub: 'بعد الـ Dispatch', ac: C.amber, dk: 'awaitingResults' },
-    { x: KPI_X(3), v: String(b.completed), vc: C.green, lab: 'نتائج مكتملة', sub: '', ac: C.green, dk: 'completed' },
-    { x: KPI_X(4), v: String(b.rejected), vc: C.redSoft, lab: 'النتائج المرفوضة', sub: 'نتائج مرفوضة من المختبر', ac: C.redSoft, dk: 'rejected' },
-    { x: KPI_X(5), v: String(b.lateNoResult), vc: C.redPure, lab: 'الطلبات المتأخرة', sub: `تمثل ${b.latePct}% من الطلبات`, ac: C.redPure, dk: 'lateNoResult' },
-    { x: KPI_X(6), v: String(b.shippedNotReceived), vc: C.redSoft, lab: 'شُحنت ولم تُستلم', sub: '', ac: C.redSoft, dk: 'shippedNotReceived' },
+  // Displayed late/awaiting values (overrides win). The late-% sublabel is recomputed
+  // from the DISPLAYED numbers when either input was overridden (guard div-by-zero),
+  // else the engine's precomputed b.latePct is used verbatim (byte-stable default).
+  const vLate = V('lateNoResult', b.lateNoResult);
+  const vAwait = V('awaitingResults', b.awaitingResults);
+  const latePctShown = (isOv('lateNoResult') || isOv('awaitingResults'))
+    ? (vAwait > 0 ? Math.round((vLate / vAwait) * 1000) / 10 : 0)
+    : b.latePct;
+
+  // -- ZONE A: KPI cards in one row, right-to-left (total rightmost). المرفوضة sits
+  // between المكتملة and المتأخرة. Card defs in RTL logical order (index 0 = rightmost).
+  // dk = the delta/override/kpiCards key. A card renders unless kpiCards[dk] === false;
+  // its value is the manual override (if finite) else the computed metric, and its green
+  // "+N" chip is suppressed when that value was overridden.
+  const cardDefs = [
+    { v: V('total', m.kpi.totals.total),                vc: C.blue,      lab: L('kpiTotal'),            sub: 'يناير – يوليو',            ac: C.blue,      dk: 'total' },
+    { v: V('awaitingDispatch', b.awaitingDispatch),     vc: C.greenSoft, lab: L('kpiAwaitingDispatch'),  sub: 'قبل الـ Dispatch',         ac: C.greenSoft, dk: 'awaitingDispatch' },
+    { v: vAwait,                                        vc: C.amber,     lab: L('kpiAwaitingResults'),   sub: 'بعد الـ Dispatch',         ac: C.amber,     dk: 'awaitingResults' },
+    { v: V('completed', b.completed),                   vc: C.green,     lab: L('kpiCompleted'),         sub: '',                         ac: C.green,     dk: 'completed' },
+    { v: V('rejected', b.rejected),                     vc: C.redSoft,   lab: L('kpiRejected'),          sub: 'نتائج مرفوضة من المختبر',   ac: C.redSoft,   dk: 'rejected' },
+    { v: vLate,                                         vc: C.redPure,   lab: L('kpiLate'),              sub: `تمثل ${latePctShown}% من الطلبات`, ac: C.redPure, dk: 'lateNoResult' },
+    { v: V('shippedNotReceived', b.shippedNotReceived), vc: C.redSoft,   lab: L('kpiShipped'),           sub: '',                         ac: C.redSoft,   dk: 'shippedNotReceived' },
   ];
-  const kpiEls = cards.flatMap((c) => kpiCard({ ...c, w: KPI_CARD_W, delta: d[c.dk] > 0 ? '+' + d[c.dk] : undefined }));
+  const visible = cardDefs.filter((c) => m.reportOptions?.kpiCards?.[c.dk] !== false);
+  const { cardW, xOf, numFont } = kpiRowGeom(visible.length);
+  const kpiEls = visible.flatMap((c, i) => kpiCard({
+    x: xOf(i), w: cardW, nf: numFont, v: String(c.v), vc: c.vc, lab: c.lab, sub: c.sub, ac: c.ac,
+    delta: (d[c.dk] > 0 && !isOv(c.dk)) ? '+' + d[c.dk] : undefined,
+  }));
 
-  // -- ZONE B: order-journey funnel (from old buildJourney; X unchanged, Y +0.40)
-  const maxV = f.created;
+  // -- ZONE B: order-journey funnel (from old buildJourney; X unchanged, Y +0.40).
+  // Each stage value is the manual override (if finite) else the funnel count; the
+  // "+N" flow chip is suppressed when that stage value was overridden.
+  const created = V('funnel.created', f.created);
+  const maxV = created;
   const rows = [
-    { stage: '1. إنشاء طلب', val: f.created, desc: 'الطلب أُنشئ في مسبار', color: C.navy, key: 'total' },
-    { stage: '2. سحب العينة', val: f.collected, desc: 'العينة مُجمَّعة في KAMC', color: C.blue, key: 'collected' },
-    { stage: '3. شحن العينة', val: f.dispatched, desc: 'العينة شُحنت من قبل المستشفى', color: C.amber, key: 'dispatched' },
-    { stage: '4. إستلام العينة', val: f.received, desc: 'حالة إستلام العينة بقبولها او رفضها', color: C.greenSoft, key: 'received' },
-    { stage: '5. إصدار نتيجة', val: f.resulted, desc: 'نتيجة تحليل العينة', color: C.greenBright, key: 'completed' },
+    { stage: '1. إنشاء طلب', val: created,                          desc: 'الطلب أُنشئ في مسبار',              color: C.navy,        key: 'total',     ov: 'funnel.created' },
+    { stage: '2. سحب العينة', val: V('funnel.collected', f.collected),  desc: 'العينة مُجمَّعة في KAMC',          color: C.blue,        key: 'collected', ov: 'funnel.collected' },
+    { stage: '3. شحن العينة', val: V('funnel.dispatched', f.dispatched), desc: 'العينة شُحنت من قبل المستشفى',      color: C.amber,       key: 'dispatched', ov: 'funnel.dispatched' },
+    { stage: '4. إستلام العينة', val: V('funnel.received', f.received),  desc: 'حالة إستلام العينة بقبولها او رفضها', color: C.greenSoft,  key: 'received',  ov: 'funnel.received' },
+    { stage: '5. إصدار نتيجة', val: V('funnel.resulted', f.resulted),   desc: 'نتيجة تحليل العينة',               color: C.greenBright, key: 'completed', ov: 'funnel.resulted' },
   ];
   const rowY = [3.226, 3.876, 4.526, 5.176, 5.862];
   const accentY = [3.276, 3.926, 4.576, 5.226, 5.912];
@@ -127,13 +280,13 @@ function buildExecFunnel(m) {
   const trackX = 3.92, trackW = 5.0, barH = 0.3;
 
   const els = [
-    ...chrome('الملخص التنفيذي  •  رحلة الطلب', 1),
+    ...chrome(L('titleExec')),
     ...kpiEls,
-    text(10.542, 2.55, 2.271, 0.32, `* ${m.kpi.cancelledNote} طلب ملغي`, 11, { bold: true, color: C.slate600, align: 'right', valign: 'middle', rtl: true }),
+    text(10.542, 2.55, 2.271, 0.32, `* ${V('cancelledNote', m.kpi.cancelledNote)} طلب ملغي`, 11, { bold: true, color: C.slate600, align: 'right', valign: 'middle', rtl: true }),
     // Funnel column labels
-    text(9.05, 2.906, 3.0, 0.3, 'المرحلة', 10, { bold: true, color: C.slate500, align: 'right', valign: 'middle', rtl: true }),
-    text(8.629, 2.906, 1.0, 0.3, 'العدد', 10, { bold: true, color: C.slate500, align: 'center', valign: 'middle', rtl: true }),
-    text(0.05, 2.906, 2.9, 0.3, 'الوصف', 10, { bold: true, color: C.slate500, align: 'right', valign: 'middle', rtl: true }),
+    text(9.05, 2.906, 3.0, 0.3, L('funnelStage'), 10, { bold: true, color: C.slate500, align: 'right', valign: 'middle', rtl: true }),
+    text(8.629, 2.906, 1.0, 0.3, L('funnelCount'), 10, { bold: true, color: C.slate500, align: 'center', valign: 'middle', rtl: true }),
+    text(0.05, 2.906, 2.9, 0.3, L('funnelDesc'), 10, { bold: true, color: C.slate500, align: 'right', valign: 'middle', rtl: true }),
     // Brackets
     rect(12.03, 3.501, 0.02, 1.3, C.slate600),
     text(12.35, 3.824, 0.9, 0.55, 'المستشفى', 12, { bold: true, color: C.slate900, align: 'right', valign: 'middle', rtl: true }),
@@ -141,7 +294,7 @@ function buildExecFunnel(m) {
     text(12.25, 5.496, 0.95, 0.55, 'المختبرات', 12, { bold: true, color: C.slate900, align: 'right', valign: 'middle', rtl: true }),
   ];
   rows.forEach((r, i) => {
-    const fillW = Math.round((r.val / maxV) * trackW * 1000) / 1000;
+    const fillW = Math.round((r.val / (maxV || 1)) * trackW * 1000) / 1000;
     els.push(
       rect(11.97, accentY[i], 0.06, 0.45, r.color),
       text(9.05, rowY[i], 2.85, 0.55, r.stage, 12, { bold: true, color: C.slate900, align: 'right', valign: 'middle', rtl: true }),
@@ -151,8 +304,9 @@ function buildExecFunnel(m) {
       rect(trackX + trackW - fillW, barY[i], fillW, barH, r.color, { radius: 0.03 }),
     );
     // Stage delta chip — de-duplicated: endpoint metrics (total/completed) are shown
-    // on their KPI cards, so the funnel only surfaces intermediate flow deltas.
-    if (d[r.key] > 0 && !KPI_DELTA_KEYS.has(r.key)) {
+    // on their KPI cards, so the funnel only surfaces intermediate flow deltas; and an
+    // overridden stage value suppresses its chip.
+    if (d[r.key] > 0 && !KPI_DELTA_KEYS.has(r.key) && !isOv(r.ov)) {
       els.push(text(7.75, rowY[i], 0.75, 0.55, '+' + d[r.key], 10, { bold: true, color: C.deltaGreen, align: 'center', valign: 'middle' }));
     }
   });
@@ -163,6 +317,8 @@ function buildExecFunnel(m) {
 // Slide 3 — Monthly orders & results
 // ============================================================================
 function buildMonthly(m) {
+  const L = labelOf(m);
+  const V = valueOf(m);
   const mo = m.kpi.monthly;
   const bg = C.bgLight;
   // Month list derived from the data — drives the table headers AND both chart
@@ -178,11 +334,11 @@ function buildMonthly(m) {
   const cTot = pctMonthly(cPct);
   // logical (deck) order: [label, months…, total]; reverse -> visual L->R
   const header = rev(['المؤشر', ...monthLabels, { text: 'الإجمالي', fill: C.navyDark }]);
-  const rowOrders = rev([{ text: 'الطلبات', align: 'right' }, ...mo.map((x) => String(x.orders)), { text: String(oTot), fill: bg, bold: true }]);
-  const rowResults = rev([{ text: 'النتائج المستلمة', align: 'right' }, ...mo.map((x) => String(x.results)), { text: String(rTot), fill: bg, bold: true }]);
-  const rowRejected = rev([{ text: 'النتائج المرفوضة', align: 'right' }, ...mo.map((x) => String(x.rejected || 0)), { text: String(rejTot), fill: bg, bold: true }]);
-  const rowIncomplete = rev([{ text: 'النتائج غير المكتملة', align: 'right' }, ...mo.map((x) => String(x.incomplete)), { text: String(iTot), fill: bg, bold: true }]);
-  const rowCompletion = rev([{ text: 'نسبة الاكتمال', align: 'right' }, ...mo.map((x) => pctMonthly(x.completionPct)), { text: cTot, fill: bg, bold: true }]);
+  const rowOrders = rev([{ text: L('monthlyRowOrders'), align: 'right' }, ...mo.map((x) => String(x.orders)), { text: String(oTot), fill: bg, bold: true }]);
+  const rowResults = rev([{ text: L('monthlyRowResults'), align: 'right' }, ...mo.map((x) => String(x.results)), { text: String(rTot), fill: bg, bold: true }]);
+  const rowRejected = rev([{ text: L('monthlyRowRejected'), align: 'right' }, ...mo.map((x) => String(x.rejected || 0)), { text: String(rejTot), fill: bg, bold: true }]);
+  const rowIncomplete = rev([{ text: L('monthlyRowIncomplete'), align: 'right' }, ...mo.map((x) => String(x.incomplete)), { text: String(iTot), fill: bg, bold: true }]);
+  const rowCompletion = rev([{ text: L('monthlyRowCompletion'), align: 'right' }, ...mo.map((x) => pctMonthly(x.completionPct)), { text: cTot, fill: bg, bold: true }]);
 
   // Column widths: label + N month cols + total over the fixed table width. The
   // canonical 7-month deck keeps its original per-column widths verbatim
@@ -200,13 +356,14 @@ function buildMonthly(m) {
     rows: [header, rowOrders, rowResults, rowRejected, rowIncomplete, rowCompletion],
   };
 
+  // Bar-chart series names reuse the monthly row labels (same metrics, same slide).
   const monthlyChart = {
     t: 'chart', kind: 'colClustered', x: 0.5, y: 1.07, w: 6.0, h: 3.4,
     categories: monthLabels,
     series: [
-      { name: 'الطلبات', values: mo.map((x) => x.orders), color: CHART_BLUE },
-      { name: 'النتائج المستلمة', values: mo.map((x) => x.results), color: C.greenBright },
-      { name: 'النتائج غير المكتملة', values: mo.map((x) => x.incomplete), color: CHART_GRAY },
+      { name: L('monthlyRowOrders'), values: mo.map((x) => x.orders), color: CHART_BLUE },
+      { name: L('monthlyRowResults'), values: mo.map((x) => x.results), color: C.greenBright },
+      { name: L('monthlyRowIncomplete'), values: mo.map((x) => x.incomplete), color: CHART_GRAY },
     ],
     opts: { dataLabels: true, legend: 'bottom' },
   };
@@ -219,21 +376,25 @@ function buildMonthly(m) {
     t: 'chart', kind: 'line', x: 4.139, y: 4.583, w: 9.139, h: 2.389,
     categories: monthLabels,
     series: [
-      { name: 'الفعلي', values: monthKeys.map((k) => t.perMonth.find((p) => p.month === k)?.actual ?? null), color: C.navyChart, marker: 'circle' },
-      { name: 'المتوقع', values: monthKeys.map((k) => t.perMonth.find((p) => p.month === k)?.expected ?? null), color: C.orangeSeries, dash: true, marker: 'diamond' },
+      { name: L('chartActual'), values: monthKeys.map((k) => t.perMonth.find((p) => p.month === k)?.actual ?? null), color: C.navyChart, marker: 'circle' },
+      { name: L('chartExpected'), values: monthKeys.map((k) => t.perMonth.find((p) => p.month === k)?.expected ?? null), color: C.orangeSeries, dash: true, marker: 'diamond' },
     ],
-    opts: { legend: 'bottom', title: 'الأيام', valMin: 0 },
+    opts: { legend: 'bottom', title: L('chartDaysAxis'), valMin: 0 },
   };
 
+  // Overall-average card values honor the turnaround.actual/expected overrides.
+  const ovActual = V('turnaround.actual', t.overallActual);
+  const ovExpected = V('turnaround.expected', t.overallExpected);
+
   const els = [
-    ...chrome('الطلبات والنتائج الشهرية', 2),
+    ...chrome(L('titleMonthly')),
     table,
     monthlyChart,
     turnaroundChart,
     rect(0.5, 4.583, 3.417, 2.389, C.navyChart, { radius: 0.1 }),
-    text(0.5, 4.78, 3.417, 0.5, 'المتوسط العام لزمن الإنجاز', 13, { bold: true, color: CARD_TITLE, align: 'center', valign: 'middle', rtl: true }),
-    text(0.5, 5.4, 3.417, 0.7, `الفعلي: ${t.overallActual.toFixed(1)} يوم`, 24, { bold: true, color: C.white, align: 'center', valign: 'middle', rtl: true }),
-    text(0.5, 6.2, 3.417, 0.7, `المتوقع: ${t.overallExpected.toFixed(1)} يوم`, 24, { bold: true, color: C.peach, align: 'center', valign: 'middle', rtl: true }),
+    text(0.5, 4.78, 3.417, 0.5, L('overallAvgTitle'), 13, { bold: true, color: CARD_TITLE, align: 'center', valign: 'middle', rtl: true }),
+    text(0.5, 5.4, 3.417, 0.7, `الفعلي: ${ovActual.toFixed(1)} يوم`, 24, { bold: true, color: C.white, align: 'center', valign: 'middle', rtl: true }),
+    text(0.5, 6.2, 3.417, 0.7, `المتوقع: ${ovExpected.toFixed(1)} يوم`, 24, { bold: true, color: C.peach, align: 'center', valign: 'middle', rtl: true }),
   ];
   return { id: 'monthly', bg: C.white, elements: els };
 }
@@ -242,11 +403,12 @@ function buildMonthly(m) {
 // Slide 4 — Compliance measure / late orders
 // ============================================================================
 function buildCompliance(m) {
+  const L = labelOf(m);
   const lab = m.kpi.byLab;
   // logical (deck rtl) order per row: [#, lab, total, awaitingResult, rejected, late, late%];
   // reverse -> visual. 'مرفوضة' sits between 'مستلمة بانتظار نتيجة' and 'المتأخرة'.
   const rejTot = lab.reduce((s, r) => s + (r.rejected || 0), 0);
-  const header = rev(['#', 'المختبر', 'مجموع الطلبات', 'طلبات مستلمة بانتظار نتيجة', 'مرفوضة', 'الطلبات المتأخرة', 'نسبة الطلبات المتأخرة']);
+  const header = rev([L('compHash'), L('compLab'), L('compTotal'), L('compAwaiting'), L('compRejected'), L('compLate'), L('compLatePct')]);
   const labRows = lab.map((r, i) => rev([
     String(i + 1),
     { text: r.lab, align: 'right' },
@@ -278,12 +440,12 @@ function buildCompliance(m) {
   const lateChart = {
     t: 'chart', kind: 'barH', x: 0.806, y: 4.5, w: 11.694, h: 2.64,
     categories: m.kpi.byTest.map((x) => m.displayNames[x.testName] || x.testName),
-    series: [{ name: 'الطلبات المتأخرة', values: m.kpi.byTest.map((x) => x.late), color: C.navyBar }],
+    series: [{ name: L('chartLateSeries'), values: m.kpi.byTest.map((x) => x.late), color: C.navyBar }],
     opts: { dataLabels: true, legend: 'none' },
   };
 
   const els = [
-    ...chrome('مقياس الالتزام', 3),
+    ...chrome(L('titleCompliance')),
     labTable,
     rect(0.6, 4.12, 12.3, 0.012, C.border),
     text(0.6, 4.16, 12.3, 0.4, 'تفاصيل الطلبات المتأخرة', 14, { bold: true, color: C.navy, align: 'center', valign: 'middle', rtl: true }),
@@ -299,9 +461,9 @@ const STATUS_FILL = { 'مستمر': { fill: C.taskNavy, color: C.white }, 'مت�
 
 // Full-width tasks table. '#' is renumbered by row index (i+1) — internal rows do
 // NOT keep their own tk.num (which restarts at 1). rowH/fonts are parametrized.
-function taskTable(tasks, { y, rowH, bodySize, headerSize }) {
+function taskTable(tasks, { y, rowH, bodySize, headerSize, L }) {
   // rtl=0 in deck: visual == authored order [الحالة, تاريخ, المالك, المسؤول, الإجراء, #]
-  const header = ['الحالة', 'تاريخ الإكتمال', 'المالك', 'المسؤول', 'الإجراء', '#'];
+  const header = [L('taskStatus'), L('taskDue'), L('taskOwner'), L('taskResponsible'), L('taskAction'), L('taskHash')];
   const rows = tasks.map((tk, i) => {
     const st = STATUS_FILL[tk.status] || { fill: C.slate500, color: C.white };
     return [
@@ -344,6 +506,7 @@ const crNote = (x, hidden) => text(
 );
 
 function buildAction(m, variant) {
+  const L = labelOf(m);
   // Block 1 — tasks table. nupco = current only; internal appends the internal rows.
   // Internal report = لين-category actions only; NUPCO = the remaining actions.
   const taskRows = variant === 'nupco' ? m.tasksCurrent : m.tasksInternal;
@@ -360,10 +523,10 @@ function buildAction(m, variant) {
   const rowH = Math.max(0.18, Math.min(0.30, AREA / (shown + 1)));
   const bodySize = rowH >= 0.26 ? 9.5 : rowH >= 0.21 ? 9 : 8;
   const headerSize = bodySize;
-  const table = taskTable(taskRows.slice(0, shown), { y: 1.15, rowH, bodySize, headerSize });
+  const table = taskTable(taskRows.slice(0, shown), { y: 1.15, rowH, bodySize, headerSize, L });
 
   const els = [
-    ...chrome('المهام والتحديات والمخاطر', 4),
+    ...chrome(L('titleAction')),
     ...tasksSubhead('المهام الحالية', 0.84),
     table,
   ];
@@ -377,7 +540,7 @@ function buildAction(m, variant) {
   // bottom (5.54) stays clear of the subhead dots that end exactly at the table top.
   els.push(
     rect(0.5, 4.62, 12.3, 0.92, C.bgRed, { radius: 0.06 }),
-    text(0.7, 4.66, 11.9, 0.34, 'الدعم المطلوب:', 14, { bold: true, color: C.navy, align: 'right', valign: 'middle', rtl: true }),
+    text(0.7, 4.66, 11.9, 0.34, L('supportTitle'), 14, { bold: true, color: C.navy, align: 'right', valign: 'middle', rtl: true }),
     text(0.9, 5.02, 11.7, 0.50, bullets(m.panels.supportRequired), 10.5, { color: C.slate900, align: 'right', valign: 'top', rtl: true, lineSpacing: 1.0 }),
   );
 
@@ -436,13 +599,14 @@ function buildAction(m, variant) {
 // ============================================================================
 // Slide 6 — Thanks
 // ============================================================================
-function buildThanks() {
+function buildThanks(m) {
+  const L = labelOf(m);
   return {
     id: 'thanks', bg: C.navy, elements: [
       rect(0, 0, 0.15, 7.5, C.purple),
       rect(13.15, 0, 0.15, 7.5, C.orange),
       text(8.7, 0.5, 4.0, 0.5, 'NUPCO  |  Lean', 18, { bold: true, color: C.white, align: 'right', valign: 'middle' }),
-      text(0.895, 3.1, 11.9, 1.3, 'شكرا لكم', 60, { bold: true, color: C.white, align: 'center', valign: 'middle', rtl: true }),
+      text(0.895, 3.1, 11.9, 1.3, L('thanks'), 60, { bold: true, color: C.white, align: 'center', valign: 'middle', rtl: true }),
     ],
   };
 }
@@ -453,14 +617,21 @@ function buildThanks() {
  * @returns {import('../contracts.js').SlideSpec}
  */
 export function buildSpec(reportModel, { variant = 'internal' } = {}) {
-  return [
-    buildCover(reportModel),
-    buildExecFunnel(reportModel),
-    buildMonthly(reportModel),
-    buildCompliance(reportModel),
-    buildAction(reportModel, variant),
-    buildThanks(),
+  const m = reportModel;
+  // SLIDE TOGGLES — the 4 middle slides are filtered by m.reportOptions.slides
+  // (absent → all on). Cover + thanks ALWAYS render. Page numbers are assigned AFTER
+  // filtering so they renumber sequentially (1..n) over the INCLUDED content slides.
+  const slides = m.reportOptions?.slides;
+  const on = (key) => !slides || slides[key] !== false;
+  const middleDefs = [
+    { key: 'execFunnel', build: () => buildExecFunnel(m) },
+    { key: 'monthly', build: () => buildMonthly(m) },
+    { key: 'compliance', build: () => buildCompliance(m) },
+    { key: 'action', build: () => buildAction(m, variant) },
   ];
+  const middle = middleDefs.filter((x) => on(x.key)).map((x) => x.build());
+  middle.forEach((s, i) => s.elements.push(pageFooter(i + 1)));
+  return [buildCover(m), ...middle, buildThanks(m)];
 }
 
 export default buildSpec;

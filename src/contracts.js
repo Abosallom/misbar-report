@@ -50,6 +50,7 @@
  * @property {{lab:string, total:number, awaitingResult:number, rejected:number, late:number, latePct:number}[]} byLab
  * @property {{testName:string, late:number}[]} byTest - late-no-result count per test, ascending like the chart
  * @property {string[]} unmatchedTests - test names absent from TAT lookup
+ * @property {number} excludedNoTat - rows dropped by opts.excludeNoTat (0 when option off)
  * @property {{total:number, collected:number, dispatched:number, received:number,
  *             completed:number, rejected:number, awaitingDispatch:number, shippedNotReceived:number,
  *             awaitingResults:number, lateNoResult:number}} deltas
@@ -70,6 +71,13 @@
  * @property {TrackerModel['risks']} risks
  * @property {Settings['scorecard']} scorecard
  * @property {Object<string,string>} displayNames - full test name -> short chart label
+ * @property {Object<string,number>} [overrides] - PER-RUN manual number overrides from
+ *   the review screen (never persisted). Keys: 'total','awaitingDispatch','awaitingResults',
+ *   'completed','rejected','lateNoResult','shippedNotReceived','funnel.created',
+ *   'funnel.collected','funnel.dispatched','funnel.received','funnel.resulted',
+ *   'cancelledNote','turnaround.actual','turnaround.expected'. build-spec renders
+ *   override ?? computed; an overridden key suppresses its delta chip.
+ * @property {Settings['reportOptions']} [reportOptions] - presentation options (see Settings)
  */
 
 /**
@@ -112,6 +120,13 @@
  *     'https://elab.seha.sa/hpapm'. Empty/disabled → CSV drop only. The access
  *     token is the public-dashboard token (view-only, server-side-masked data);
  *     it is NEVER seeded in the repo — the user enters it once in Settings.
+ * @property {{excludeNoTat:boolean, slides:Object<string,boolean>, kpiCards:Object<string,boolean>, labels:Object<string,string>}} reportOptions
+ *   - presentation defaults: excludeNoTat drops rows with no TAT from ANY source
+ *     (lookup + CSV fallback = null → 'No Match') before aggregation; slides keys
+ *     'execFunnel'|'monthly'|'compliance'|'action' toggle the middle slides (cover/
+ *     thanks always render; page numbers renumber); kpiCards keys mirror the deltas
+ *     keys and hide exec-slide cards (row geometry repacks); labels overrides the
+ *     DEFAULT_LABELS registry in slidespec/build-spec.js (empty = built-in text).
  * @property {{model:TrackerModel, updatedAt:string}|null} cachedTracker
  *   - last successfully parsed Project Tracker, reused when no fresh file is
  *     dropped. NOTE on the no-PHI invariant: this is PROJECT-management content

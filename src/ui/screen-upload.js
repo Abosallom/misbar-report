@@ -569,6 +569,7 @@ export async function render(container, ctx) {
           asOf: state.reportDate,
           cancelledByMonth: (s.historicalConstants || {}).cancelledByMonth || {},
           snapshot: s.snapshot,
+          excludeNoTat: !!(s.reportOptions && s.reportOptions.excludeNoTat),
         });
         if (out && typeof out.then === 'function') out = await out;
       }

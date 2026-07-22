@@ -137,6 +137,11 @@ export const MOCK_REPORT_MODEL = {
   risks: RISKS,
   scorecard: SCORECARD_SEED,
   displayNames: {}, // BY_TEST already carries short chart labels
+  // Presentation options unset (undefined) → build-spec applies its defaults: all 6
+  // slides on, all 7 KPI cards on, DEFAULT_LABELS text. No manual number overrides.
+  // Both fields are the byte-stable "defaults" case, so the mock render is unchanged.
+  reportOptions: undefined,
+  overrides: {},
 };
 
 export default MOCK_REPORT_MODEL;

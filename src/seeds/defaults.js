@@ -17,6 +17,24 @@ export const HISTORICAL_CONSTANTS_SEED = {
   },
 };
 
+// Report presentation options (Settings.reportOptions): whether to drop no-TAT
+// rows, which middle slides render, which exec-slide KPI cards show, and any
+// per-report label overrides (edited from the review screen). See contracts.js.
+export const REPORT_OPTIONS_SEED = {
+  excludeNoTat: false,
+  slides: { execFunnel: true, monthly: true, compliance: true, action: true },
+  kpiCards: {
+    total: true,
+    awaitingDispatch: true,
+    awaitingResults: true,
+    completed: true,
+    rejected: true,
+    lateNoResult: true,
+    shippedNotReceived: true,
+  },
+  labels: {},
+};
+
 // Snapshot of the 09-07-2026 published deck (E6 prompt): the previous report's
 // full number set, so the first real run's "+N" chips are correct. Keys mirror
 // EngineOutput.deltas (see contracts.js).
