@@ -144,6 +144,7 @@ function barH(el) {
     const x = baseX - (v / vmax) * plotW;
     s += `<line x1="${x.toFixed(1)}" y1="${m.top}" x2="${x.toFixed(1)}" y2="${H - m.bottom}" stroke="${GRID}" stroke-width="1"/>`;
   }
+  const placedLabels = []; // value-label collision avoidance across bars/rows
   cats.forEach((cat, i) => {
     // index 0 at the BOTTOM (ascending upward) — matches PptxGenJS and the source deck
     const cy = m.top + (cats.length - 1 - i) * rowH + rowH / 2;
@@ -153,7 +154,21 @@ function barH(el) {
       const len = (v / vmax) * plotW;
       const by = y0 + si * bh;
       s += `<rect x="${(baseX - len).toFixed(1)}" y="${by.toFixed(1)}" width="${len.toFixed(1)}" height="${bh.toFixed(1)}" fill="${se.color}"/>`;
-      if (el.opts?.dataLabels && v > 0) s += txt(baseX - len - 3, by + bh / 2 + 2.5, fmtNum(v), 7, { anchor: 'end', fill: C.slate900, bold: true });
+      if (el.opts?.dataLabels && v > 0) {
+        // Cairo ink (~13px at 7pt) is taller than one thin bar, so labels of
+        // adjacent bars/rows can graze. Deterministic collision-avoidance: nudge
+        // left until clear of every previously placed label.
+        const labelFont = ns > 1 ? 6.5 : 7;
+        let lx = baseX - len - 3;
+        const ly = by + bh / 2 + 2.5;
+        for (let guard = 0; guard < 4; guard++) {
+          const hit = placedLabels.some((p) => Math.abs(p.y - ly) < 11 && Math.abs(p.x - lx) < 20);
+          if (!hit) break;
+          lx -= 18;
+        }
+        placedLabels.push({ x: lx, y: ly });
+        s += txt(lx, ly, fmtNum(v), labelFont, { anchor: 'end', fill: C.slate900, bold: true });
+      }
     });
     // category label in the right column, right-aligned against the edge
     s += txt(W - m.right, cy + catFont * 0.36, cat, catFont, { anchor: 'end', fill: LABEL });

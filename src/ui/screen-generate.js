@@ -5,6 +5,7 @@ import { VARIANTS } from '../contracts.js';
 import { getGenLibs } from '../vendor-loader.js';
 import { resetRunData } from '../state.js';
 import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js';
+import { autoDraft } from '../model/drafts.js';
 
 async function tryImport(path) { try { return await import(path); } catch { return null; } }
 function pickFn(mod, names) {
@@ -50,16 +51,22 @@ function installFastTimers() {
 function fallbackModel(state, store) {
   const kpi = state.engineOutput || buildMockEngineOutput(store.settings);
   const tracker = state.parsed.tracker || buildMockTracker();
-  // Mirror the drafts/review split so NUPCO files never leak internal or closed
-  // tasks: drop مغلق (closed) rows, then partition by فئة (internal = داخلي).
-  const isInternal = (t) => /داخل/.test((t && t.category) || '');
+  const reportDate = state.reportDate || todayISO();
+  // CANONICAL task split via model/drafts.js (internal = فئة التقرير 'لين') —
+  // a local regex here once diverged and emptied the internal task table.
+  let d;
+  try { d = autoDraft(tracker, reportDate); } catch { d = null; }
   const visible = (tracker.tasks || []).filter((t) => !t.hidden && t.status !== 'مغلق');
   return {
-    reportDate: state.reportDate || todayISO(),
+    reportDate,
     kpi,
-    panels: { supportRequired: [], completedTasks: [], plannedTasks: [] },
-    tasksCurrent: visible.filter((t) => !isInternal(t)),
-    tasksInternal: visible.filter((t) => isInternal(t)),
+    panels: {
+      supportRequired: (d && d.supportRequired) || [],
+      completedTasks: (d && d.completedTasks) || [],
+      plannedTasks: (d && d.plannedTasks) || [],
+    },
+    tasksCurrent: (d && d.tasksCurrent) || visible,
+    tasksInternal: (d && d.tasksInternal) || [],
     challenges: tracker.challenges || [],
     risks: tracker.risks || [],
     scorecard: (store.settings && store.settings.scorecard) || [],

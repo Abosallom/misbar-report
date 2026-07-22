@@ -33,8 +33,8 @@ export const DEFAULT_LABELS = {
   thanks: 'شكرا لكم',
   // Exec KPI card labels (keys mirror the deltas/overrides keys)
   kpiTotal: 'إجمالي الطلبات',
-  kpiAwaitingDispatch: 'في انتظار شحن العينة (المستشفى)',
-  kpiAwaitingResults: 'في انتظار نتائج العينة (المختبر)',
+  kpiAwaitingDispatch: 'بانتظار الشحن (المستشفى)',
+  kpiAwaitingResults: 'بانتظار النتائج (المختبر)',
   kpiCompleted: 'نتائج مكتملة',
   kpiRejected: 'النتائج المرفوضة',
   kpiLate: 'الطلبات المتأخرة',
@@ -42,7 +42,7 @@ export const DEFAULT_LABELS = {
   // Exec slide — overall completion-rate line (label part; value appended as ': N%')
   execCompletionRate: 'نسبة الاكتمال الإجمالية',
   // Exec slide — delta-chip legend (rendered only when a green "+N" chip is visible)
-  execDeltaLegend: '▲ الأخضر = التغيّر منذ التقرير السابق',
+  execDeltaLegend: '▲ التغيّر منذ التقرير السابق — أخضر: إيجابي، أحمر: يستدعي الانتباه',
   // Monthly table row labels (also reused as the monthly bar-chart series names).
   // monthlyRowIncomplete now surfaces the engine's `pending` partition value
   // (orders = results + rejected + pending), renamed accordingly.
@@ -260,20 +260,36 @@ function buildCover(m) {
 // ============================================================================
 // Slide 2 — Executive summary + order-journey funnel (merged)
 // ============================================================================
-// KPI card factory. Width AND number-font are params (the row repacks for N cards);
-// height/y and the inner layout proportions are fixed. Number font is 34pt for the
-// narrow 7-card layout (1.639in card, ~1.40in ink box fits '1234' at 34pt) and 40pt
-// when the card is >=1.9in wide (the original single-card size).
-function kpiCard({ x, w, nf = 34, v, vc, lab, sub, ac, delta }) {
+// KPI card factory. Width AND number-font are params (the row repacks for N cards).
+// Interior REDESIGNED for narrow (7-card) widths where 3-digit live values + long
+// labels collided: the number sits in an upper right-aligned band (28pt narrow /
+// 40pt wide), the green "+N" delta chip is pinned to the TOP-LEFT corner (13pt, left-
+// aligned) so it can never touch the right-aligned number, the label gets a tight
+// 3-line band below the number, and the sublabel sits in a bottom band clear of both.
+function kpiCard({ x, w, nf = 28, v, vc, lab, sub, ac, delta, deltaColor }) {
   const y = 0.93, h = 1.6;
+  // The Cairo Range ink-line is ~1.88x the font px (much taller than the CSS box), so
+  // the number's tall glyph line must be reckoned with directly: inkHalf is half that
+  // line, in inches. The number is centred just low enough that its ink top clears the
+  // delta-legend above the row, and the label/sublabel bands are derived from the ink
+  // line so 3-digit live numbers never touch the label below.
+  const numH = 0.48;
+  const inkHalf = nf * 1.253 / 96;                       // half the number's ink-line (in)
+  const numY = inkHalf + 0.016 - numH / 2;              // ink top ≈ 0.016in below the card top
+  const labY = Math.min(2 * inkHalf + 0.13, 0.90);      // label clears the number ink-line
+  const subY = Math.min(labY + 0.50, 1.29);            // sublabel below the (≤2-line) label
   const els = [
     rect(x, y, w, h, C.white, { radius: 0.05, line: { color: C.border, w: 0.75 } }),
     rect(x + w - 0.063, y, 0.063, h, ac),
-    text(x + 0.08, y + 0.13, w - 0.24, 0.72, v, nf, { bold: true, color: vc, align: 'right', valign: 'middle' }),
-    text(x + 0.08, y + 0.9, w - 0.16, 0.42, lab, 11.5, { bold: true, color: C.slate900, align: 'right', valign: 'top', rtl: true }),
+    // number — right-aligned (28pt narrow / 30pt wide)
+    text(x + 0.08, y + numY, w - 0.22, numH, v, nf, { bold: true, color: vc, align: 'right', valign: 'middle' }),
+    // label — up to 2 tight lines below the number ink-line
+    text(x + 0.08, y + labY, w - 0.16, subY - labY - 0.02, lab, 10, { bold: true, color: C.slate900, align: 'right', valign: 'top', rtl: true, lineSpacing: 0.95 }),
   ];
-  if (sub) els.push(text(x + 0.08, y + 1.28, w - 0.16, 0.28, sub, 9.5, { color: C.slate500, align: 'right', valign: 'top', rtl: true }));
-  if (delta) els.push(text(x + 0.1, y + 0.3, 0.9, 0.42, delta, 20, { bold: true, color: C.deltaGreen, align: 'left', valign: 'middle' }));
+  // delta chip — TOP-LEFT corner, left-aligned; horizontally clear of the number
+  if (delta) els.push(text(x + 0.06, y + 0.06, 0.55, 0.24, delta, 13, { bold: true, color: deltaColor || C.deltaGreen, align: 'left', valign: 'middle' }));
+  // sublabel — bottom band
+  if (sub) els.push(text(x + 0.08, y + subY, w - 0.16, h - subY - 0.03, sub, 8, { color: C.slate500, align: 'right', valign: 'top', rtl: true }));
   return els;
 }
 
@@ -292,7 +308,7 @@ function kpiRowGeom(n) {
   cardW = Math.floor(cardW * 1000) / 1000;          // N=7 => 1.639 (byte-stable)
   const step = cardW + KPI_GAP;
   const xOf = (i) => Math.round((KPI_RIGHT - cardW - i * step) * 1000) / 1000; // i=0 rightmost
-  const numFont = cardW >= 1.9 ? 40 : 34;           // N=7 => 34, fewer cards => 40
+  const numFont = cardW >= 1.9 ? 30 : 28;           // N=7 => 28; wider cards a touch larger (30)
   return { cardW, xOf, numFont };
 }
 
@@ -323,7 +339,7 @@ function buildExecFunnel(m) {
   // Overall completion rate — SAME override-aware total/completed the cards use (guard /0).
   const vTotalCard = V('total', m.kpi.totals.total);
   const vCompletedCard = V('completed', b.completed);
-  const completionRate = vTotalCard > 0 ? Math.round((vCompletedCard / vTotalCard) * 100) : 0;
+  const completionRate = vTotalCard > 0 ? Math.round((vCompletedCard / vTotalCard) * 1000) / 10 : 0; // 1-decimal — consistent with نسبة الاكتمال elsewhere
 
   // -- ZONE A: KPI cards in one row, right-to-left (total rightmost). المرفوضة sits
   // between المكتملة and المتأخرة. Card defs in RTL logical order (index 0 = rightmost).
@@ -341,9 +357,13 @@ function buildExecFunnel(m) {
   ];
   const visible = cardDefs.filter((c) => m.reportOptions?.kpiCards?.[c.dk] !== false);
   const { cardW, xOf, numFont } = kpiRowGeom(visible.length);
+  // Rising is BAD for these metrics — their chips render red so '+38 متأخرة'
+  // never reads as good news (analyst sign-off finding).
+  const BAD_DELTA = new Set(['rejected', 'lateNoResult', 'shippedNotReceived']);
   const kpiEls = visible.flatMap((c, i) => kpiCard({
     x: xOf(i), w: cardW, nf: numFont, v: String(c.v), vc: c.vc, lab: c.lab, sub: c.sub, ac: c.ac,
     delta: (d[c.dk] > 0 && !isOv(c.dk)) ? '+' + d[c.dk] : undefined,
+    deltaColor: BAD_DELTA.has(c.dk) ? C.redPure : C.deltaGreen,
   }));
 
   // -- ZONE B: order-journey funnel (from old buildJourney; X unchanged, Y +0.40).
@@ -504,20 +524,23 @@ function buildMonthly(m) {
     text(6.604, 3.82, 6.661, 0.24, L('monthlyPartition'), 9, { color: C.slate600, align: 'right', valign: 'middle', rtl: true }),
     monthlyChart,
     turnaroundChart,
+    // Overall-average card — RESTACKED so 3-digit live values never touch: title,
+    // actual, expected, variance and sample size each get their own band inside the
+    // card (4.583 → 6.972). Actual/expected dropped to 20pt to keep the stack clear.
     rect(0.5, 4.583, 3.417, 2.389, C.navyChart, { radius: 0.1 }),
-    text(0.5, 4.78, 3.417, 0.5, L('overallAvgTitle'), 13, { bold: true, color: CARD_TITLE, align: 'center', valign: 'middle', rtl: true }),
-    text(0.5, 5.4, 3.417, 0.7, `الفعلي: ${ovActual.toFixed(1)} يوم`, 24, { bold: true, color: C.white, align: 'center', valign: 'middle', rtl: true }),
-    text(0.5, 6.2, 3.417, 0.7, `المتوقع: ${ovExpected.toFixed(1)} يوم`, 24, { bold: true, color: C.peach, align: 'center', valign: 'middle', rtl: true }),
+    text(0.5, 4.66, 3.417, 0.3, L('overallAvgTitle'), 13, { bold: true, color: CARD_TITLE, align: 'center', valign: 'middle', rtl: true }),
+    text(0.5, 5.0, 3.417, 0.5, `الفعلي: ${ovActual.toFixed(1)} يوم`, 20, { bold: true, color: C.white, align: 'center', valign: 'middle', rtl: true }),
+    text(0.5, 5.55, 3.417, 0.5, `المتوقع: ${ovExpected.toFixed(1)} يوم`, 20, { bold: true, color: C.peach, align: 'center', valign: 'middle', rtl: true }),
   ];
   // Variance vs target — actual − expected, sign always shown; only when both present.
   if (Number.isFinite(ovActual) && Number.isFinite(ovExpected)) {
     const diff = ovActual - ovExpected;
     const diffStr = (diff >= 0 ? '+' : '-') + Math.abs(diff).toFixed(1);
-    els.push(text(0.5, 6.5, 3.417, 0.24, `الفارق: ${diffStr} يوم عن المستهدف`, 11, { bold: true, color: C.amber, align: 'center', valign: 'middle', rtl: true }));
+    els.push(text(0.5, 6.15, 3.417, 0.3, `الفارق: ${diffStr} يوم عن المستهدف`, 11, { bold: true, color: C.amber, align: 'center', valign: 'middle', rtl: true }));
   }
   // Sample size behind the averages — only when the engine reports measuredCount.
   if (Number.isFinite(t.measuredCount)) {
-    els.push(text(0.5, 6.74, 3.417, 0.2, `(ن = ${t.measuredCount} طلب)`, 9, { color: CARD_TITLE, align: 'center', valign: 'middle', rtl: true }));
+    els.push(text(0.5, 6.5, 3.417, 0.26, `(ن = ${t.measuredCount} طلب)`, 9, { color: CARD_TITLE, align: 'center', valign: 'middle', rtl: true }));
   }
   return { id: 'monthly', bg: C.white, elements: els };
 }
@@ -592,15 +615,28 @@ function buildCompliance(m) {
   // remainder (3.667in — un-truncated for the 6 known labs at the body font). Total
   // table width UNCHANGED = 11.667 (3.667 + 8×1.0).
   const LAB_W = 3.667, NUM_W = 1.0;
+  // Footnote Y is DYNAMIC: live data renders MORE lab rows than the mock, so a static
+  // footnote y crashed into the totals row. rowH stays 0.275 for the known labs; when
+  // labRows > 7 the rows shrink so the table + footnote still clear the chart band
+  // (divider at y 4.12). The footnote sits one gap below the totals row, clamped so it
+  // never drops past the chart top − 0.05.
+  const TABLE_Y = 1.194, BASE_ROW_H = 0.275, FOOT_H = 0.24, BAND_TOP = 4.12;
+  const nTableRows = labRows.length + 2;            // header + labRows + totals
+  let rowH = BASE_ROW_H;
+  if (labRows.length > 7) {
+    const maxRowH = (BAND_TOP - 0.05 - FOOT_H - 0.08 - TABLE_Y) / nTableRows;
+    rowH = Math.min(BASE_ROW_H, Math.floor(maxRowH * 1000) / 1000);
+  }
+  const footnoteY = Math.min(TABLE_Y + nTableRows * rowH + 0.08, BAND_TOP - 0.05 - FOOT_H);
   const labTable = {
-    t: 'table', x: 0.833, y: 1.194, w: 11.667, rtl: true, rowH: 0.275, headerSize: 9, bodySize: 9.5,
+    t: 'table', x: 0.833, y: TABLE_Y, w: 11.667, rtl: true, rowH, headerSize: 9, bodySize: 9.5,
     header: { fill: C.navy, color: C.white, bold: true },
     colW: rev([LAB_W, NUM_W, NUM_W, NUM_W, NUM_W, NUM_W, NUM_W, NUM_W, NUM_W]),
     rows: [header, ...labRows, totalRow],
   };
   // Equation footnote directly under the table (small, slate, rtl) — spells out the
   // add-up so the columns visibly reconcile. Built from the labels so it tracks overrides.
-  const eqFootnote = text(0.833, 3.70, 11.667, 0.24,
+  const eqFootnote = text(0.833, footnoteY, 11.667, FOOT_H,
     `${L('compTotal')} = ${L('compPipeline')} + ${L('compAwaiting')} + ${L('compOnTime')} + ${L('compResultedLate')} + ${L('compRejected')}`,
     9, { color: C.slate600, align: 'right', valign: 'middle', rtl: true });
 
@@ -713,7 +749,13 @@ function buildAction(m, variant) {
   // the band. With it, noteY + 0.24 ≤ 4.60. AREA is untouched when there is no note,
   // so the n≤15 layout is unchanged.
   const AREA = hasNote ? 3.35 - 0.26 : 3.35;
-  const rowH = Math.max(0.18, Math.min(0.30, AREA / (shown + 1)));
+  // Two-line cells (date RANGES like '25-06-2026\n16-07-2026') need ~0.42in of
+  // Cairo ink — with the default 0.30 cap adjacent rows' dates collide. Raise
+  // the cap only when multi-line content exists AND the row count leaves room.
+  const hasTwoLine = taskRows.slice(0, shown).some((t) =>
+    Object.values(t || {}).some((v) => typeof v === 'string' && v.includes('\n')));
+  const rowCap = hasTwoLine ? 0.44 : 0.30;
+  const rowH = Math.max(0.18, Math.min(rowCap, AREA / (shown + 1)));
   const bodySize = rowH >= 0.26 ? 9.5 : rowH >= 0.21 ? 9 : 8;
   const headerSize = bodySize;
   const table = taskTable(taskRows.slice(0, shown), { y: 1.15, rowH, bodySize, headerSize, L });
@@ -728,13 +770,18 @@ function buildAction(m, variant) {
     els.push(text(0.641, noteY, 12.259, 0.24, `+ ${n - CAP} مهمة أخرى`, bodySize, { italic: true, color: C.slate600, align: 'center', valign: 'middle', rtl: true }));
   }
 
-  // Block 2 — support required (full width red band). Band height holds up to 3
-  // right-aligned single-line bullets (Arabic ink overflows a tight box), while its
-  // bottom (5.54) stays clear of the subhead dots that end exactly at the table top.
+  // Block 2 — support required (full width red band, bottom 5.54, clear of the subhead
+  // dots below). The band must CONTAIN its ink: title + up to 3 right-aligned bullets
+  // fit the band height; a 4th+ item is folded into an inline '+ N أخرى' line so live
+  // data with many long bullets never overflows into the challenges/risks subheads.
+  const SUP_CAP = 3;
+  const support = m.panels.supportRequired || [];
+  const supText = bullets(support.slice(0, SUP_CAP))
+    + (support.length > SUP_CAP ? `\n+ ${support.length - SUP_CAP} أخرى` : '');
   els.push(
     rect(0.5, 4.62, 12.3, 0.92, C.bgRed, { radius: 0.06 }),
-    text(0.7, 4.66, 11.9, 0.34, L('supportTitle'), 14, { bold: true, color: C.navy, align: 'right', valign: 'middle', rtl: true }),
-    text(0.9, 5.02, 11.7, 0.50, bullets(m.panels.supportRequired), 10.5, { color: C.slate900, align: 'right', valign: 'top', rtl: true, lineSpacing: 1.0 }),
+    text(0.7, 4.62, 11.9, 0.26, L('supportTitle'), 11.5, { bold: true, color: C.navy, align: 'right', valign: 'middle', rtl: true }),
+    text(0.9, 5.02, 11.7, 0.52, supText, 9, { color: C.slate900, align: 'right', valign: 'top', rtl: true, lineSpacing: 0.9 }),
   );
 
   // Blocks 3 & 4 — challenges (right) + risks (left), side-by-side, subheads at y 5.60.
@@ -750,7 +797,7 @@ function buildAction(m, variant) {
   const chTable = {
     t: 'table', x: 6.80, y: CR_TABLE_Y, w: 6.0, rtl: true, rowH: CR_ROW_H, bodySize: 8.5, headerSize: 9,
     header: { fill: C.navy, color: C.white, bold: true },
-    colW: [1.832, 0.406, 1.245, 2.281, 0.235],
+    colW: [1.738, 0.50, 1.245, 2.281, 0.236], // التأثير widened: 'متوسط' clipped at 0.406 (analyst finding)
     rows: [chHeader, ...chCap.rows],
   };
 

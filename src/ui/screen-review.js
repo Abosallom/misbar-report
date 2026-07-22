@@ -2,6 +2,7 @@
 import { STR, todayISO, formatDateAr } from '../i18n/ar.js';
 import { el, editableTable, textareaField, toast } from './components.js';
 import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js';
+import { autoDraft } from '../model/drafts.js';
 
 /* small local module helpers (kept local to avoid cross-screen coupling) */
 async function tryImport(path) { try { return await import(path); } catch { return null; } }
@@ -115,25 +116,40 @@ const pagerDotStyle = (on) => 'min-width:30px;height:30px;flex:0 0 auto;border-r
   + (on ? 'background:var(--navy);color:#fff;border:1px solid var(--navy)'
         : 'background:var(--white);color:var(--slate-600);border:1px solid var(--border-dark)');
 
-/* Assemble an editable ReportModel from engineOutput + tracker + settings. */
+/* Assemble an editable ReportModel from engineOutput + tracker + settings.
+ * Task splitting/panels go through model/drafts.js autoDraft — the CANONICAL
+ * rule (internal = فئة التقرير 'لين'). A local regex here once diverged and
+ * rendered the internal variant's task table empty with real tracker data. */
 function buildDraftReportModel(state, store) {
   const kpi = state.engineOutput || buildMockEngineOutput(store.settings);
   const tracker = state.parsed.tracker || buildMockTracker();
-  const tasks = (tracker.tasks || []).filter((t) => !t.hidden);
+  const reportDate = state.reportDate || todayISO();
 
-  const tasksInternal = tasks.filter(isInternalCat);
-  const tasksCurrent = tasks.filter((t) => !isInternalCat(t) && !isClosed(t));
-
-  const completedTasks = tasks.filter(isClosed).map((t) => t.task);
-  const plannedTasks = tasks.filter((t) => !isClosed(t) && !isInternalCat(t)).map((t) => t.task);
-  const supportRequired = (tracker.challenges || []).map((c) => c.title).filter(Boolean);
+  let d;
+  try {
+    d = autoDraft(tracker, reportDate);
+  } catch (e) {
+    console.warn('[review] autoDraft failed; falling back to local split', e);
+    const tasks = (tracker.tasks || []).filter((t) => !t.hidden);
+    d = {
+      tasksInternal: tasks.filter(isInternalCat),
+      tasksCurrent: tasks.filter((t) => !isInternalCat(t) && !isClosed(t)),
+      completedTasks: tasks.filter(isClosed).map((t) => t.task),
+      plannedTasks: tasks.filter((t) => !isClosed(t) && !isInternalCat(t)).map((t) => t.task),
+      supportRequired: (tracker.challenges || []).map((c) => c.title).filter(Boolean),
+    };
+  }
 
   return {
-    reportDate: state.reportDate || todayISO(),
+    reportDate,
     kpi,
-    panels: { supportRequired, completedTasks, plannedTasks },
-    tasksCurrent: tasksCurrent.map((t) => ({ ...t })),
-    tasksInternal: tasksInternal.map((t) => ({ ...t })),
+    panels: {
+      supportRequired: d.supportRequired || [],
+      completedTasks: d.completedTasks || [],
+      plannedTasks: d.plannedTasks || [],
+    },
+    tasksCurrent: (d.tasksCurrent || []).map((t) => ({ ...t })),
+    tasksInternal: (d.tasksInternal || []).map((t) => ({ ...t })),
     challenges: (tracker.challenges || []).map((c) => ({ ...c })),
     risks: (tracker.risks || []).map((r) => ({ ...r })),
     scorecard: (store.settings && store.settings.scorecard) || [],
