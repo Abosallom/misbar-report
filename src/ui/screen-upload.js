@@ -3,6 +3,7 @@ import { STR, todayISO, formatDateAr } from '../i18n/ar.js';
 import { el, dropZone, fileSummaryCard, toast } from './components.js';
 import { normTest } from '../contracts.js';
 import { getPapa, getXLSX } from '../vendor-loader.js';
+import { TAT_LOINC } from '../seeds/tat-lookup.js';
 
 /** Format an ISO timestamp as local 'HH:MM' for snapshot-freshness labels. */
 function fmtHHMM(iso) {
@@ -261,6 +262,7 @@ export async function render(container, ctx) {
   let fetchInFlight = false; // guards the auto-fetch + manual button against overlap
   let proceedBtn = null; // the sticky proceed button (rebuilt each paint)
   let heroSeq = 0; // guards overlapping async hero runs — only the latest paints
+  let unmatchedSeq = 0; // guards overlapping async suggestion runs on the unmatched panel
   const errorsByKind = { csv: [], tracker: [] };
 
   const head = el('div', { class: 'screen__head' }, [
@@ -535,10 +537,11 @@ export async function render(container, ctx) {
       ]));
     }
 
-    // Unmatched-tests panel with inline TAT inputs
+    // Unmatched-tests panel with inline TAT inputs + computed suggestions.
     if (state.parsed.orders) {
       const unmatched = computeUnmatched(state.parsed.orders, store.settings.tatLookup);
       if (unmatched.length) {
+        const rowRefs = [];
         const rows = unmatched.map((name) => {
           const input = el('input', { type: 'number', min: '0', step: '1', inputmode: 'numeric', placeholder: STR.upload.unmatchedDays });
           const saved = el('span', { class: 'small', style: 'color:var(--green);font-weight:700' });
@@ -559,13 +562,29 @@ export async function render(container, ctx) {
             }),
           ]);
           rowEl.appendChild(saved);
+          rowRefs.push({ name, input, rowEl });
           return rowEl;
         });
+        // Header: title + (async) subtitle on the start side, apply-all button on the end.
+        const subtitleEl = el('p', { class: 'small', style: 'display:none;color:#92400E;margin:2px 0 0' });
+        const actionsBar = el('div', { style: 'flex:0 0 auto' });
+        const header = el('div', {
+          style: 'display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap',
+        }, [
+          el('div', { style: 'min-width:0' }, [
+            el('div', { class: 'panel-warn__title', text: `⚠️ ${STR.upload.unmatchedTitle} (${unmatched.length})` }),
+            subtitleEl,
+          ]),
+          actionsBar,
+        ]);
         unmatchedHost.appendChild(el('div', { class: 'panel-warn' }, [
-          el('div', { class: 'panel-warn__title', text: `⚠️ ${STR.upload.unmatchedTitle} (${unmatched.length})` }),
-          el('p', { class: 'small', text: STR.upload.unmatchedHint }),
+          header,
+          el('p', { class: 'small', style: 'margin:6px 0 8px', text: STR.upload.unmatchedHint }),
           ...rows,
         ]));
+        // Layer computed suggestions on top of the plain panel. Graceful: if the
+        // suggestion module is absent, the panel above is a complete, working UI.
+        enhanceUnmatched(unmatched, rowRefs, subtitleEl, actionsBar);
       }
     }
 
@@ -581,6 +600,85 @@ export async function render(container, ctx) {
 
     // The moment orders exist, transform the top of the screen into a mini-dashboard.
     paintHero();
+  }
+
+  /* ---------------------------------------------------------------- *
+   * Intelligent suggestions for the unmatched-TAT panel. Dynamically
+   * imports ../ingest/tat-suggest.js; when present it pre-fills each
+   * row's days input with a computed value, drops a muted evidence line
+   * (with a confidence dot) under the row, and offers a one-click
+   * 'اعتماد جميع المقترحات'. When absent, the plain panel is untouched.
+   * ---------------------------------------------------------------- */
+  const DOT = { high: 'var(--green)', medium: 'var(--amber)', low: '#94A3B8' };
+  function evidenceLine(color, text) {
+    return el('div', {
+      style: 'font-size:.78rem;color:var(--slate-500);margin:1px 0 6px;display:flex;align-items:flex-start;gap:6px;line-height:1.35',
+    }, [
+      el('span', { style: `width:8px;height:8px;border-radius:999px;background:${color};flex:0 0 auto;margin-top:5px`, 'aria-hidden': 'true' }),
+      el('span', { text }),
+    ]);
+  }
+
+  async function enhanceUnmatched(unmatched, rowRefs, subtitleEl, actionsBar) {
+    const seq = ++unmatchedSeq;
+    let mod;
+    try {
+      mod = await import('../ingest/tat-suggest.js');
+    } catch { return; } // module not present yet — keep the plain panel behavior
+    if (seq !== unmatchedSeq) return; // a newer paint superseded this run
+    const fn = pickFn(mod, ['suggestTats']);
+    if (typeof fn !== 'function') return;
+
+    let results;
+    try {
+      results = fn({
+        unmatched,
+        rows: state.parsed.orders,
+        tatLookup: (store.settings || {}).tatLookup,
+        tatLoinc: TAT_LOINC,
+      });
+      if (results && typeof results.then === 'function') results = await results;
+    } catch (e) {
+      console.warn('[upload] suggestTats failed', e);
+      return;
+    }
+    if (seq !== unmatchedSeq) return;
+    if (!Array.isArray(results)) return;
+
+    const byName = new Map(results.map((r) => [r && r.testName, r]));
+    const applicable = []; // { name, suggested } for every non-null suggestion
+
+    for (const ref of rowRefs) {
+      const s = byName.get(ref.name);
+      let line;
+      if (s && s.suggested != null) {
+        ref.input.value = String(s.suggested);
+        applicable.push({ name: ref.name, suggested: s.suggested });
+        const color = DOT[s.confidence] || '#94A3B8';
+        line = evidenceLine(color, s.evidence || '');
+      } else {
+        line = evidenceLine('#94A3B8', (s && s.evidence) || 'لا توجد بيانات كافية للاقتراح');
+      }
+      ref.rowEl.after(line); // sits directly under its row, above the next divider
+    }
+
+    subtitleEl.textContent = 'اقتراحات محسوبة من التحليل — راجعها ثم اعتمد';
+    subtitleEl.style.display = '';
+
+    actionsBar.innerHTML = '';
+    if (applicable.length) {
+      actionsBar.appendChild(el('button', {
+        class: 'btn btn--primary btn--sm',
+        text: `اعتماد جميع المقترحات (${applicable.length})`,
+        onClick: () => {
+          for (const a of applicable) store.setTat(a.name, a.suggested);
+          state.settings = store.settings;
+          for (const ref of rowRefs) ref.rowEl.classList.add('is-saved'); // brief, before repaint
+          toast(`تم اعتماد ${applicable.length} مدة مقترحة`, 'ok');
+          paint(); // same recompute/paint the individual add triggers — applied names drop off
+        },
+      }));
+    }
   }
 
   /* ---------------------------------------------------------------- *
