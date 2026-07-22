@@ -1,12 +1,12 @@
 // main.js — boot, settings store, top app bar, and screen router (Track E).
-import { state } from './state.js?v=v2026-07-22.10';
-import { STR } from './i18n/ar.js?v=v2026-07-22.10';
-import { APP_VERSION } from './version.js?v=v2026-07-22.10';
-import { el, toast } from './ui/components.js?v=v2026-07-22.10';
-import { SETTINGS_KEY } from './contracts.js?v=v2026-07-22.10';
-import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-07-22.10';
-import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-07-22.10';
-import { HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED, GRAFANA_SEED } from './seeds/defaults.js?v=v2026-07-22.10';
+import { state } from './state.js?v=v2026-07-22.11';
+import { STR } from './i18n/ar.js?v=v2026-07-22.11';
+import { APP_VERSION } from './version.js?v=v2026-07-22.11';
+import { el, toast } from './ui/components.js?v=v2026-07-22.11';
+import { SETTINGS_KEY } from './contracts.js?v=v2026-07-22.11';
+import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-07-22.11';
+import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-07-22.11';
+import { HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED, GRAFANA_SEED } from './seeds/defaults.js?v=v2026-07-22.11';
 
 /* ------------------------------------------------------------------ *
  * Settings store — prefers Track C's src/store.js, falls back to a
@@ -162,7 +162,7 @@ async function resolveStore() {
   const local = createLocalStore(persistent);
   let backend = null;
   try {
-    const mod = await import('./store.js?v=v2026-07-22.10');
+    const mod = await import('./store.js?v=v2026-07-22.11');
     if (mod && typeof mod.loadSettings === 'function' && typeof mod.saveSettings === 'function') {
       const s = mod.loadSettings();
       if (s && s.tatLookup) backend = mod;
@@ -176,10 +176,10 @@ async function resolveStore() {
  * ------------------------------------------------------------------ */
 
 const SCREEN_MODULES = {
-  upload: './ui/screen-upload.js?v=v2026-07-22.10',
-  review: './ui/screen-review.js?v=v2026-07-22.10',
-  generate: './ui/screen-generate.js?v=v2026-07-22.10',
-  settings: './ui/screen-settings.js?v=v2026-07-22.10', // Track C
+  upload: './ui/screen-upload.js?v=v2026-07-22.11',
+  review: './ui/screen-review.js?v=v2026-07-22.11',
+  generate: './ui/screen-generate.js?v=v2026-07-22.11',
+  settings: './ui/screen-settings.js?v=v2026-07-22.11', // Track C
 };
 
 let appEl = null;
@@ -295,12 +295,46 @@ async function renderScreen() {
   }
 }
 
+/* ------------------------------------------------------------------ *
+ * Appearance (light/dark) — per-device, persisted in localStorage.
+ * index.html's <head> applies the stored choice before first paint;
+ * this toggle only flips data-theme + saves. Absence of the key = follow
+ * the OS via the CSS @media(prefers-color-scheme) rules. The report slides
+ * use no CSS vars, so the deck is unaffected by the theme.
+ * ------------------------------------------------------------------ */
+const THEME_KEY = 'misbar.theme.v1';
+
+function effectiveTheme() {
+  const attr = document.documentElement.getAttribute('data-theme');
+  if (attr === 'dark' || attr === 'light') return attr;
+  return (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+}
+
+function syncThemeButton(btn) {
+  const dark = effectiveTheme() === 'dark';
+  btn.textContent = dark ? '☀️' : '🌙';
+  const label = dark ? 'المظهر الفاتح' : 'المظهر الداكن';
+  btn.setAttribute('aria-label', label);
+  btn.title = label;
+}
+
+function toggleTheme(btn) {
+  const next = effectiveTheme() === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  try { localStorage.setItem(THEME_KEY, next); } catch { /* storage blocked — session-only */ }
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', next === 'dark' ? '#0E1626' : '#1E3A8A');
+  syncThemeButton(btn);
+}
+
 function buildShell(store) {
   const root = document.getElementById('app-shell') || document.body;
 
   const logo = el('img', { class: 'appbar__logo', src: 'assets/icon.svg', alt: '' });
   navHome = el('button', { class: 'navbtn', text: STR.nav.home, onClick: goHome });
   navSettings = el('button', { class: 'navbtn', text: STR.nav.settings, onClick: () => navigate('settings') });
+  const navTheme = el('button', { class: 'navbtn navbtn--theme', onClick: () => toggleTheme(navTheme) });
+  syncThemeButton(navTheme);
   const navLock = (lockMod && typeof lockMod.lock === 'function')
     ? el('button', {
       class: 'navbtn', text: 'قفل 🔒', title: 'قفل البوابة على هذا الجهاز',
@@ -313,7 +347,7 @@ function buildShell(store) {
   const bar = el('header', { class: 'appbar' }, [
     el('div', { class: 'appbar__brand' }, [logo, el('div', { class: 'appbar__title', text: STR.appTitle })]),
     el('div', { class: 'appbar__spacer' }),
-    el('nav', { class: 'appbar__nav' }, [navHome, navSettings, navLock]),
+    el('nav', { class: 'appbar__nav' }, [navHome, navSettings, navTheme, navLock]),
     versionChip,
   ]);
 
@@ -342,7 +376,7 @@ async function boot() {
   // behind the passphrase screen. Devices remember a successful unlock; the
   // قفل nav button re-locks (clears the marker + sealed secrets).
   try {
-    lockMod = await import('./ui/lock.js?v=v2026-07-22.10');
+    lockMod = await import('./ui/lock.js?v=v2026-07-22.11');
   } catch { lockMod = null; /* lock module absent — open boot (dev) */ }
   if (lockMod && typeof lockMod.isUnlocked === 'function' && !lockMod.isUnlocked(store)) {
     const root = document.getElementById('app-shell') || document.body;
@@ -356,8 +390,8 @@ async function boot() {
   // TAT-lookup Excel merge hook consumed by the settings screen (Track C).
   state.onTatFileMerge = async (file) => {
     const [{ getXLSX }, { parseTatLookupXlsx }] = await Promise.all([
-      import('./vendor-loader.js?v=v2026-07-22.10'),
-      import('./ingest/xlsx.js?v=v2026-07-22.10'),
+      import('./vendor-loader.js?v=v2026-07-22.11'),
+      import('./ingest/xlsx.js?v=v2026-07-22.11'),
     ]);
     const XLSX = await getXLSX();
     const { tests } = parseTatLookupXlsx(await file.arrayBuffer(), XLSX);
@@ -377,7 +411,7 @@ async function boot() {
   // Connection test consumed by the settings screen's اختبار الاتصال button.
   state.onGrafanaTest = async () => {
     try {
-      const mod = await import('./ingest/grafana.js?v=v2026-07-22.10');
+      const mod = await import('./ingest/grafana.js?v=v2026-07-22.11');
       const g = store.loadSettings().grafana || {};
       const now = Date.now();
       const res = await mod.fetchKamcOrders(g, { fromMs: now - 7 * 86400000, toMs: now });

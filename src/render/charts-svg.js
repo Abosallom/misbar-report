@@ -6,7 +6,7 @@
 //   barH         — horizontal bars, category labels on the RTL (right) side, value labels (chart3)
 // All output is self-contained SVG markup with real Cairo text. Colors/sizes mirror the
 // original ppt/charts/chart{1,2,3}.xml. Coordinates are px (inches * 96).
-import { COLORS as C } from '../theme.js?v=v2026-07-22.10';
+import { COLORS as C } from '../theme.js?v=v2026-07-22.11';
 
 const PXIN = 96;
 const GRID = '#D9D9D9';

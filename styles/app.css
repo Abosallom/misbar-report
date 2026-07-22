@@ -23,6 +23,10 @@
   --border-dark: #CBD5E1;
   --ice-blue: #C7D2FE;
   --white: #FFFFFF;
+  /* Brand navy used as *foreground text* on light surfaces (titles, values). Split
+     from --navy so dark mode can lighten the ink while --navy stays a real navy for
+     the appbar / buttons / table headers (which carry white text). */
+  --brand-ink: var(--navy);
 
   --bar-h: 56px;
   --radius: 12px;
@@ -40,7 +44,7 @@ html, body {
   margin: 0;
   padding: 0;
   background: var(--bg-lighter);
-  color: var(--slate-900);
+  color: var(--text);
   font-family: var(--font);
   -webkit-text-size-adjust: 100%;
   line-height: 1.5;
@@ -219,7 +223,7 @@ input, select, textarea { font-family: inherit; font-size: 1rem; }
 @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 
 .screen__head { margin-bottom: 16px; }
-.screen__head h1 { font-size: 1.35rem; color: var(--navy); }
+.screen__head h1 { font-size: 1.35rem; color: var(--brand-ink); }
 .screen__head p { color: var(--slate-600); margin-top: 4px; font-size: .95rem; }
 
 .card {
@@ -232,7 +236,7 @@ input, select, textarea { font-family: inherit; font-size: 1rem; }
 }
 .card__title {
   font-size: 1.02rem;
-  color: var(--navy);
+  color: var(--brand-ink);
   margin-bottom: 12px;
   display: flex;
   align-items: center;
@@ -259,7 +263,7 @@ input, select, textarea { font-family: inherit; font-size: 1rem; }
 }
 .btn--primary { background: var(--navy); color: var(--white); }
 .btn--primary:hover:not(:disabled) { background: #1b3477; }
-.btn--ghost { background: var(--bg-lighter); color: var(--navy); border-color: var(--border-dark); }
+.btn--ghost { background: var(--bg-lighter); color: var(--brand-ink); border-color: var(--border-dark); }
 .btn--ghost:hover:not(:disabled) { background: #e6ebf2; }
 .btn--danger { background: var(--red); color: var(--white); }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
@@ -293,7 +297,7 @@ input, select, textarea { font-family: inherit; font-size: 1rem; }
 .dropzone.is-loaded { border-style: solid; border-color: var(--green); background: #f0fdf4; }
 .dropzone.is-error { border-color: var(--red); background: var(--bg-red); }
 .dropzone__icon { font-size: 2rem; line-height: 1; }
-.dropzone__title { font-weight: 700; color: var(--navy); }
+.dropzone__title { font-weight: 700; color: var(--brand-ink); }
 .dropzone__hint { font-size: .85rem; color: var(--slate-500); }
 .dropzone__file { font-size: .85rem; color: var(--green); font-weight: 700; word-break: break-all; }
 .dropzone input[type="file"] { display: none; }
@@ -307,7 +311,7 @@ input, select, textarea { font-family: inherit; font-size: 1rem; }
   padding: 10px 12px;
 }
 .stat__label { font-size: .78rem; color: var(--slate-500); }
-.stat__value { font-size: 1.25rem; font-weight: 700; color: var(--navy); margin-top: 2px; }
+.stat__value { font-size: 1.25rem; font-weight: 700; color: var(--brand-ink); margin-top: 2px; }
 .stat__value.small { font-size: .95rem; }
 
 /* ---------- Lists / panels ---------- */
@@ -372,7 +376,7 @@ input, select, textarea { font-family: inherit; font-size: 1rem; }
   padding: 10px 12px;
   min-height: var(--touch);
   background: var(--white);
-  color: var(--slate-900);
+  color: var(--text);
 }
 .field textarea { min-height: 96px; resize: vertical; line-height: 1.7; }
 .field .hint { font-size: .78rem; color: var(--slate-500); margin-top: 4px; }
@@ -386,7 +390,7 @@ input, select, textarea { font-family: inherit; font-size: 1rem; }
   padding: 8px 10px;
 }
 .kpi-item__label { font-size: .76rem; color: var(--slate-500); }
-.kpi-item__value { font-weight: 700; color: var(--navy); font-size: 1.05rem; }
+.kpi-item__value { font-weight: 700; color: var(--brand-ink); font-size: 1.05rem; }
 .kpi-item__value .delta { color: var(--delta-green); font-size: .8rem; margin-inline-start: 6px; }
 
 /* Editable table */
@@ -485,7 +489,7 @@ input, select, textarea { font-family: inherit; font-size: 1rem; }
 .dl-links { display: grid; gap: 8px; margin-top: 12px; }
 .dl-link {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  text-decoration: none; color: var(--navy); font-weight: 600;
+  text-decoration: none; color: var(--brand-ink); font-weight: 600;
   border: 1px solid var(--border-dark); border-radius: var(--radius-sm);
   padding: 12px 14px; min-height: var(--touch); background: var(--white);
 }
@@ -558,3 +562,154 @@ input, select, textarea { font-family: inherit; font-size: 1rem; }
   .appbar__title { font-size: .92rem; }
   .appbar__version { font-size: .62rem; padding: 3px 6px; }
 }
+
+/* ============================================================= *
+ * DARK APPEARANCE
+ * The report slides (.sl-slide + descendants, the offscreen .render-host, and the
+ * .gen-thumb clones) use ZERO CSS custom properties — their colors are hardcoded
+ * in styles/slide.css and inlined from src/theme.js by the renderer — so remapping
+ * these tokens NEVER touches the deck. A dark preview shows a real white slide.
+ *
+ * Palette lives in one place (--misbar-dark-*) and is *applied* by two selectors:
+ *   1) html[data-theme='dark']            — explicit stored choice (wins)
+ *   2) prefers-color-scheme:dark + :not([data-theme='light']) — system follow
+ * Both call the same custom-property assignments below via a shared list.
+ * ============================================================= */
+
+/* --- shared dark token assignments --- */
+html[data-theme='dark'] {
+  color-scheme: dark;
+  --navy: #24408f;            /* appbar / buttons / table headers (white text on them) */
+  --navy-dark: #172554;
+  --brand-ink: #9DB8FF;       /* navy-as-text on dark surfaces (titles, values) */
+  --blue: #60A5FA;
+  --amber: #FBBF24;
+  --green: #22C55E;
+  --red: #F05252;
+  --text: #E6EDF7;           /* body text (AA on the dark surfaces below) */
+  --slate-900: #334155;      /* now ONLY dark chrome (toast pill); white text pops */
+  --slate-600: #C3CEDE;      /* secondary text */
+  --slate-500: #93A2B8;      /* muted text */
+  --bg-light: #26324a;       /* raised inner surface / even table rows */
+  --bg-lighter: #0E1626;     /* page background (deep slate, not pure black) */
+  --bg-red: #3a1a1f;         /* dark red tint (error dropzone / notelist bg) */
+  --border: #334155;
+  --border-dark: #475569;
+  --ice-blue: #1e3a63;       /* drag-over dropzone tint */
+  --white: #1B2537;          /* elevated card / input surface */
+  --shadow: 0 1px 3px rgba(0,0,0,.5), 0 1px 2px rgba(0,0,0,.4);
+  --shadow-lg: 0 12px 34px rgba(0,0,0,.6);
+  /* status soft tokens — consumed by inline styles via var(--x, <light-literal>),
+     so light mode keeps its exact literals and only dark defines these. */
+  --good-bg: rgba(34,197,94,.18);   --good-text: #5FE08A;
+  --bad-bg:  rgba(240,82,82,.20);   --bad-text:  #FCA5A5;
+  --warn-bg: rgba(245,158,11,.20);  --warn-text: #FBBF24;
+  --info-bg: rgba(96,165,250,.20);  --info-text: #A5C4FF;
+  --closed-tint: rgba(34,197,94,.15);
+}
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme='light']) {
+    color-scheme: dark;
+    --navy: #24408f;
+    --navy-dark: #172554;
+    --brand-ink: #9DB8FF;
+    --blue: #60A5FA;
+    --amber: #FBBF24;
+    --green: #22C55E;
+    --red: #F05252;
+    --text: #E6EDF7;
+    --slate-900: #334155;
+    --slate-600: #C3CEDE;
+    --slate-500: #93A2B8;
+    --bg-light: #26324a;
+    --bg-lighter: #0E1626;
+    --bg-red: #3a1a1f;
+    --border: #334155;
+    --border-dark: #475569;
+    --ice-blue: #1e3a63;
+    --white: #1B2537;
+    --shadow: 0 1px 3px rgba(0,0,0,.5), 0 1px 2px rgba(0,0,0,.4);
+    --shadow-lg: 0 12px 34px rgba(0,0,0,.6);
+    --good-bg: rgba(34,197,94,.18);   --good-text: #5FE08A;
+    --bad-bg:  rgba(240,82,82,.20);   --bad-text:  #FCA5A5;
+    --warn-bg: rgba(245,158,11,.20);  --warn-text: #FBBF24;
+    --info-bg: rgba(96,165,250,.20);  --info-text: #A5C4FF;
+    --closed-tint: rgba(34,197,94,.15);
+  }
+}
+
+/* --- dark corrections for panels/tints authored with hardcoded light hex --- */
+html[data-theme='dark'] .dropzone:hover { background: #202c42; border-color: var(--blue); }
+
+html[data-theme='dark'] .dropzone.is-loaded,
+html[data-theme='dark'] .gen-file.is-done,
+html[data-theme='dark'] .journey-step.is-done:hover { background: rgba(34,197,94,.12); }
+
+html[data-theme='dark'] .success-panel { background: rgba(34,197,94,.12); border-color: rgba(34,197,94,.4); }
+
+html[data-theme='dark'] .btn--primary:hover:not(:disabled) { background: #2c4ba3; }
+html[data-theme='dark'] .btn--ghost:hover:not(:disabled) { background: #232f47; }
+html[data-theme='dark'] .dl-link:hover { background: #232f47; }
+
+html[data-theme='dark'] .storage-warn { background: #3a2a12; color: #FCD9A6; border-bottom-color: #6b4e1f; }
+html[data-theme='dark'] .panel-warn { background: #33290f; border-color: #6b571f; }
+html[data-theme='dark'] .panel-warn__title { color: #FBD38D; }
+html[data-theme='dark'] .notelist li.err { background: var(--bg-red); color: #FCA5A5; }
+html[data-theme='dark'] .notelist li.warn { background: #33290f; color: #FBD38D; }
+html[data-theme='dark'] .kpi-item__value .delta { color: var(--good-text); }
+html[data-theme='dark'] .unmatched-row { border-top-color: #6b571f; }
+
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme='light']) .dropzone:hover { background: #202c42; border-color: var(--blue); }
+  html:not([data-theme='light']) .dropzone.is-loaded,
+  html:not([data-theme='light']) .gen-file.is-done,
+  html:not([data-theme='light']) .journey-step.is-done:hover { background: rgba(34,197,94,.12); }
+  html:not([data-theme='light']) .success-panel { background: rgba(34,197,94,.12); border-color: rgba(34,197,94,.4); }
+  html:not([data-theme='light']) .btn--primary:hover:not(:disabled) { background: #2c4ba3; }
+  html:not([data-theme='light']) .btn--ghost:hover:not(:disabled) { background: #232f47; }
+  html:not([data-theme='light']) .dl-link:hover { background: #232f47; }
+  html:not([data-theme='light']) .storage-warn { background: #3a2a12; color: #FCD9A6; border-bottom-color: #6b4e1f; }
+  html:not([data-theme='light']) .panel-warn { background: #33290f; border-color: #6b571f; }
+  html:not([data-theme='light']) .panel-warn__title { color: #FBD38D; }
+  html:not([data-theme='light']) .notelist li.err { background: var(--bg-red); color: #FCA5A5; }
+  html:not([data-theme='light']) .notelist li.warn { background: #33290f; color: #FBD38D; }
+  html:not([data-theme='light']) .kpi-item__value .delta { color: var(--good-text); }
+  html:not([data-theme='light']) .unmatched-row { border-top-color: #6b571f; }
+}
+
+/* --white is remapped to a dark elevated *surface* in dark mode, but it is ALSO
+   used as white *foreground* text on the (still-navy/red/green) appbar, buttons,
+   table headers, journey pills, badges and toasts. Those foregrounds must stay
+   white — restore them here. (Light mode is untouched: --white = #fff there.) */
+html[data-theme='dark'] .appbar,
+html[data-theme='dark'] .navbtn,
+html[data-theme='dark'] .btn--primary,
+html[data-theme='dark'] .btn--danger,
+html[data-theme='dark'] .etable th,
+html[data-theme='dark'] .toast,
+html[data-theme='dark'] .journey-step.is-current,
+html[data-theme='dark'] .journey-step.is-current .journey-marker,
+html[data-theme='dark'] .journey-step.is-done .journey-marker,
+html[data-theme='dark'] .st-badge,
+html[data-theme='dark'] .st-btn--primary,
+html[data-theme='dark'] .st-table thead th,
+html[data-theme='dark'] .st-toast { color: #fff; }
+
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme='light']) .appbar,
+  html:not([data-theme='light']) .navbtn,
+  html:not([data-theme='light']) .btn--primary,
+  html:not([data-theme='light']) .btn--danger,
+  html:not([data-theme='light']) .etable th,
+  html:not([data-theme='light']) .toast,
+  html:not([data-theme='light']) .journey-step.is-current,
+  html:not([data-theme='light']) .journey-step.is-current .journey-marker,
+  html:not([data-theme='light']) .journey-step.is-done .journey-marker,
+  html:not([data-theme='light']) .st-badge,
+  html:not([data-theme='light']) .st-btn--primary,
+  html:not([data-theme='light']) .st-table thead th,
+  html:not([data-theme='light']) .st-toast { color: #fff; }
+}
+
+/* App-bar theme toggle — inherits .navbtn look; just add the icon sizing. */
+.navbtn--theme { font-size: 1.05rem; padding: 8px 10px; }

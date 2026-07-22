@@ -382,3 +382,29 @@
     max-width: 100%;
   }
 }
+
+/* ---- dark appearance ----
+   --st-white is a hardcoded #fff used for panel/tab/input/table surfaces, so it
+   must be remapped for dark. --st-navy stays a navy for backgrounds (badges,
+   table headers, primary buttons carry white text); navy-as-TEXT sites switch to
+   --brand-ink. Base --st-bg/--st-border/--st-text already flip via the app-level
+   token remap. */
+html[data-theme='dark'] .st-root { --st-white: #1B2537; }
+html[data-theme='dark'] .st-title,
+html[data-theme='dark'] .st-tab--active,
+html[data-theme='dark'] .st-tab:hover,
+html[data-theme='dark'] .st-file-label,
+html[data-theme='dark'] .st-td-total { color: var(--brand-ink); }
+html[data-theme='dark'] .st-banner--warn { background: #33290f; border-color: #6b571f; color: #FBD38D; }
+html[data-theme='dark'] .st-btn--danger:hover { background: rgba(240,82,82,.14); }
+
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme='light']) .st-root { --st-white: #1B2537; }
+  html:not([data-theme='light']) .st-title,
+  html:not([data-theme='light']) .st-tab--active,
+  html:not([data-theme='light']) .st-tab:hover,
+  html:not([data-theme='light']) .st-file-label,
+  html:not([data-theme='light']) .st-td-total { color: var(--brand-ink); }
+  html:not([data-theme='light']) .st-banner--warn { background: #33290f; border-color: #6b571f; color: #FBD38D; }
+  html:not([data-theme='light']) .st-btn--danger:hover { background: rgba(240,82,82,.14); }
+}

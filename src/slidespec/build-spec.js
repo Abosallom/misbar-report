@@ -12,7 +12,7 @@
 //   m.reportOptions.slides[key]   toggles the 5 middle slides (cover/thanks always render)
 //   m.reportOptions.kpiCards[key] toggles the 7 exec KPI cards (row geometry repacks)
 //   m.overrides[key]              per-run manual NUMBER overrides (suppresses that delta chip)
-import { COLORS as C, GEOM } from '../theme.js?v=v2026-07-22.10';
+import { COLORS as C, GEOM } from '../theme.js?v=v2026-07-22.11';
 
 // ============================================================================
 // LABELS REGISTRY — user-facing STATIC strings. DEFAULT_LABELS holds the built-in

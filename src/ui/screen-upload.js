@@ -1,10 +1,10 @@
 // ui/screen-upload.js — file upload + parse + engine kickoff (Track E).
-import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-07-22.10';
-import { el, dropZone, fileSummaryCard, toast } from './components.js?v=v2026-07-22.10';
-import { normTest } from '../contracts.js?v=v2026-07-22.10';
-import { getPapa, getXLSX } from '../vendor-loader.js?v=v2026-07-22.10';
-import { TAT_LOINC } from '../seeds/tat-lookup.js?v=v2026-07-22.10';
-import { buildLateLabsSection } from './late-labs-section.js?v=v2026-07-22.10';
+import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-07-22.11';
+import { el, dropZone, fileSummaryCard, toast } from './components.js?v=v2026-07-22.11';
+import { normTest } from '../contracts.js?v=v2026-07-22.11';
+import { getPapa, getXLSX } from '../vendor-loader.js?v=v2026-07-22.11';
+import { TAT_LOINC } from '../seeds/tat-lookup.js?v=v2026-07-22.11';
+import { buildLateLabsSection } from './late-labs-section.js?v=v2026-07-22.11';
 
 /** Format an ISO timestamp as local 'HH:MM' for snapshot-freshness labels. */
 function fmtHHMM(iso) {
@@ -200,7 +200,7 @@ function normalizeTracker(res) {
 
 async function ingestCsv(file) {
   const Papa = await getPapa();
-  const mod = await tryImport('../ingest/csv.js?v=v2026-07-22.10');
+  const mod = await tryImport('../ingest/csv.js?v=v2026-07-22.11');
   const fn = pickFn(mod, ['parseKamcCsv', 'parseCsv', 'ingestCsv', 'parseOrders', 'parse']);
   if (fn) {
     const text = await file.text();
@@ -213,7 +213,7 @@ async function ingestCsv(file) {
 
 async function ingestTracker(file) {
   const XLSX = await getXLSX();
-  const mod = await tryImport('../ingest/xlsx.js?v=v2026-07-22.10');
+  const mod = await tryImport('../ingest/xlsx.js?v=v2026-07-22.11');
   const fn = pickFn(mod, ['parseTracker', 'ingestXlsx', 'parseXlsx', 'parse']);
   if (fn) {
     const buf = await file.arrayBuffer();
@@ -328,7 +328,7 @@ export async function render(container, ctx) {
       const ageH = (now - at) / 3600000;
       if (ageH > 2) {
         freshnessEl.textContent = STR.upload.snapshotStale.replace('{t}', when);
-        freshnessEl.style.color = '#B45309';
+        freshnessEl.style.color = 'var(--warn-text,#B45309)';
         freshnessEl.style.fontWeight = '600';
       } else {
         freshnessEl.textContent = STR.upload.snapshotFreshness.replace('{t}', when);
@@ -383,7 +383,7 @@ export async function render(container, ctx) {
     const gcfg = (store.settings && store.settings.grafana) || {};
     const dataKey = (gcfg.dataKey || '').trim();
     try {
-      const mod = await import('../ingest/grafana.js?v=v2026-07-22.10');
+      const mod = await import('../ingest/grafana.js?v=v2026-07-22.11');
       const asOf = state.reportDate || todayISO();
       const directConfigured = !!(gcfg.baseUrl && gcfg.accessToken);
       try {
@@ -582,7 +582,7 @@ export async function render(container, ctx) {
           return rowEl;
         });
         // Header: title + (async) subtitle on the start side, apply-all button on the end.
-        const subtitleEl = el('p', { class: 'small', style: 'display:none;color:#92400E;margin:2px 0 0' });
+        const subtitleEl = el('p', { class: 'small', style: 'display:none;color:var(--warn-text,#92400E);margin:2px 0 0' });
         const actionsBar = el('div', { style: 'flex:0 0 auto' });
         const header = el('div', {
           style: 'display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap',
@@ -685,7 +685,7 @@ export async function render(container, ctx) {
     const seq = ++unmatchedSeq;
     let mod;
     try {
-      mod = await import('../ingest/tat-suggest.js?v=v2026-07-22.10');
+      mod = await import('../ingest/tat-suggest.js?v=v2026-07-22.11');
     } catch { return; } // module not present yet — keep the plain panel behavior
     if (seq !== unmatchedSeq) return; // a newer paint superseded this run
     const fn = pickFn(mod, ['suggestTats']);
@@ -777,7 +777,7 @@ export async function render(container, ctx) {
     }, [
       el('span', { text: String(value) }),
       (typeof delta === 'number' && delta > 0) ? el('span', {
-        style: 'font-size:13px;font-weight:700;color:var(--delta-green);background:#E7F6EC;border-radius:999px;padding:1px 8px;white-space:nowrap;direction:ltr;unicode-bidi:isolate',
+        style: 'font-size:13px;font-weight:700;color:var(--good-text,var(--delta-green));background:var(--good-bg,#E7F6EC);border-radius:999px;padding:1px 8px;white-space:nowrap;direction:ltr;unicode-bidi:isolate',
         text: `+${delta}`,
       }) : null,
     ]);
@@ -798,18 +798,18 @@ export async function render(container, ctx) {
     const pct = total > 0 ? Math.round((completed / total) * 1000) / 10 : 0;
 
     const tiles = [
-      { label: 'إجمالي الطلبات', value: total, accent: 'var(--navy)', num: 'var(--navy)' },
-      { label: 'نتائج مكتملة', value: completed, accent: 'var(--green)', num: '#15803D', delta: deltas.completed },
-      { label: 'بانتظار النتائج', value: b.awaitingResults || 0, accent: 'var(--amber)', num: '#B45309' },
+      { label: 'إجمالي الطلبات', value: total, accent: 'var(--navy)', num: 'var(--brand-ink)' },
+      { label: 'نتائج مكتملة', value: completed, accent: 'var(--green)', num: 'var(--good-text,#15803D)', delta: deltas.completed },
+      { label: 'بانتظار النتائج', value: b.awaitingResults || 0, accent: 'var(--amber)', num: 'var(--warn-text,#B45309)' },
       { label: 'المتأخرة', value: b.lateNoResult || 0, accent: 'var(--red)', num: 'var(--red)' },
-      { label: 'المرفوضة', value: b.rejected || 0, accent: '#F87171', num: '#B91C1C' },
+      { label: 'المرفوضة', value: b.rejected || 0, accent: '#F87171', num: 'var(--bad-text,#B91C1C)' },
       { label: 'نسبة الاكتمال', value: `${pct}%`, accent: 'var(--blue)', num: 'var(--blue)' },
     ];
 
     const header = el('div', {
       style: 'display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;flex-wrap:wrap',
     }, [
-      el('div', { style: 'font-size:1.05rem;font-weight:800;color:var(--navy);display:flex;align-items:center;gap:8px' }, [
+      el('div', { style: 'font-size:1.05rem;font-weight:800;color:var(--brand-ink);display:flex;align-items:center;gap:8px' }, [
         el('span', { text: '📊' }),
         el('span', { text: 'لمحة اليوم' }),
       ]),
@@ -831,7 +831,7 @@ export async function render(container, ctx) {
     if (!orders || !orders.length) { heroHost.innerHTML = ''; return; }
     let out;
     try {
-      const mod = await import('../engine/engine.js?v=v2026-07-22.10');
+      const mod = await import('../engine/engine.js?v=v2026-07-22.11');
       if (seq !== heroSeq) return; // a newer run superseded this one
       const compute = pickFn(mod, ['compute', 'runEngine', 'run']);
       if (typeof compute !== 'function') { heroHost.innerHTML = ''; return; }
@@ -856,7 +856,7 @@ export async function render(container, ctx) {
       let out = (state.engineOutput && state.engineOutput.totals) ? state.engineOutput : null;
       if (!out) {
         try {
-          const mod = await tryImport('../engine/engine.js?v=v2026-07-22.10');
+          const mod = await tryImport('../engine/engine.js?v=v2026-07-22.11');
           const compute = pickFn(mod, ['compute', 'runEngine', 'run']);
           if (compute) {
             out = compute(state.parsed.orders, (store.settings || {}).tatLookup, engineOpts());

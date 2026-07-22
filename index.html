@@ -4,8 +4,20 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#1E3A8A">
-  <meta name="color-scheme" content="light">
+  <meta name="color-scheme" content="light dark">
   <title>مولد تقرير مسبار اليومي</title>
+
+  <!-- Apply the stored appearance BEFORE first paint (no flash). Absence of the
+       key = follow the OS via CSS @media(prefers-color-scheme). Only an explicit
+       'dark'/'light' stamps data-theme (which then wins over the media query). -->
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem('misbar.theme.v1');
+        if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t);
+      } catch (e) { /* storage blocked — fall back to system */ }
+    })();
+  </script>
 
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" type="image/svg+xml" href="assets/icon.svg">
@@ -16,10 +28,10 @@
   <link rel="preload" href="assets/fonts/Cairo-400-latin.woff2" as="font" type="font/woff2" crossorigin>
 
   <!-- Stylesheets: fonts + app chrome (Track E) then settings + slide (other tracks). -->
-  <link rel="stylesheet" href="styles/fonts.css?v=v2026-07-22.10">
-  <link rel="stylesheet" href="styles/app.css?v=v2026-07-22.10">
-  <link rel="stylesheet" href="styles/settings.css?v=v2026-07-22.10">
-  <link rel="stylesheet" href="styles/slide.css?v=v2026-07-22.10">
+  <link rel="stylesheet" href="styles/fonts.css?v=v2026-07-22.11">
+  <link rel="stylesheet" href="styles/app.css?v=v2026-07-22.11">
+  <link rel="stylesheet" href="styles/settings.css?v=v2026-07-22.11">
+  <link rel="stylesheet" href="styles/slide.css?v=v2026-07-22.11">
 
   <!-- PapaParse eager (UMD -> window.Papa). -->
   <script src="vendor/papaparse.min.js"></script>
@@ -27,6 +39,6 @@
 <body>
   <div id="app-shell"></div>
   <noscript>هذا التطبيق يتطلب تفعيل JavaScript.</noscript>
-  <script type="module" src="src/main.js?v=v2026-07-22.10"></script>
+  <script type="module" src="src/main.js?v=v2026-07-22.11"></script>
 </body>
 </html>

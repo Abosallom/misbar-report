@@ -1,8 +1,8 @@
 // ui/screen-review.js — review/edit report content with a live slide preview (Track E).
-import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-07-22.10';
-import { el, editableTable, textareaField, toast } from './components.js?v=v2026-07-22.10';
-import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-07-22.10';
-import { autoDraft } from '../model/drafts.js?v=v2026-07-22.10';
+import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-07-22.11';
+import { el, editableTable, textareaField, toast } from './components.js?v=v2026-07-22.11';
+import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-07-22.11';
+import { autoDraft } from '../model/drafts.js?v=v2026-07-22.11';
 
 /* small local module helpers (kept local to avoid cross-screen coupling) */
 async function tryImport(path) { try { return await import(path); } catch { return null; } }
@@ -81,8 +81,8 @@ const SLIDE_TOGGLES = [
   { key: 'action', label: STR.review.slideToggles.action },
 ];
 
-const OV_INPUT_STYLE = 'flex:1;min-width:0;border:1px solid var(--border-dark);border-radius:6px;padding:6px 8px;min-height:36px;background:var(--white);color:var(--slate-900);font-weight:700;text-align:right';
-const OV_BADGE_STYLE = 'align-items:center;background:#FEF3C7;color:#92400E;border:1px solid var(--amber);font-size:.68rem;font-weight:700;padding:1px 8px;border-radius:999px;white-space:nowrap';
+const OV_INPUT_STYLE = 'flex:1;min-width:0;border:1px solid var(--border-dark);border-radius:6px;padding:6px 8px;min-height:36px;background:var(--white);color:var(--text);font-weight:700;text-align:right';
+const OV_BADGE_STYLE = 'align-items:center;background:var(--warn-bg,#FEF3C7);color:var(--warn-text,#92400E);border:1px solid var(--amber);font-size:.68rem;font-weight:700;padding:1px 8px;border-radius:999px;white-space:nowrap';
 const OV_RESET_STYLE = 'align-items:center;justify-content:center;flex:0 0 auto;width:32px;height:32px;border:1px solid var(--border-dark);background:var(--white);color:var(--slate-600);border-radius:6px;cursor:pointer;font-size:1rem;line-height:1';
 const chipStyle = (on) => 'border-radius:999px;padding:6px 14px;font-weight:700;font-size:.85rem;cursor:pointer;min-height:36px;'
   + (on
@@ -105,16 +105,16 @@ const DELTA_META = [
   { key: 'received', label: 'تم استلامها', intent: 'info' },
 ];
 const DELTA_CHIP_TONE = {
-  good: 'background:#DCFCE7;color:#166534;border:1px solid rgba(22,163,74,.35)',
-  bad: 'background:#FEE2E2;color:#991B1B;border:1px solid rgba(220,38,38,.35)',
-  wait: 'background:#FEF3C7;color:#92400E;border:1px solid rgba(245,158,11,.45)',
-  info: 'background:#E0E7FF;color:#1E3A8A;border:1px solid rgba(30,58,138,.30)',
+  good: 'background:var(--good-bg,#DCFCE7);color:var(--good-text,#166534);border:1px solid rgba(22,163,74,.35)',
+  bad: 'background:var(--bad-bg,#FEE2E2);color:var(--bad-text,#991B1B);border:1px solid rgba(220,38,38,.35)',
+  wait: 'background:var(--warn-bg,#FEF3C7);color:var(--warn-text,#92400E);border:1px solid rgba(245,158,11,.45)',
+  info: 'background:var(--info-bg,#E0E7FF);color:var(--info-text,#1E3A8A);border:1px solid rgba(30,58,138,.30)',
 };
 const DELTA_CHIP_BASE = 'display:inline-flex;align-items:center;gap:4px;border-radius:999px;padding:6px 13px;font-weight:800;font-size:.82rem;line-height:1.3;white-space:nowrap';
 
 /* Slide-pager (preview) chrome. */
 const PAGER_BAR_STYLE = 'display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap';
-const PAGER_ARROW_STYLE = 'min-width:40px;height:40px;flex:0 0 auto;border:1px solid var(--border-dark);background:var(--white);color:var(--navy);border-radius:8px;font-size:1.1rem;line-height:1;cursor:pointer;display:inline-flex;align-items:center;justify-content:center';
+const PAGER_ARROW_STYLE = 'min-width:40px;height:40px;flex:0 0 auto;border:1px solid var(--border-dark);background:var(--white);color:var(--brand-ink);border-radius:8px;font-size:1.1rem;line-height:1;cursor:pointer;display:inline-flex;align-items:center;justify-content:center';
 const PAGER_COUNT_STYLE = 'font-weight:700;color:var(--slate-600);font-size:.85rem;white-space:nowrap';
 const pagerDotStyle = (on) => 'min-width:30px;height:30px;flex:0 0 auto;border-radius:6px;font-size:.78rem;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;'
   + (on ? 'background:var(--navy);color:#fff;border:1px solid var(--navy)'
@@ -238,9 +238,9 @@ export async function render(container, ctx) {
   async function renderPreview() {
     const token = ++renderToken;
     model.reportDate = state.reportDate;
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-07-22.10');
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-07-22.11');
     const buildSpec = pickFn(specMod, ['buildSpec', 'build', 'makeSpec', 'toSpec']);
-    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-07-22.10');
+    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-07-22.11');
     const renderFn = pickFn(rendMod, ['renderSpec', 'renderSlides', 'renderHtml', 'render']);
 
     if (!buildSpec || !renderFn) {
@@ -436,7 +436,7 @@ export async function render(container, ctx) {
       // Collapse everything past the threshold unless expanded.
       tr.style.display = (!internalExpanded && i >= COLLAPSE_ROWS) ? 'none' : '';
       // مغلق → subtle green 'done' tint; hidden (collapsed done-work) → dimmed + chip.
-      tr.style.background = isClosed(r) ? 'rgba(22,163,74,.08)' : '';
+      tr.style.background = isClosed(r) ? 'var(--closed-tint,rgba(22,163,74,.08))' : '';
       tr.style.opacity = r.hidden ? '0.55' : '';
       if (r.hidden) {
         const firstCell = tr.firstElementChild;
@@ -592,7 +592,7 @@ export async function render(container, ctx) {
     el('summary', { class: 'card__title', style: 'cursor:pointer', text: STR.review.labelsCardTitle }),
   ]);
   (async () => {
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-07-22.10');
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-07-22.11');
     const LABEL_NAMES = specMod && specMod.LABEL_NAMES;
     const DEFAULT_LABELS = (specMod && specMod.DEFAULT_LABELS) || {};
     if (!LABEL_NAMES || typeof LABEL_NAMES !== 'object') {

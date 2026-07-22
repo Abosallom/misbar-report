@@ -20,11 +20,11 @@
 //   • GRAIN = per test LINE (order line): counts (late/dueSoon) and data rows are
 //     NEVER deduplicated by order — one order with 3 qualifying tests contributes
 //     3 rows and counts as 3, not 1.
-import { buildTatIndex, resolveTat } from '../engine/tat.js?v=v2026-07-22.10';
+import { buildTatIndex, resolveTat } from '../engine/tat.js?v=v2026-07-22.11';
 import {
   parseDateTime, toEpochDay, workday, dayDiff,
-} from '../engine/workday.js?v=v2026-07-22.10';
-import { writeStyledXlsx } from './xlsx-styled.js?v=v2026-07-22.10';
+} from '../engine/workday.js?v=v2026-07-22.11';
+import { writeStyledXlsx } from './xlsx-styled.js?v=v2026-07-22.11';
 
 /** The 20 export columns, VERBATIM (keep the 'Lonic code' typo — established format). */
 export const LATE_LAB_HEADERS = Object.freeze([
