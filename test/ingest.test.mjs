@@ -32,7 +32,10 @@ const TRK_PATH = firstExisting(
   join(HERE, 'samples/tracker.xlsx'),
   '/Users/aziz/Misbar Project Tracker.xlsx',
 );
-const TAT_PATH = firstExisting('/Users/aziz/TAT Lookup.xlsx');
+const TAT_PATH = firstExisting(
+  '/Users/aziz/TAT Lookup.xlsx',
+  '/Users/aziz/Downloads/TAT Lookup.xlsx',
+);
 
 const REPORT_DATE = '2026-07-09';
 const SKIP = { csv: !CSV_PATH, trk: !TRK_PATH, tat: !TAT_PATH };
@@ -100,14 +103,25 @@ test('parseTatLookupXlsx — 59 tests from the TAT Lookup workbook', { skip: SKI
   );
 });
 
-test('autoDraft — reproduces the 8 current / 5 internal split', { skip: SKIP.trk }, () => {
+test('autoDraft — current stays filtered (8); internal is the full لين log (31)', { skip: SKIP.trk }, () => {
   const trk = parseTracker(trkBuf, XLSX);
   const d = autoDraft(trk, REPORT_DATE);
+  // tasksCurrent (NUPCO/external): non-closed + scheduled, non-لين. UNCHANGED.
   assert.equal(d.tasksCurrent.length, 8, 'current (external) tasks');
-  assert.equal(d.tasksInternal.length, 5, 'internal tasks');
-  // Internal slide is the لين-category subset.
+  // tasksInternal (داخلي): the COMPLETE لين log — every لين row, any status
+  // (مغلق included), unscheduled + hidden rows included (user decision 2026-07-22).
+  const linTotal = trk.tasks.filter((t) => t.category === 'لين').length;
+  assert.equal(linTotal, 31, 'sanity: full لين count in the sample tracker');
+  assert.equal(d.tasksInternal.length, 31, 'internal tasks = full لين log');
+  // Every internal row is لين; current has no لين.
   assert.ok(d.tasksInternal.every((t) => t.category === 'لين'));
   assert.ok(d.tasksCurrent.every((t) => t.category !== 'لين'));
+  // The full log keeps closed rows: مغلق is present and verbatim on internal rows.
+  assert.ok(d.tasksInternal.some((t) => t.status === 'مغلق'), 'at least one مغلق internal row');
+  // Display mapping still applies to internal rows (مفتوح -> قيد التنفيذ; no raw مفتوح).
+  assert.ok(!d.tasksInternal.some((t) => t.status === 'مفتوح'));
+  // Current stays none-لين / none-closed.
+  assert.ok(!d.tasksCurrent.some((t) => t.status === 'مغلق'), 'current has no closed rows');
   // Display mapping: مفتوح -> قيد التنفيذ; ongoing/late statuses stay verbatim.
   assert.ok(!d.tasksCurrent.some((t) => t.status === 'مفتوح'));
   assert.ok(d.tasksCurrent.some((t) => t.status === 'قيد التنفيذ'));
@@ -127,7 +141,7 @@ test('buildReportModel — wires drafts and applies edits (shallow merge)', { sk
   assert.equal(m0.reportDate, REPORT_DATE);
   assert.equal(m0.kpi, engineOutput);
   assert.equal(m0.tasksCurrent.length, 8);
-  assert.equal(m0.tasksInternal.length, 5);
+  assert.equal(m0.tasksInternal.length, 31);
   assert.equal(m0.challenges.length, 5);
   assert.equal(m0.risks.length, 1);
   assert.equal(m0.scorecard, settings.scorecard);
@@ -142,6 +156,6 @@ test('buildReportModel — wires drafts and applies edits (shallow merge)', { sk
   const m1 = buildReportModel({ engineOutput, tracker: trk, settings, reportDate: REPORT_DATE, edits });
   assert.deepEqual(m1.panels.supportRequired, ['custom bullet']);
   assert.equal(m1.tasksCurrent.length, 1); // replaced
-  assert.equal(m1.tasksInternal.length, 5); // untouched -> still auto-drafted
+  assert.equal(m1.tasksInternal.length, 31); // untouched -> still auto-drafted (full لين log)
   assert.deepEqual(m1.panels.completedTasks, m0.panels.completedTasks); // other panel keys survive
 });

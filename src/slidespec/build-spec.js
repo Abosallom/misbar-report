@@ -26,6 +26,7 @@ export const DEFAULT_LABELS = {
   titleMonthly: 'الطلبات والنتائج الشهرية',
   titleCompliance: 'مقياس الالتزام',
   titleAction: 'المهام والتحديات والمخاطر',
+  titleActionCont: 'المهام — تتمة',
   // Cover + thanks
   coverTitle: 'تقرير مسبار اليومي',
   coverSubtitle: 'متابعة تقدم الطلبات وقياس جاهزية المختبرات',
@@ -123,6 +124,7 @@ export const LABEL_NAMES = {
   titleMonthly: 'عنوان شريحة الطلبات الشهرية',
   titleCompliance: 'عنوان شريحة مقياس الالتزام',
   titleAction: 'عنوان شريحة المهام والتحديات',
+  titleActionCont: 'عنوان شريحة تتمة المهام',
   coverTitle: 'عنوان الغلاف',
   coverSubtitle: 'العنوان الفرعي للغلاف',
   coverPreparedBy: 'سطر جهة الإعداد في الغلاف',
@@ -168,6 +170,7 @@ export const LABEL_NAMES = {
   chartOnTimeSeries: 'سلسلة الطلبات الملتزمة',
   overallAvgTitle: 'عنوان بطاقة متوسط زمن الإنجاز',
   execPartition: 'حاشية معادلة الإجمالي (الملخص التنفيذي)',
+  monthlyPartition: 'حاشية معادلة الطلبات الشهرية',
   execCancelledLabel: 'نص ملاحظة الطلبات الملغاة',
   execCancelledHistPre: 'ملاحظة الملغاة: بادئة الجزء التاريخي',
   execCancelledHistPost: 'ملاحظة الملغاة: لاحقة الجزء التاريخي',
@@ -686,11 +689,15 @@ function buildCompliance(m) {
 // ============================================================================
 // Slide 5 — Tasks + challenges + risks (variant changes the task ROWS)
 // ============================================================================
-const STATUS_FILL = { 'مستمر': { fill: C.taskNavy, color: C.white }, 'متأخر': { fill: C.redDark, color: C.white }, 'قيد التنفيذ': { fill: C.amberStatus, color: C.black }, 'مغلق': { fill: C.green, color: C.white }, 'مفتوح': { fill: C.slate500, color: C.white } };
+// 'مغلق' (closed) reads as DONE — greenBright (#00B050) fill, white text — so a fully
+// closed لين action never looks "in progress". Other statuses are unchanged.
+const STATUS_FILL = { 'مستمر': { fill: C.taskNavy, color: C.white }, 'متأخر': { fill: C.redDark, color: C.white }, 'قيد التنفيذ': { fill: C.amberStatus, color: C.black }, 'مغلق': { fill: C.greenBright, color: C.white }, 'مفتوح': { fill: C.slate500, color: C.white } };
 
-// Full-width tasks table. '#' is renumbered by row index (i+1) — internal rows do
-// NOT keep their own tk.num (which restarts at 1). rowH/fonts are parametrized.
-function taskTable(tasks, { y, rowH, bodySize, headerSize, L }) {
+// Full-width tasks table. '#' is renumbered by row index (startIndex + i + 1) —
+// internal rows do NOT keep their own tk.num (which restarts at 1). startIndex lets a
+// continuation slide's '#' CONTINUE (e.g. 16..) instead of restarting at 1. rowH/fonts
+// are parametrized.
+function taskTable(tasks, { y, rowH, bodySize, headerSize, L, startIndex = 0 }) {
   // rtl=0 in deck: visual == authored order [الحالة, تاريخ, المالك, المسؤول, الإجراء, #]
   const header = [L('taskStatus'), L('taskDue'), L('taskOwner'), L('taskResponsible'), L('taskAction'), L('taskHash')];
   const rows = tasks.map((tk, i) => {
@@ -701,7 +708,7 @@ function taskTable(tasks, { y, rowH, bodySize, headerSize, L }) {
       { text: tk.owner, align: 'right' },
       tk.responsible,
       { text: tk.task, align: 'right' },
-      String(i + 1),
+      String(startIndex + i + 1),
     ];
   });
   return {
@@ -734,19 +741,53 @@ const crNote = (x, hidden) => text(
   { italic: true, color: C.slate600, align: 'center', valign: 'middle', rtl: true },
 );
 
+// ---- task-table pagination ---------------------------------------------------
+// The internal report's task list is now ALL لين actions (every status incl. مغلق),
+// which routinely exceeds the first slide's 15-row block. Rows 1..15 stay on the
+// action slide (its '+ N مهمة أخرى' note becomes a small 'يتبع…' continuation marker);
+// the remainder flows onto one or more full-band continuation slides.
+const TASK_CAP = 15;                       // first-slide task rows
+const CONT_CAP = 30;                       // task rows per continuation slide (~30 at min rowH 0.18)
+// Two-line date RANGES (e.g. '25-06-2026\n16-07-2026') render ~38px of ink, which needs
+// rowH ≈ 0.44 to clear the next row. That cap only engages at ≤12 rows/slide
+// (band/13 → 0.44); a 16-row page falls to rowH 0.35 and the stacked dates collide
+// (browser Range probe: 15 offenders). So two-line continuation pages carry ≤12 rows
+// and spill onto further continuation slides — no truncation, no ink collision.
+const CONT_CAP_TWOLINE = 12;               // task rows per continuation slide when dates wrap
+const CONT_Y_TOP = 1.0, CONT_Y_BOT = 6.95; // full-band table window
+const CONT_BAND = CONT_Y_BOT - CONT_Y_TOP; // 5.95in
+
+// One continuation slide: a full-band task table, same columns/colW as the first
+// slide. rowH = clamp(0.18, band/(rows+1), cap) — cap 0.34, raised to 0.44 when any
+// row carries a two-line date range (reuses the first-slide adaptive-cap logic so
+// stacked date ranges don't collide). The table height = (rows+1)*rowH ≤ band, so it
+// never crosses CONT_Y_BOT (6.95). '#' continues from startIndex (16, 46, …).
+function buildActionCont(tasks, startIndex, contNo, L) {
+  const rowCount = tasks.length;
+  const hasTwoLine = tasks.some((t) =>
+    Object.values(t || {}).some((v) => typeof v === 'string' && v.includes('\n')));
+  const rowCap = hasTwoLine ? 0.44 : 0.34;
+  const rowH = Math.max(0.18, Math.min(rowCap, CONT_BAND / (rowCount + 1)));
+  const bodySize = rowH >= 0.26 ? 9.5 : rowH >= 0.21 ? 9 : 8;
+  const table = taskTable(tasks, { y: CONT_Y_TOP, rowH, bodySize, headerSize: bodySize, L, startIndex });
+  return { id: `action-cont-${contNo}`, bg: C.white, elements: [...chrome(L('titleActionCont')), table] };
+}
+
+// Returns an ARRAY of slides: [action, action-cont-1, …]. buildSpec flattens it so the
+// continuation slides land right after the action slide and pick up sequential footers.
 function buildAction(m, variant) {
   const L = labelOf(m);
   // Block 1 — tasks table. nupco = current only; internal appends the internal rows.
   // Internal report = لين-category actions only; NUPCO = the remaining actions.
   const taskRows = variant === 'nupco' ? m.tasksCurrent : m.tasksInternal;
   const n = taskRows.length;
-  const CAP = 15;
+  const CAP = TASK_CAP;
   const shown = Math.min(n, CAP);
   const hasNote = n > CAP;
-  // Reserve the overflow note's slot (0.26") out of AREA up front, so the table rows
-  // shrink to fit and the note lands ABOVE the support band (starts 4.62). Without
-  // this the fixed-height table pushed the note to y=4.50 (bottom 4.74), overlapping
-  // the band. With it, noteY + 0.24 ≤ 4.60. AREA is untouched when there is no note,
+  // Reserve the marker slot (0.26") out of AREA up front, so the table rows shrink to
+  // fit and the 'يتبع…' marker lands ABOVE the support band (starts 4.62). Without this
+  // the fixed-height table pushed the marker to y=4.50 (bottom 4.74), overlapping the
+  // band. With it, markerY + 0.24 ≤ 4.60. AREA is untouched when there is no overflow,
   // so the n≤15 layout is unchanged.
   const AREA = hasNote ? 3.35 - 0.26 : 3.35;
   // Two-line cells (date RANGES like '25-06-2026\n16-07-2026') need ~0.42in of
@@ -766,8 +807,11 @@ function buildAction(m, variant) {
     table,
   ];
   if (hasNote) {
-    const noteY = 1.15 + (shown + 1) * rowH;
-    els.push(text(0.641, noteY, 12.259, 0.24, `+ ${n - CAP} مهمة أخرى`, bodySize, { italic: true, color: C.slate600, align: 'center', valign: 'middle', rtl: true }));
+    // Truncation is no longer acceptable for the internal report: rows 16.. move to
+    // continuation slides, so the first slide gets a small 'يتبع…' (continued…) marker
+    // instead of the old '+ N مهمة أخرى' drop note.
+    const markerY = 1.15 + (shown + 1) * rowH;
+    els.push(text(0.641, markerY, 12.259, 0.24, 'يتبع…', bodySize, { italic: true, color: C.slate600, align: 'center', valign: 'middle', rtl: true }));
   }
 
   // Block 2 — support required (full width red band, bottom 5.54, clear of the subhead
@@ -833,7 +877,19 @@ function buildAction(m, variant) {
   if (chCap.hidden > 0) els.push(crNote(6.80, chCap.hidden));
   if (rkCap.hidden > 0) els.push(crNote(0.5, rkCap.hidden));
 
-  return { id: 'action', bg: C.white, elements: els };
+  const slides = [{ id: 'action', bg: C.white, elements: els }];
+  // Continuation slides for rows 16..n. Page size shrinks to CONT_CAP_TWOLINE when ANY
+  // continuation row carries a wrapping date range, so those taller rows never collide;
+  // otherwise ~30 single-line rows per slide. '#' continues from the row's absolute
+  // position (start), so it never restarts at 1.
+  const rest = taskRows.slice(CAP);
+  const restTwoLine = rest.some((t) =>
+    Object.values(t || {}).some((v) => typeof v === 'string' && v.includes('\n')));
+  const pageSize = restTwoLine ? CONT_CAP_TWOLINE : CONT_CAP;
+  for (let start = CAP, contNo = 1; start < n; start += pageSize, contNo++) {
+    slides.push(buildActionCont(taskRows.slice(start, start + pageSize), start, contNo, L));
+  }
+  return slides;
 }
 
 // ============================================================================
@@ -904,16 +960,20 @@ export function buildSpec(reportModel, { variant = 'internal' } = {}) {
   // filtering so they renumber sequentially (1..n) over the INCLUDED content slides.
   const slides = m.reportOptions?.slides;
   const on = (key) => !slides || slides[key] !== false;
+  // Each builder returns an ARRAY of slides. Most yield exactly one; buildAction yields
+  // the action slide plus zero-or-more continuation slides (task pagination). flatMap
+  // splices those inline so continuation slides sit right after the action slide and
+  // pick up the sequential post-filter footer numbering automatically.
   const middleDefs = [
-    { key: 'execFunnel', build: () => buildExecFunnel(m) },
-    { key: 'monthly', build: () => buildMonthly(m) },
-    { key: 'compliance', build: () => buildCompliance(m) },
+    { key: 'execFunnel', build: () => [buildExecFunnel(m)] },
+    { key: 'monthly', build: () => [buildMonthly(m)] },
+    { key: 'compliance', build: () => [buildCompliance(m)] },
     { key: 'action', build: () => buildAction(m, variant) },
     // Definitions ('منهجية الأرقام') — default ON; rendered just before thanks and
     // participates in the sequential footer numbering like the other middle slides.
-    { key: 'definitions', build: () => buildDefinitions(m) },
+    { key: 'definitions', build: () => [buildDefinitions(m)] },
   ];
-  const middle = middleDefs.filter((x) => on(x.key)).map((x) => x.build());
+  const middle = middleDefs.filter((x) => on(x.key)).flatMap((x) => x.build());
   middle.forEach((s, i) => s.elements.push(pageFooter(i + 1)));
   return [buildCover(m), ...middle, buildThanks(m)];
 }

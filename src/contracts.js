@@ -18,6 +18,10 @@
  * @property {string|null} resulted    - Result report datetime
  * @property {string}      rawStatus   - Order Status column verbatim
  * @property {number|null} tatDaysCsv  - CSV "TAT - Days" (fallback only)
+ * @property {string|null} [specimenNo]           - Specimen identifier ('Specimen Id' col; export header 'Specimen no'). Operational id, not PHI.
+ * @property {string|null} [shipmentId]           - Shipment identifier ('Shipment ID'). Operational id, not PHI.
+ * @property {string|null} [orderingFacilityId]   - Ordering facility id ('Ordering facility ID'). Operational id, not PHI.
+ * @property {string|null} [performingFacilityId] - Performing facility id ('Performing facility id'); absent from the CSV export → null.
  */
 
 /**

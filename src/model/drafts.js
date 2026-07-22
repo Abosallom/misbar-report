@@ -40,6 +40,18 @@ const dayDiff = (a, b) => Math.round((a.getTime() - b.getTime()) / 86400000);
 
 /**
  * autoDraft(tracker, reportDate) -> draft panels + task splits.
+ *
+ * The two task lists follow DIFFERENT rules (user decision 2026-07-22):
+ *  - tasksCurrent (NUPCO/نوبكو, external deck): non-closed AND scheduled/active,
+ *    excluding the لين category. This is the published-deck filter (reproduces the
+ *    09-07 split of 8 current tasks). UNCHANGED.
+ *  - tasksInternal (داخلي, internal deck): the COMPLETE لين log — EVERY task whose
+ *    category === 'لين', in tracker order, at every status (مغلق included) and
+ *    including unscheduled rows and hidden (collapsed done-work) rows. 'All actions'
+ *    means all: nothing is filtered out. The `hidden` flag stays on each object.
+ * Status display mapping (مفتوح -> قيد التنفيذ) applies to internal rows too; the
+ * مغلق status is kept verbatim (displayStatus only rewrites مفتوح).
+ *
  * @param {import('../contracts.js').TrackerModel} tracker
  * @param {string} reportDate - 'YYYY-MM-DD'
  * @returns {{supportRequired:string[], completedTasks:string[], plannedTasks:string[],
@@ -51,11 +63,14 @@ export function autoDraft(tracker, reportDate) {
   const challenges = (tracker && tracker.challenges) || [];
   const rd = parseISO(reportDate);
 
-  // ---- Task slides: non-closed + scheduled, split by فئة التقرير ----
-  const active = tasks.filter((t) => t.status !== CLOSED && isScheduled(t));
+  // ---- Task slides ----
   const toDisplay = (t) => ({ ...t, status: displayStatus(t.status) });
-  const tasksInternal = active.filter((t) => t.category === CAT_INTERNAL).map(toDisplay);
+  // Current (external/NUPCO): non-closed + scheduled, non-لين. UNCHANGED rule.
+  const active = tasks.filter((t) => t.status !== CLOSED && isScheduled(t));
   const tasksCurrent = active.filter((t) => t.category !== CAT_INTERNAL).map(toDisplay);
+  // Internal (داخلي): the complete لين log — all statuses, unscheduled + hidden rows
+  // included, tracker order preserved. hidden flag survives via the {...t} spread.
+  const tasksInternal = tasks.filter((t) => t.category === CAT_INTERNAL).map(toDisplay);
 
   // ---- supportRequired: solutions of OPEN (مفتوح) challenges ----
   const supportRequired = challenges

@@ -2,10 +2,12 @@
 import { STR, todayISO, buildFileName, formatDateAr } from '../i18n/ar.js';
 import { el, progressBar, toast } from './components.js';
 import { VARIANTS } from '../contracts.js';
-import { getGenLibs } from '../vendor-loader.js';
+import { getGenLibs, getXLSX } from '../vendor-loader.js';
 import { resetRunData } from '../state.js';
 import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js';
 import { autoDraft } from '../model/drafts.js';
+import { buildLateLabWorkbooks } from '../export/late-labs.js';
+import { parseDateTime } from '../engine/workday.js';
 
 async function tryImport(path) { try { return await import(path); } catch { return null; } }
 function pickFn(mod, names) {
@@ -57,6 +59,11 @@ function fallbackModel(state, store) {
   let d;
   try { d = autoDraft(tracker, reportDate); } catch { d = null; }
   const visible = (tracker.tasks || []).filter((t) => !t.hidden && t.status !== 'مغلق');
+  // Canonical internal fallback: the complete لين log (hidden + مغلق included),
+  // same مفتوح→قيد التنفيذ display mapping autoDraft applies.
+  const linAll = (tracker.tasks || [])
+    .filter((t) => t.category === 'لين')
+    .map((t) => (t.status === 'مفتوح' ? { ...t, status: 'قيد التنفيذ' } : t));
   return {
     reportDate,
     kpi,
@@ -66,7 +73,7 @@ function fallbackModel(state, store) {
       plannedTasks: (d && d.plannedTasks) || [],
     },
     tasksCurrent: (d && d.tasksCurrent) || visible,
-    tasksInternal: (d && d.tasksInternal) || [],
+    tasksInternal: (d && d.tasksInternal) || linAll,
     challenges: tracker.challenges || [],
     risks: tracker.risks || [],
     scorecard: (store.settings && store.settings.scorecard) || [],
@@ -234,9 +241,116 @@ function buildShareCard(model, date, fileCount) {
   ]);
 }
 
+// English email template the team pastes when notifying a lab — verbatim wording.
+function labEmailText(lab) {
+  const subject = `${lab} | Late Test Results — Action Required`;
+  const body = [
+    'Dear all,',
+    'This is a reminder regarding laboratory orders that require your attention.',
+    'Some orders in the attached report are approaching their SLA deadline and will breach within the next 24 hours. These are flagged for priority and should be actioned urgently to avoid an SLA breach.',
+    'Please confirm once the listed orders have been addressed. If you have any questions or are facing issues preventing fulfillment, let us know so we can support you.',
+    'Please find the attachment for more info about the orders.',
+    'Thank you for your cooperation.',
+  ].join('\n\n');
+  return `Subject: ${subject}\n\n${body}`;
+}
+
+// Copy text to the clipboard with an execCommand fallback (keeps user activation
+// on browsers where navigator.clipboard is unavailable). Mirrors buildShareCard.
+async function copyText(text) {
+  const fallback = () => {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.cssText = 'position:fixed;top:-1000px;opacity:0';
+      document.body.appendChild(ta);
+      ta.focus(); ta.select();
+      const ok = document.execCommand('copy');
+      ta.remove();
+      return ok;
+    } catch { return false; }
+  };
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) { await navigator.clipboard.writeText(text); return true; }
+  } catch { /* fall through */ }
+  return fallback();
+}
+
+// Per-lab "Late & Due" Excel export section. Built from the SAME dataset the
+// generate run used (state.parsed.orders + settings.tatLookup + report date), so
+// it works in live-snapshot mode too. Returns a DOM node, or the empty-state card.
+async function buildLateLabsSection(model, state, store) {
+  const title = 'ملفات المختبرات — المتأخر والمستحق (Excel)';
+  const rows = (state.parsed && state.parsed.orders) || null;
+  const tatTests = (store.settings && store.settings.tatLookup) || {};
+  const asOfMs = parseDateTime(model.reportDate || todayISO());
+
+  const emptyCard = (msg) => el('div', { class: 'card', style: 'margin-top:16px;text-align:right' }, [
+    el('div', { class: 'card__title', text: title }),
+    el('p', { class: 'small muted', style: 'margin:0', text: msg }),
+  ]);
+
+  if (!rows || !rows.length || asOfMs == null) return emptyCard('لا توجد فحوصات متأخرة أو مستحقة خلال 24 ساعة ✅');
+
+  let XLSX;
+  let wbs = [];
+  try {
+    XLSX = await getXLSX();
+    wbs = buildLateLabWorkbooks({ rows, tatTests, asOfMs, XLSX });
+  } catch (e) {
+    console.warn('[generate] late-labs build failed', e);
+    return emptyCard('تعذّر إنشاء ملفات المختبرات.');
+  }
+  if (!wbs.length) return emptyCard('لا توجد فحوصات متأخرة أو مستحقة خلال 24 ساعة ✅');
+
+  const SHEET_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  const downloadOne = (w) => {
+    const buf = XLSX.write(w.wb, { type: 'array', bookType: 'xlsx' });
+    triggerDownload(new Blob([buf], { type: SHEET_MIME }), w.fileName);
+  };
+
+  const labRows = wbs.map((w) => el('div', { class: 'dl-link', style: 'flex-wrap:wrap;gap:8px' }, [
+    el('div', { style: 'display:flex;flex-direction:column;gap:2px;min-width:0;flex:1' }, [
+      el('span', { dir: 'ltr', style: 'font-weight:600;overflow-wrap:anywhere', text: w.lab }),
+      el('span', { class: 'small muted' }, [
+        'متأخر: ', el('span', { dir: 'ltr', text: String(w.late) }),
+        ' • مستحق ≤24س: ', el('span', { dir: 'ltr', text: String(w.dueSoon) }),
+      ]),
+    ]),
+    el('div', { style: 'display:flex;gap:6px;flex-shrink:0' }, [
+      el('button', {
+        class: 'btn btn--ghost', text: '⬇ تنزيل',
+        onClick: () => downloadOne(w),
+      }),
+      el('button', {
+        class: 'btn btn--ghost', text: '✉ نسخ نص البريد',
+        onClick: async () => { if (await copyText(labEmailText(w.lab))) toast('تم نسخ نص البريد', 'ok'); },
+      }),
+    ]),
+  ]));
+
+  const children = [el('div', { class: 'card__title', text: title }), ...labRows];
+  if (wbs.length > 1) {
+    children.push(el('button', {
+      class: 'btn btn--primary btn--block', style: 'margin-top:10px', text: 'تنزيل الكل',
+      // Sequential downloads ~300ms apart so browsers don't drop stacked clicks.
+      onClick: async () => {
+        for (let i = 0; i < wbs.length; i++) {
+          downloadOne(wbs[i]);
+          if (i < wbs.length - 1) await new Promise((r) => setTimeout(r, 300));
+        }
+      },
+    }));
+  }
+  return el('div', { class: 'card', style: 'margin-top:16px;text-align:right' }, children);
+}
+
 function triggerDownload(blob, name) {
+  // Lab names come from CSV data — strip path separators and other
+  // filesystem-illegal characters before using them as a download name.
+  const safe = String(name).replace(/[/\\<>:"|?*\u0000-\u001f]/g, '-');
   const url = URL.createObjectURL(blob);
-  const a = el('a', { href: url, download: name });
+  const a = el('a', { href: url, download: safe });
   document.body.appendChild(a);
   a.click();
   setTimeout(() => { a.remove(); }, 4000);
@@ -418,6 +532,14 @@ export async function render(container, ctx) {
       panel.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
     toast(STR.generate.done, 'ok');
+  }
+
+  // Per-lab "Late & Due" Excel export — built from the SAME dataset this run used
+  // (works whether or not the four report files were produced, incl. live-snapshot).
+  try {
+    resultHost.appendChild(await buildLateLabsSection(model, state, store));
+  } catch (e) {
+    console.warn('[generate] late-labs section failed', e);
   }
 
   // Reset control

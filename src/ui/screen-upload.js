@@ -40,13 +40,26 @@ export function buildMockOrders() {
 
 export function buildMockTracker() {
   return {
+    // فئة التقرير 'لين' routes a task to the internal (داخلي) deck — the COMPLETE لين
+    // log, every status including مغلق and hidden (collapsed done-work) rows. The rest
+    // are 'نوبكو' (external deck). Both variants get real content in demo/mock mode.
     tasks: [
-      { num: 1, task: 'تفعيل ربط النتائج آليًا مع نظام المستشفى', responsible: 'لين', owner: 'م. أحمد', dueDate: 'يومي', status: 'مستمر', category: 'تشغيلي', hidden: false },
-      { num: 2, task: 'إغلاق فجوة الطلبات المعلقة لدى المختبر المرجعي', responsible: 'نوبكو', owner: 'أ. سارة', dueDate: '2026-07-25', status: 'مفتوح', category: 'تشغيلي', hidden: false },
-      { num: 3, task: 'مراجعة عقود المختبرات المتأخرة في الرفع', responsible: 'لين', owner: 'م. خالد', dueDate: '2026-07-15', status: 'متأخر', category: 'تعاقدي', hidden: false },
-      { num: 4, task: 'اعتماد نموذج التقرير اليومي الموحد', responsible: 'لين', owner: 'أ. منى', dueDate: '2026-07-10', status: 'مغلق', category: 'تشغيلي', hidden: false },
-      { num: 5, task: 'تحديث جدول المدد المعيارية للفحوصات الجديدة', responsible: 'لين', owner: 'م. أحمد', dueDate: '2026-07-30', status: 'مفتوح', category: 'داخلي', hidden: false },
-      { num: 6, task: 'تدريب الفريق على لوحة المتابعة', responsible: 'لين', owner: 'أ. سارة', dueDate: '2026-08-01', status: 'مستمر', category: 'داخلي', hidden: false },
+      // ── لين (internal log — mixed statuses, incl. مغلق + hidden done-work) ──
+      { num: 1, task: 'تفعيل ربط النتائج آليًا مع نظام المستشفى', responsible: 'لين', owner: 'م. أحمد', dueDate: 'يومي', status: 'مستمر', category: 'لين', hidden: false },
+      { num: 2, task: 'اعتماد نموذج التقرير اليومي الموحد', responsible: 'لين', owner: 'أ. منى', dueDate: '2026-07-10', status: 'مغلق', category: 'لين', hidden: false },
+      { num: 3, task: 'تحديث جدول المدد المعيارية للفحوصات الجديدة', responsible: 'لين', owner: 'م. أحمد', dueDate: '2026-07-30', status: 'مفتوح', category: 'لين', hidden: false },
+      { num: 4, task: 'تدريب الفريق على لوحة المتابعة', responsible: 'لين', owner: 'أ. سارة', dueDate: '2026-08-01', status: 'مستمر', category: 'لين', hidden: false },
+      { num: 5, task: 'مراجعة صلاحيات المستخدمين على النظام', responsible: 'لين', owner: 'م. خالد', dueDate: '2026-07-18', status: 'متأخر', category: 'لين', hidden: false },
+      { num: 6, task: 'توثيق إجراءات التشغيل القياسية', responsible: 'لين', owner: 'أ. منى', dueDate: '2026-07-28', status: 'مفتوح', category: 'لين', hidden: false },
+      { num: 7, task: 'إعداد لوحة مؤشرات الأداء الأسبوعية', responsible: 'لين', owner: 'م. أحمد', dueDate: '2026-08-06', status: 'مفتوح', category: 'لين', hidden: false },
+      { num: 8, task: 'تحديث دليل المستخدم الداخلي', responsible: 'لين', owner: 'أ. منى', dueDate: '2026-07-22', status: 'مفتوح', category: 'لين', hidden: false },
+      { num: 9, task: 'أرشفة التقارير الشهرية السابقة', responsible: 'لين', owner: 'أ. سارة', dueDate: '2026-06-30', status: 'مغلق', category: 'لين', hidden: true },
+      { num: 10, task: 'مراجعة سجل الأخطاء الأسبوعي وإغلاقه', responsible: 'لين', owner: 'م. خالد', dueDate: '2026-06-25', status: 'مغلق', category: 'لين', hidden: true },
+      // ── نوبكو (external deck) ──
+      { num: 11, task: 'إغلاق فجوة الطلبات المعلقة لدى المختبر المرجعي', responsible: 'نوبكو', owner: 'أ. سارة', dueDate: '2026-07-25', status: 'مستمر', category: 'نوبكو', hidden: false },
+      { num: 12, task: 'مراجعة عقود المختبرات المتأخرة في الرفع', responsible: 'نوبكو', owner: 'م. خالد', dueDate: '2026-07-15', status: 'متأخر', category: 'نوبكو', hidden: false },
+      { num: 13, task: 'تسريع اعتماد المختبر المرجعي الجديد', responsible: 'نوبكو', owner: 'أ. منى', dueDate: '2026-07-27', status: 'مستمر', category: 'نوبكو', hidden: false },
+      { num: 14, task: 'متابعة توريد مستلزمات سحب العينات', responsible: 'نوبكو', owner: 'م. أحمد', dueDate: '2026-08-03', status: 'مفتوح', category: 'نوبكو', hidden: false },
     ],
     challenges: [
       { id: 'c1', title: 'تأخر رفع النتائج', desc: 'بعض المختبرات ترفع النتائج يدويًا مما يؤخر الظهور في النظام', impact: 'عالٍ', owner: 'أ. سارة', status: 'مفتوح', solution: 'تفعيل الربط الآلي' },

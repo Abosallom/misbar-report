@@ -73,6 +73,14 @@ export function parseKamcCsv(text, Papa) {
       resulted: clean(r['Result report date time']),
       rawStatus: r['Order Status'] == null ? '' : String(r['Order Status']).trim(),
       tatDaysCsv: intOrNull(r['TAT - Days']),
+      // Operational identifiers for the per-lab "Late & Due" export (NOT patient
+      // data). Kept as strings (leading zeros preserved, like orderId). CSV header
+      // names differ from the export's headers: 'Specimen Id' → specimenNo. The
+      // 'Performing facility id' column is absent from this export → null.
+      specimenNo: clean(r['Specimen Id']),
+      shipmentId: clean(r['Shipment ID']),
+      orderingFacilityId: clean(r['Ordering facility ID']),
+      performingFacilityId: clean(r['Performing facility id']),
     });
   }
 

@@ -12,7 +12,11 @@ function pickFn(mod, names) {
   if (typeof mod.default === 'function') return mod.default;
   return null;
 }
-const isInternalCat = (t) => /داخل|internal/i.test((t && (t.category || '')) || '');
+// Canonical internal rule mirrors model/drafts.js: فئة التقرير 'لين' routes a task to
+// the internal (داخلي) deck; مفتوح displays as قيد التنفيذ. (An old /داخل|internal/i
+// regex here matched no real 'لين' rows and once rendered the internal table empty.)
+const CAT_INTERNAL = 'لين';
+const displayStatus = (s) => (s === 'مفتوح' ? 'قيد التنفيذ' : s);
 const isClosed = (t) => /مغلق|closed|منجز|مكتمل/i.test((t && (t.status || '')) || '');
 const linesToArr = (s) => String(s || '').split('\n').map((x) => x.trim()).filter(Boolean);
 
@@ -130,12 +134,17 @@ function buildDraftReportModel(state, store) {
     d = autoDraft(tracker, reportDate);
   } catch (e) {
     console.warn('[review] autoDraft failed; falling back to local split', e);
-    const tasks = (tracker.tasks || []).filter((t) => !t.hidden);
+    // Mirror the canonical split (model/drafts.js): tasksInternal = EVERY task whose
+    // category === 'لين' — hidden rows and مغلق included — with the مفتوح→قيد التنفيذ
+    // display mapping. The other lists stay on visible (non-hidden) rows.
+    const allTasks = tracker.tasks || [];
+    const toDisplay = (t) => ({ ...t, status: displayStatus(t.status) });
+    const visible = allTasks.filter((t) => !t.hidden);
     d = {
-      tasksInternal: tasks.filter(isInternalCat),
-      tasksCurrent: tasks.filter((t) => !isInternalCat(t) && !isClosed(t)),
-      completedTasks: tasks.filter(isClosed).map((t) => t.task),
-      plannedTasks: tasks.filter((t) => !isClosed(t) && !isInternalCat(t)).map((t) => t.task),
+      tasksInternal: allTasks.filter((t) => t.category === CAT_INTERNAL).map(toDisplay),
+      tasksCurrent: visible.filter((t) => t.category !== CAT_INTERNAL && !isClosed(t)).map(toDisplay),
+      completedTasks: visible.filter(isClosed).map((t) => t.task),
+      plannedTasks: visible.filter((t) => !isClosed(t) && t.category !== CAT_INTERNAL).map((t) => t.task),
       supportRequired: (tracker.challenges || []).map((c) => c.title).filter(Boolean),
     };
   }
@@ -398,13 +407,60 @@ export async function render(container, ctx) {
       onChange: (rows) => { model.tasksCurrent = rows; schedulePreview(); },
     }),
   ]);
+  // Internal (لين) task table = the COMPLETE log — all statuses + hidden (collapsed
+  // done-work) rows — so it can run long. Collapse to the first COLLAPSE_ROWS rows
+  // behind a toggle, dim hidden rows (with a 'مخفي في الجدول' chip) and give مغلق rows
+  // a subtle done tint. editableTable rebuilds its <tbody> on add/remove, so the
+  // decoration is re-applied from onChange (and once up-front). Editability, the
+  // add/remove wiring and the hidden flag (preserved by editableTable's {...r} spread)
+  // are all untouched — decoration only styles rows, it never mutates the data.
+  const COLLAPSE_ROWS = 8;
+  let internalExpanded = false;
+  const internalTable = editableTable({
+    columns: taskCols, rows: model.tasksInternal, minWidth: '520px', newRow: newTask,
+    onChange: (rows) => { model.tasksInternal = rows; decorateInternalTable(); schedulePreview(); },
+  });
+  const internalToggle = el('button', {
+    type: 'button', class: 'btn btn--ghost btn--sm', style: 'margin-top:8px;display:none',
+    onClick: () => { internalExpanded = !internalExpanded; decorateInternalTable(); },
+  });
+  function decorateInternalTable() {
+    const tbody = internalTable.querySelector('tbody');
+    if (!tbody) return;
+    const rows = model.tasksInternal || [];
+    const trs = Array.from(tbody.children);
+    // Idempotent: strip decoration from any prior pass before re-applying.
+    tbody.querySelectorAll('.rev-hidden-chip').forEach((n) => n.remove());
+    trs.forEach((tr, i) => {
+      const r = rows[i] || {};
+      // Collapse everything past the threshold unless expanded.
+      tr.style.display = (!internalExpanded && i >= COLLAPSE_ROWS) ? 'none' : '';
+      // مغلق → subtle green 'done' tint; hidden (collapsed done-work) → dimmed + chip.
+      tr.style.background = isClosed(r) ? 'rgba(22,163,74,.08)' : '';
+      tr.style.opacity = r.hidden ? '0.55' : '';
+      if (r.hidden) {
+        const firstCell = tr.firstElementChild;
+        if (firstCell) firstCell.appendChild(el('span', {
+          class: 'rev-hidden-chip',
+          style: 'display:inline-block;margin-top:5px;font-size:.68rem;font-weight:700;color:var(--slate-600);background:var(--border);border:1px solid var(--border-dark);border-radius:999px;padding:1px 8px;white-space:nowrap',
+          text: 'مخفي في الجدول',
+        }));
+      }
+    });
+    const N = trs.length;
+    if (N > COLLAPSE_ROWS) {
+      internalToggle.style.display = '';
+      internalToggle.textContent = internalExpanded ? 'عرض أقل' : `عرض كل المهام (${N})`;
+    } else {
+      internalToggle.style.display = 'none';
+    }
+  }
   const tasksInternalCard = el('div', { class: 'card' }, [
     el('div', { class: 'card__title', text: STR.review.tasksInternalTitle }),
-    editableTable({
-      columns: taskCols, rows: model.tasksInternal, minWidth: '520px', newRow: newTask,
-      onChange: (rows) => { model.tasksInternal = rows; schedulePreview(); },
-    }),
+    internalTable,
+    internalToggle,
   ]);
+  decorateInternalTable(); // decorate the initial (already-rendered) rows
 
   // Challenges
   const challengeCols = [

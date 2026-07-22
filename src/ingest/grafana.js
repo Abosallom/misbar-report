@@ -265,6 +265,12 @@ export async function fetchKamcOrders(grafanaCfg, { fromMs, toMs, fetchImpl = fe
       resulted: toRiyadh(r['Result report date time']),
       rawStatus: r['Order Status'] == null ? '' : String(r['Order Status']).trim(),
       tatDaysCsv: intOrNull(r['TAT - Days']),
+      // Operational identifiers for the per-lab "Late & Due" export (mirror csv.js).
+      // Not patient data. Absent Grafana columns coerce to null via clean().
+      specimenNo: clean(r['Specimen Id']),
+      shipmentId: clean(r['Shipment ID']),
+      orderingFacilityId: clean(r['Ordering facility ID']),
+      performingFacilityId: clean(r['Performing facility id']),
     });
   }
 
