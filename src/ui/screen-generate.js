@@ -159,10 +159,12 @@ export async function render(container, ctx) {
   const resultHost = el('div');
   const host = el('div', { class: 'render-host' }); // full-size, offscreen, for html2canvas capture
 
+  const subtitleEl = el('p', { text: STR.generate.subtitle });
+  const keepOpenEl = el('p', { class: 'small muted', text: '⏳ ' + STR.generate.keepOpen });
   const head = el('div', { class: 'screen__head' }, [
     el('h1', { text: STR.generate.title }),
-    el('p', { text: STR.generate.subtitle }),
-    el('p', { class: 'small muted', text: '⏳ ' + STR.generate.keepOpen }),
+    subtitleEl,
+    keepOpenEl,
   ]);
 
   container.appendChild(el('div', { class: 'screen' }, [
@@ -237,6 +239,9 @@ export async function render(container, ctx) {
     ]));
   } else {
     bar.set(100, STR.generate.done);
+    // Done-state: flip the in-progress head so at a glance it reads finished.
+    subtitleEl.textContent = STR.generate.done;
+    keepOpenEl.style.display = 'none';
     // Persist the FULL number snapshot — next run's "+N" chips (E6 rule) compare
     // every exec/journey number against these.
     try {
@@ -271,7 +276,7 @@ export async function render(container, ctx) {
     }
 
     resultHost.appendChild(el('div', { class: 'success-panel' }, [
-      el('div', { class: 'success-panel__icon', text: '✅' }),
+      el('div', { class: 'success-panel__icon', text: '✓' }),
       el('h3', { text: STR.generate.done }),
       el('button', {
         class: 'btn btn--primary btn--block', text: STR.generate.downloadAll,
@@ -288,6 +293,12 @@ export async function render(container, ctx) {
           el('span', { class: 'small', text: '⬇ ' + STR.generate.downloadAgain }),
         ]))),
     ]));
+    // Bring the success panel above the sticky action bar — the moment of success
+    // must not render half-hidden behind it.
+    const panel = resultHost.querySelector('.success-panel');
+    if (panel && typeof panel.scrollIntoView === 'function') {
+      panel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
     toast(STR.generate.done, 'ok');
   }
 

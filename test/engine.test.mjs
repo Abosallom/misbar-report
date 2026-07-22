@@ -104,6 +104,19 @@ test('byLab + byTest (curated catalog, sum 56)', () => {
   assert.equal(out.byTest.reduce((s, t) => s + t.late, 0), 56);
 });
 
+test('onTime "success" metric: byLab column sums to 170; byTest catalog sums to 58', () => {
+  const out = compute(GOLDEN_ORDERS, TAT_LOOKUP, goldenOpts());
+  // Every byLab row carries an onTime count (day-granular resulted <= due).
+  for (const l of out.byLab) assert.equal(typeof l.onTime, 'number');
+  assert.equal(out.byLab.reduce((s, l) => s + l.onTime, 0), 170);
+  // A catalog test now surfaces when EITHER late>0 OR onTime>0.
+  for (const t of out.byTest) assert.equal(typeof t.onTime, 'number');
+  assert.equal(out.byTest.reduce((s, t) => s + t.onTime, 0), 58);
+  // onTime-only tests (late 0) are included; BK Virus is the top success test.
+  const bk = out.byTest.find((t) => t.testName.includes('BK VIRUS'));
+  assert.ok(bk && bk.late === 0 && bk.onTime === 20);
+});
+
 test('dedupe is a no-op on the clean golden data', () => {
   const a = compute(GOLDEN_ORDERS, TAT_LOOKUP, goldenOpts());
   const b = compute(GOLDEN_ORDERS, TAT_LOOKUP, { ...goldenOpts(), dedupe: true });

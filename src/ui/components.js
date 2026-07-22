@@ -54,7 +54,7 @@ export function dropZone({ title, hint, accept, onFile }) {
 
   return {
     el: zone,
-    setLoaded(name) { zone.classList.remove('is-error'); zone.classList.add('is-loaded'); iconEl.textContent = '✅'; if (name) fileEl.textContent = name; },
+    setLoaded(name) { zone.classList.remove('is-error'); zone.classList.add('is-loaded'); iconEl.textContent = '✓'; iconEl.style.color = 'var(--green)'; iconEl.style.fontWeight = '800'; if (name) fileEl.textContent = name; },
     setError() { zone.classList.remove('is-loaded'); zone.classList.add('is-error'); iconEl.textContent = '⚠️'; },
     setBusy(busy) { hintEl.textContent = busy ? STR.upload.parsing : hint; },
     reset() { zone.classList.remove('is-loaded', 'is-error'); iconEl.textContent = '📄'; fileEl.textContent = ''; input.value = ''; },
@@ -142,7 +142,15 @@ export function editableTable({ columns, rows, onChange, addLabel = STR.review.a
     } else if (col.type === 'textarea') {
       ctrl = el('textarea', { rows: 2, ...common });
     } else if (col.type === 'date') {
-      ctrl = el('input', { type: 'text', placeholder: 'YYYY-MM-DD', ...common });
+      // Real date picker for ISO (or empty) values; text fallback keeps non-ISO
+      // values ('يومي', '25-06-2026', ranges) visible and editable. A native
+      // type=date input already writes YYYY-MM-DD on change, so no extra convert.
+      const isISO = /^\d{4}-\d{2}-\d{2}$/.test(common.value);
+      if (common.value === '' || isISO) {
+        ctrl = el('input', { type: 'date', value: isISO ? common.value : '' });
+      } else {
+        ctrl = el('input', { type: 'text', placeholder: 'YYYY-MM-DD', ...common });
+      }
     } else {
       ctrl = el('input', { type: 'text', ...common });
     }

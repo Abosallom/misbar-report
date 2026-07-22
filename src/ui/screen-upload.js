@@ -91,27 +91,31 @@ export function buildMockEngineOutput(settings) {
       ],
     },
     byLab: [
-      { lab: 'Advanced Laboratory Services .Co', total: 301, awaitingResult: 89, rejected: 14, late: 60, latePct: 67.4 },
-      { lab: 'Fal Specialized Medical Lab', total: 151, awaitingResult: 21, rejected: 1, late: 2, latePct: 9.5 },
-      { lab: 'king Abdullaziz Medical city in Riyadh', total: 113, awaitingResult: 35, rejected: 0, late: 3, latePct: 8.6 },
-      { lab: 'Eurofins clinical', total: 27, awaitingResult: 0, rejected: 0, late: 0, latePct: 0 },
-      { lab: 'Saudi Diagnostics Limited Company', total: 19, awaitingResult: 7, rejected: 0, late: 2, latePct: 28.6 },
-      { lab: 'Anwa  Medical Company', total: 7, awaitingResult: 7, rejected: 0, late: 0, latePct: 0 },
+      { lab: 'Advanced Laboratory Services .Co', total: 301, awaitingResult: 89, rejected: 14, onTime: 29, late: 60, latePct: 67.4 },
+      { lab: 'Fal Specialized Medical Lab', total: 151, awaitingResult: 21, rejected: 1, onTime: 75, late: 2, latePct: 9.5 },
+      { lab: 'king Abdullaziz Medical city in Riyadh', total: 113, awaitingResult: 35, rejected: 0, onTime: 42, late: 3, latePct: 8.6 },
+      { lab: 'Eurofins clinical', total: 27, awaitingResult: 0, rejected: 0, onTime: 20, late: 0, latePct: 0 },
+      { lab: 'Saudi Diagnostics Limited Company', total: 19, awaitingResult: 7, rejected: 0, onTime: 4, late: 2, latePct: 28.6 },
+      { lab: 'Anwa  Medical Company', total: 7, awaitingResult: 7, rejected: 0, onTime: 0, late: 0, latePct: 0 },
     ],
     byTest: [
-      { testName: 'Glucagon Plasma', late: 1 },
-      { testName: 'HLA PRA Screening', late: 1 },
-      { testName: 'HLA PRA II Single Antigen', late: 1 },
-      { testName: 'HLA PRA I SA Single Antigen', late: 1 },
-      { testName: 'Oligoclonal Banding CSF/Serum', late: 2 },
-      { testName: 'GAD65 Ab Assay Serum (RIA)', late: 2 },
-      { testName: 'Treponema Pallidum (VDRL)', late: 2 },
-      { testName: 'Kidney Stone Analysis (IR)', late: 2 },
-      { testName: 'Immunofixation 24h Urine', late: 3 },
-      { testName: 'Copper Blood DRC-ICP-MS', late: 4 },
-      { testName: 'Urine Protein Electrophoresis 24h', late: 7 },
-      { testName: 'Ig Free Light Chain 24h Urine', late: 15 },
-      { testName: 'Kappa/Lambda Free Light Chains [Serum]', late: 15 },
+      { testName: 'BK Virus Quantitative PCR', late: 0, onTime: 20 },
+      { testName: 'MOG Ab IgG IFT Blood', late: 0, onTime: 1 },
+      { testName: 'Myoglobin Urine', late: 0, onTime: 1 },
+      { testName: 'HLA Class I Genotyping (NGS)', late: 0, onTime: 9 },
+      { testName: 'Glucagon Plasma', late: 1, onTime: 0 },
+      { testName: 'HLA PRA Screening', late: 1, onTime: 2 },
+      { testName: 'HLA PRA II Single Antigen', late: 1, onTime: 3 },
+      { testName: 'HLA PRA I SA Single Antigen', late: 1, onTime: 3 },
+      { testName: 'Oligoclonal Banding CSF/Serum', late: 2, onTime: 0 },
+      { testName: 'GAD65 Ab Assay Serum (RIA)', late: 2, onTime: 0 },
+      { testName: 'Treponema Pallidum (VDRL)', late: 2, onTime: 0 },
+      { testName: 'Kidney Stone Analysis (IR)', late: 2, onTime: 0 },
+      { testName: 'Immunofixation 24h Urine', late: 3, onTime: 4 },
+      { testName: 'Copper Blood DRC-ICP-MS', late: 4, onTime: 1 },
+      { testName: 'Urine Protein Electrophoresis 24h', late: 7, onTime: 9 },
+      { testName: 'Ig Free Light Chain 24h Urine', late: 15, onTime: 4 },
+      { testName: 'Kappa/Lambda Free Light Chains [Serum]', late: 15, onTime: 1 },
     ],
     unmatchedTests: [],
     deltas: {
@@ -251,6 +255,8 @@ export async function render(container, ctx) {
   const isDev = params.get('dev') === '1' || isMock;
 
   let usedMock = false;
+  let fetchInFlight = false; // guards the auto-fetch + manual button against overlap
+  let proceedBtn = null; // the sticky proceed button (rebuilt each paint)
   const errorsByKind = { csv: [], tracker: [] };
 
   const head = el('div', { class: 'screen__head' }, [
@@ -311,6 +317,10 @@ export async function render(container, ctx) {
     } catch { /* offline or file absent — leave the line empty */ }
   }
   paintFreshness();
+  // Daily flow: kick off the live fetch on load so data is already streaming in.
+  // fetchLive() is hoisted; the guards below (and its own button-disable) prevent
+  // a double-invoke if the user also clicks الجلب المباشر.
+  if (grafanaReady && !state.parsed.orders && !fetchInFlight) fetchLive();
 
   const summaryHost = el('div');
   const unmatchedHost = el('div');
@@ -342,6 +352,8 @@ export async function render(container, ctx) {
   if (state.files.tracker) trackerZone.setLoaded(state.files.tracker.name);
 
   async function fetchLive() {
+    if (fetchInFlight) return; // a fetch is already running (auto-load or a prior click)
+    fetchInFlight = true;
     grafanaBtn.disabled = true;
     grafanaBtn.textContent = STR.upload.grafanaFetching;
     errorsByKind.csv = [];
@@ -387,6 +399,7 @@ export async function render(container, ctx) {
       const isCors = e instanceof TypeError; // fetch network/CORS failures surface as TypeError
       toast(isCors ? STR.upload.grafanaCors : `${STR.upload.grafanaFail}: ${(e && e.message) || e}`, 'warn', 9000);
     } finally {
+      fetchInFlight = false;
       grafanaBtn.disabled = false;
       grafanaBtn.textContent = STR.upload.grafanaFetch;
       paint();
@@ -553,35 +566,44 @@ export async function render(container, ctx) {
       class: 'btn btn--primary btn--block', text: STR.upload.proceed, disabled: !both,
       onClick: runEngineAndGo,
     });
+    proceedBtn = btn;
     actionsHost.appendChild(btn);
     if (!both) actionsHost.appendChild(el('p', { class: 'small muted', style: 'text-align:center;margin-top:6px', text: STR.upload.proceedNeedBoth }));
   }
 
   async function runEngineAndGo() {
-    if (!state.reportDate) state.reportDate = todayISO();
-    let out = null;
+    if (proceedBtn) proceedBtn.disabled = true; // guard: a second click must not launch a second run
     try {
-      const mod = await tryImport('../engine/engine.js');
-      const compute = pickFn(mod, ['compute', 'runEngine', 'run']);
-      if (compute) {
-        const s = store.settings || {};
-        out = compute(state.parsed.orders, s.tatLookup, {
-          asOf: state.reportDate,
-          cancelledByMonth: (s.historicalConstants || {}).cancelledByMonth || {},
-          snapshot: s.snapshot,
-          excludeNoTat: !!(s.reportOptions && s.reportOptions.excludeNoTat),
-        });
-        if (out && typeof out.then === 'function') out = await out;
-      }
-    } catch (e) { console.warn('[upload] engine failed', e); }
+      if (!state.reportDate) state.reportDate = todayISO();
+      let out = null;
+      try {
+        const mod = await tryImport('../engine/engine.js');
+        const compute = pickFn(mod, ['compute', 'runEngine', 'run']);
+        if (compute) {
+          const s = store.settings || {};
+          out = compute(state.parsed.orders, s.tatLookup, {
+            asOf: state.reportDate,
+            cancelledByMonth: (s.historicalConstants || {}).cancelledByMonth || {},
+            snapshot: s.snapshot,
+            excludeNoTat: !!(s.reportOptions && s.reportOptions.excludeNoTat),
+          });
+          if (out && typeof out.then === 'function') out = await out;
+        }
+      } catch (e) { console.warn('[upload] engine failed', e); }
 
-    if (!out || !out.totals) {
-      out = buildMockEngineOutput(store.settings);
-      toast(usedMock ? STR.upload.mockLoaded : STR.upload.engineMissing, usedMock ? 'ok' : 'warn');
+      if (!out || !out.totals) {
+        out = buildMockEngineOutput(store.settings);
+        toast(usedMock ? STR.upload.mockLoaded : STR.upload.engineMissing, usedMock ? 'ok' : 'warn');
+      }
+      state.engineOutput = out;
+      state.reportModel = null; // review will (re)assemble
+      navigate('review');
+    } catch (e) {
+      // Failure path: stay on the page and re-enable so the user can retry.
+      console.error('[upload] proceed failed', e);
+      if (proceedBtn) proceedBtn.disabled = false;
+      toast(STR.common.error, 'err');
     }
-    state.engineOutput = out;
-    state.reportModel = null; // review will (re)assemble
-    navigate('review');
   }
 
   // Auto-load mock data on ?mock=1 for standalone verification.

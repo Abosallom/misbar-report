@@ -47,8 +47,8 @@
  * @property {{month:string, orders:number, results:number, rejected:number, incomplete:number, completionPct:number|null, cancelled:number}[]} monthly - month='YYYY-MM'; includes historical months merged from settings
  * @property {number} cancelledNote - sum of merged cancelledByMonth (the "* N طلب ملغي" note)
  * @property {{overallActual:number, overallExpected:number, perMonth:{month:string, actual:number|null, expected:number|null}[]}} turnaround - days, 1-decimal semantics per report
- * @property {{lab:string, total:number, awaitingResult:number, rejected:number, late:number, latePct:number}[]} byLab
- * @property {{testName:string, late:number}[]} byTest - late-no-result count per test, ascending like the chart
+ * @property {{lab:string, total:number, awaitingResult:number, rejected:number, onTime:number, late:number, latePct:number}[]} byLab - onTime = resulted within due (day-granular)
+ * @property {{testName:string, late:number, onTime:number}[]} byTest - catalog tests with late>0 OR onTime>0; late = late-no-result, onTime = resulted within due (day-granular); sorted late asc, catalog-idx desc
  * @property {string[]} unmatchedTests - test names absent from TAT lookup
  * @property {number} excludedNoTat - rows dropped by opts.excludeNoTat (0 when option off)
  * @property {{total:number, collected:number, dispatched:number, received:number,

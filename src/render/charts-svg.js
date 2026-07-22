@@ -124,14 +124,18 @@ function line(el) {
 // ---------------------------------------------------------------------------
 function barH(el) {
   const W = el.w * PXIN, H = el.h * PXIN;
-  const m = { top: 6, right: 8, bottom: 6, left: 30 };
+  const legendH = el.opts?.legend === 'bottom' ? 20 : 0;
+  const m = { top: 6, right: 8, bottom: 6 + legendH, left: 30 };
   const labelW = Math.min(300, W * 0.28);              // category-name column on the RIGHT
   const baseX = W - m.right - labelW;                   // value=0 baseline (bars grow left)
   const plotW = baseX - m.left;
-  const cats = el.categories, ser = el.series[0];
-  const vmax = niceMax(Math.max(1, ...ser.values.filter((v) => v != null)));
+  const cats = el.categories, ser = el.series, ns = ser.length;
+  const catFont = el.opts?.catFont || 8;
+  const allVals = ser.flatMap((se) => se.values.filter((v) => v != null));
+  const vmax = niceMax(Math.max(1, ...allVals));
   const rowH = (H - m.top - m.bottom) / cats.length;
-  const bh = Math.min(rowH * 0.62, 16);
+  const groupH = Math.min(rowH * 0.72, 20);            // total height of the clustered pair
+  const bh = groupH / ns;                              // one bar per series
   let s = '';
   // vertical gridlines
   const ticks = 5;
@@ -143,14 +147,19 @@ function barH(el) {
   cats.forEach((cat, i) => {
     // index 0 at the BOTTOM (ascending upward) — matches PptxGenJS and the source deck
     const cy = m.top + (cats.length - 1 - i) * rowH + rowH / 2;
-    const v = ser.values[i] ?? 0;
-    const len = (v / vmax) * plotW;
-    s += `<rect x="${(baseX - len).toFixed(1)}" y="${(cy - bh / 2).toFixed(1)}" width="${len.toFixed(1)}" height="${bh.toFixed(1)}" fill="${ser.color}"/>`;
-    if (el.opts?.dataLabels) s += txt(baseX - len - 4, cy + 3, fmtNum(v), 8, { anchor: 'end', fill: C.slate900, bold: true });
+    const y0 = cy - groupH / 2;
+    ser.forEach((se, si) => {
+      const v = se.values[i] ?? 0;
+      const len = (v / vmax) * plotW;
+      const by = y0 + si * bh;
+      s += `<rect x="${(baseX - len).toFixed(1)}" y="${by.toFixed(1)}" width="${len.toFixed(1)}" height="${bh.toFixed(1)}" fill="${se.color}"/>`;
+      if (el.opts?.dataLabels && v > 0) s += txt(baseX - len - 3, by + bh / 2 + 2.5, fmtNum(v), 7, { anchor: 'end', fill: C.slate900, bold: true });
+    });
     // category label in the right column, right-aligned against the edge
-    s += txt(W - m.right, cy + 3, cat, 8, { anchor: 'end', fill: LABEL });
+    s += txt(W - m.right, cy + catFont * 0.36, cat, catFont, { anchor: 'end', fill: LABEL });
   });
   s += `<line x1="${baseX}" y1="${m.top}" x2="${baseX}" y2="${H - m.bottom}" stroke="${AXIS}" stroke-width="1"/>`;
+  if (el.opts?.legend === 'bottom') s += legend(ser, W, H - legendH + 12);
   return svg(W, H, s);
 }
 

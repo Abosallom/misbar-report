@@ -5,22 +5,38 @@
 // See src/contracts.js for the ReportModel / EngineOutput typedefs.
 import { SCORECARD_SEED } from '../../src/seeds/scorecard.js';
 
-// Late-by-test chart series (verbatim from test/fixtures/late-by-test-chart.json / chart3.xml).
-const BY_TEST = [
-  { testName: 'Glucagon Plasma', late: 1 },
-  { testName: 'HLA PRA Screening', late: 1 },
-  { testName: 'HLA PRA II Single Antigen', late: 1 },
-  { testName: 'HLA PRA I SA Single Antigen', late: 1 },
-  { testName: 'Oligoclonal Banding CSF/Serum', late: 2 },
-  { testName: 'GAD65 Ab Assay Serum (RIA)', late: 2 },
-  { testName: 'Treponema Pallidum (VDRL)', late: 2 },
-  { testName: 'Kidney Stone Analysis (IR)', late: 2 },
-  { testName: 'Immunofixation 24h Urine', late: 3 },
-  { testName: 'Copper Blood DRC-ICP-MS', late: 4 },
-  { testName: 'Urine Protein Electrophoresis 24h', late: 7 },
-  { testName: 'Ig Free Light Chain 24h Urine', late: 15 },
-  { testName: 'Kappa/Lambda Free Light Chains [Serum]', late: 15 },
+// Late-by-test chart series (late values verbatim from chart3.xml). Each entry now
+// also carries onTime (results delivered within due) per contracts.js byTest shape.
+// The 13 historic late tests had no on-time volume (onTime 0); the on-time-only
+// catalog tests below are PREPENDED so the array stays sorted late-ascending
+// (late 0 first), matching the engine's "late asc, catalog-idx desc" contract.
+const BY_TEST_LATE = [
+  { testName: 'Glucagon Plasma', late: 1, onTime: 0 },
+  { testName: 'HLA PRA Screening', late: 1, onTime: 0 },
+  { testName: 'HLA PRA II Single Antigen', late: 1, onTime: 0 },
+  { testName: 'HLA PRA I SA Single Antigen', late: 1, onTime: 0 },
+  { testName: 'Oligoclonal Banding CSF/Serum', late: 2, onTime: 0 },
+  { testName: 'GAD65 Ab Assay Serum (RIA)', late: 2, onTime: 0 },
+  { testName: 'Treponema Pallidum (VDRL)', late: 2, onTime: 0 },
+  { testName: 'Kidney Stone Analysis (IR)', late: 2, onTime: 0 },
+  { testName: 'Immunofixation 24h Urine', late: 3, onTime: 0 },
+  { testName: 'Copper Blood DRC-ICP-MS', late: 4, onTime: 0 },
+  { testName: 'Urine Protein Electrophoresis 24h', late: 7, onTime: 0 },
+  { testName: 'Ig Free Light Chain 24h Urine', late: 15, onTime: 0 },
+  { testName: 'Kappa/Lambda Free Light Chains [Serum]', late: 15, onTime: 0 },
 ];
+// On-time-only catalog tests (late 0, onTime > 0) — the "success" stories surfaced
+// alongside the late data on the compliance slide.
+const BY_TEST_ONTIME = [
+  { testName: 'Calprotectin', late: 0, onTime: 75 },
+  { testName: 'BK Virus', late: 0, onTime: 20 },
+  { testName: 'HLA Class II NGS', late: 0, onTime: 10 },
+  { testName: 'HLA Class I NGS', late: 0, onTime: 9 },
+  { testName: 'Renal Pathology', late: 0, onTime: 6 },
+  { testName: 'HLA Flow Cross Match', late: 0, onTime: 5 },
+  { testName: 'Epilepsy Panel Serum', late: 0, onTime: 3 },
+];
+const BY_TEST = [...BY_TEST_ONTIME, ...BY_TEST_LATE];
 
 // Monthly table (slide 4 / chart1). orders − results = incomplete; completionPct = results/orders.
 const MONTHLY = [
@@ -48,14 +64,14 @@ const TURNAROUND = {
   ],
 };
 
-// Late-by-lab table (slide 5).
+// Late-by-lab table (slide 5). onTime = results delivered within due (sum 170).
 const BY_LAB = [
-  { lab: 'Advanced Laboratory Services .Co',      total: 301, awaitingResult: 89, rejected: 14, late: 60, latePct: 67.4 },
-  { lab: 'Eurofins clinical',                     total: 27,  awaitingResult: 0,  rejected: 0,  late: 0,  latePct: 0 },
-  { lab: 'king Abdullaziz Medical city in Riyadh',total: 113, awaitingResult: 35, rejected: 0,  late: 3,  latePct: 8.6 },
-  { lab: 'Fal Specialized Medical Lab',           total: 151, awaitingResult: 21, rejected: 1,  late: 2,  latePct: 9.5 },
-  { lab: 'Saudi Diagnostics Limited Company',     total: 19,  awaitingResult: 7,  rejected: 0,  late: 2,  latePct: 28.6 },
-  { lab: 'Anwa  Medical Company',                 total: 7,   awaitingResult: 7,  rejected: 0,  late: 0,  latePct: 0 },
+  { lab: 'Advanced Laboratory Services .Co',      total: 301, awaitingResult: 89, onTime: 29, rejected: 14, late: 60, latePct: 67.4 },
+  { lab: 'Eurofins clinical',                     total: 27,  awaitingResult: 0,  onTime: 20, rejected: 0,  late: 0,  latePct: 0 },
+  { lab: 'king Abdullaziz Medical city in Riyadh',total: 113, awaitingResult: 35, onTime: 42, rejected: 0,  late: 3,  latePct: 8.6 },
+  { lab: 'Fal Specialized Medical Lab',           total: 151, awaitingResult: 21, onTime: 75, rejected: 1,  late: 2,  latePct: 9.5 },
+  { lab: 'Saudi Diagnostics Limited Company',     total: 19,  awaitingResult: 7,  onTime: 4,  rejected: 0,  late: 2,  latePct: 28.6 },
+  { lab: 'Anwa  Medical Company',                 total: 7,   awaitingResult: 7,  onTime: 0,  rejected: 0,  late: 0,  latePct: 0 },
 ];
 
 // slide 7 — current (external) tasks. PLACEHOLDER content (public repo):

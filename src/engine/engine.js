@@ -67,12 +67,18 @@ function enrichRow(row, tatIndex, asOfMs, opts) {
   else if (delay <= 0) status = STATUS.ON_TIME;
   else status = STATUS.LATE;
 
+  // "success" = resulted within TAT, DAY-granular: non-cancelled, non-rejected
+  // row that has both a Result report date and a Due date, with the resulted
+  // calendar day on or before the due calendar day. Independent of asOf/status.
+  const onTime = !cancelled && !rejected && resultedMs != null && dueMs != null
+    && toEpochDay(resultedMs) <= toEpochDay(dueMs);
+
   return {
     row,
     facility: normFacility(row.facility),
     testName: row.testName,
     orderMs, collectedMs, dispatchedMs, receivedMs, resultedMs,
-    stdTat: tat, matched, dueMs, delay, status, cancelled, rejected,
+    stdTat: tat, matched, dueMs, delay, status, cancelled, rejected, onTime,
     hasCreated: orderMs != null, // sheet's "col E non-empty" = order exists
   };
 }
@@ -212,7 +218,7 @@ function buildTurnaround(nonCancelled) {
 function buildByLab(nonCancelled) {
   const labs = new Map();
   const get = (name) => {
-    if (!labs.has(name)) labs.set(name, { lab: name, total: 0, awaitingResult: 0, rejected: 0, late: 0 });
+    if (!labs.has(name)) labs.set(name, { lab: name, total: 0, awaitingResult: 0, rejected: 0, onTime: 0, late: 0 });
     return labs.get(name);
   };
   for (const e of nonCancelled) {
@@ -220,6 +226,7 @@ function buildByLab(nonCancelled) {
     L.total++;
     if (e.receivedMs != null && e.resultedMs == null && !e.rejected) L.awaitingResult++;
     if (e.rejected) L.rejected++; // rejected count per lab (own value)
+    if (e.onTime) L.onTime++; // resulted within TAT (day-granular "success")
     // late = COUNTIFS(D=lab, T="Late", N="") — "Late" already excludes cancelled/rejected
     if (e.status === STATUS.LATE && e.resultedMs == null) L.late++;
   }
@@ -232,31 +239,38 @@ function buildByLab(nonCancelled) {
 }
 
 /**
- * Slide-5 by-test chart. Late-no-result counted per full test name, but the
- * output is restricted to the curated CHART_TEST_CATALOG (see tat.js) and to
- * nonzero counts. Sorted late-ascending, ties broken by DESCENDING catalog
- * index — reproducing the published bar order exactly.
+ * Slide-5 by-test chart. Late-no-result AND on-time ("success", resulted within
+ * TAT, day-granular) counted per full test name, restricted to the curated
+ * CHART_TEST_CATALOG (see tat.js). A catalog entry is emitted when EITHER its
+ * late OR its onTime count is nonzero. Sorted late-ascending, ties broken by
+ * DESCENDING catalog index — reproducing the published bar order exactly (the
+ * onTime column rides along on that same ordering and never affects the sort).
  */
 function buildByTest(nonCancelled, chartTests) {
   const lateByTest = new Map();
+  const onTimeByTest = new Map();
   for (const e of nonCancelled) {
     if (e.status === STATUS.LATE && e.resultedMs == null) {
       lateByTest.set(e.testName, (lateByTest.get(e.testName) || 0) + 1);
     }
+    if (e.onTime) {
+      onTimeByTest.set(e.testName, (onTimeByTest.get(e.testName) || 0) + 1);
+    }
   }
-  const idxOf = new Map();
-  chartTests.forEach((name, i) => idxOf.set(normTest(name), i));
   // match catalog entries against data via normTest, but emit the catalog's own label
-  const byNorm = new Map();
-  for (const [name, cnt] of lateByTest) byNorm.set(normTest(name), (byNorm.get(normTest(name)) || 0) + cnt);
+  const lateNorm = new Map();
+  for (const [name, cnt] of lateByTest) lateNorm.set(normTest(name), (lateNorm.get(normTest(name)) || 0) + cnt);
+  const onTimeNorm = new Map();
+  for (const [name, cnt] of onTimeByTest) onTimeNorm.set(normTest(name), (onTimeNorm.get(normTest(name)) || 0) + cnt);
 
   const rows = [];
   chartTests.forEach((name, i) => {
-    const cnt = byNorm.get(normTest(name)) || 0;
-    if (cnt > 0) rows.push({ testName: name, late: cnt, _i: i });
+    const late = lateNorm.get(normTest(name)) || 0;
+    const onTime = onTimeNorm.get(normTest(name)) || 0;
+    if (late > 0 || onTime > 0) rows.push({ testName: name, late, onTime, _i: i });
   });
   rows.sort((a, b) => a.late - b.late || b._i - a._i);
-  return rows.map(({ testName, late }) => ({ testName, late }));
+  return rows.map(({ testName, late, onTime }) => ({ testName, late, onTime }));
 }
 
 /**

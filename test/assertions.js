@@ -104,11 +104,17 @@ export function runGoldenAssertions(computeFn) {
   // 6. byLab
   check('byLab (ordered array)', G.byLab, out.byLab);
   const lt = (out.byLab || []).reduce(
-    (a, l) => ({ total: a.total + l.total, awaitingResult: a.awaitingResult + l.awaitingResult, late: a.late + l.late }),
-    { total: 0, awaitingResult: 0, late: 0 },
+    (a, l) => ({
+      total: a.total + l.total,
+      awaitingResult: a.awaitingResult + l.awaitingResult,
+      onTime: a.onTime + l.onTime,
+      late: a.late + l.late,
+    }),
+    { total: 0, awaitingResult: 0, onTime: 0, late: 0 },
   );
   check('byLab totals: total', G.byLabTotals.total, lt.total);
   check('byLab totals: awaitingResult', G.byLabTotals.awaitingResult, lt.awaitingResult);
+  check('byLab totals: onTime', G.byLabTotals.onTime, lt.onTime);
   check('byLab totals: late', G.byLabTotals.late, lt.late);
   check(
     'byLab totals: latePct',
@@ -116,9 +122,10 @@ export function runGoldenAssertions(computeFn) {
     lt.awaitingResult ? Math.round((lt.late / lt.awaitingResult) * 1000) / 10 : 0,
   );
 
-  // 7. byTest (exact ordered array + sum)
+  // 7. byTest (exact ordered array + late sum + onTime sum)
   check('byTest (ordered array)', G.byTest, out.byTest);
   check('byTest sum', G.byTestSum, (out.byTest || []).reduce((s, t) => s + t.late, 0));
+  check('byTest onTime sum', G.byTestOnTimeSum, (out.byTest || []).reduce((s, t) => s + t.onTime, 0));
 
   // 8. unmatchedTests
   check('unmatchedTests', G.unmatchedTests, out.unmatchedTests);

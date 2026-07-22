@@ -68,35 +68,41 @@ export const GOLDEN_EXPECTED = {
   // facility-normalized, excl. cancelled; sorted total-desc (workbook table order).
   // latePct = late / awaitingResult (0 when awaitingResult = 0).
   // rejected per lab (own value): Advanced 14, Fal 1, others 0.
+  // onTime per lab (day-granular "success" = resulted within TAT); sums to 170.
   byLab: [
-    { lab: 'Advanced Laboratory Services .Co', total: 301, awaitingResult: 89, rejected: 14, late: 60, latePct: 67.4 },
-    { lab: 'Fal Specialized Medical Lab', total: 151, awaitingResult: 21, rejected: 1, late: 2, latePct: 9.5 },
-    { lab: 'king Abdullaziz Medical city in Riyadh', total: 113, awaitingResult: 35, rejected: 0, late: 3, latePct: 8.6 },
-    { lab: 'Eurofins clinical', total: 27, awaitingResult: 0, rejected: 0, late: 0, latePct: 0 },
-    { lab: 'Saudi Diagnostics Limited Company', total: 19, awaitingResult: 7, rejected: 0, late: 2, latePct: 28.6 },
-    { lab: 'Anwa Medical Company', total: 7, awaitingResult: 7, rejected: 0, late: 0, latePct: 0 },
+    { lab: 'Advanced Laboratory Services .Co', total: 301, awaitingResult: 89, rejected: 14, onTime: 29, late: 60, latePct: 67.4 },
+    { lab: 'Fal Specialized Medical Lab', total: 151, awaitingResult: 21, rejected: 1, onTime: 75, late: 2, latePct: 9.5 },
+    { lab: 'king Abdullaziz Medical city in Riyadh', total: 113, awaitingResult: 35, rejected: 0, onTime: 42, late: 3, latePct: 8.6 },
+    { lab: 'Eurofins clinical', total: 27, awaitingResult: 0, rejected: 0, onTime: 20, late: 0, latePct: 0 },
+    { lab: 'Saudi Diagnostics Limited Company', total: 19, awaitingResult: 7, rejected: 0, onTime: 4, late: 2, latePct: 28.6 },
+    { lab: 'Anwa Medical Company', total: 7, awaitingResult: 7, rejected: 0, onTime: 0, late: 0, latePct: 0 },
   ],
-  byLabTotals: { total: 618, awaitingResult: 159, late: 67, latePct: 42.1 },
+  byLabTotals: { total: 618, awaitingResult: 159, onTime: 170, late: 67, latePct: 42.1 },
 
-  // curated catalog restricted, late>0, ascending (ties: reverse catalog order).
-  // Sums to 56 across 13 tests (11 late lines on 9 non-catalog tests are omitted
-  // by the workbook's design — see engine.js buildByTest / tat.js catalog).
+  // curated catalog restricted; a row appears when late>0 OR onTime>0. Sorted
+  // late-ascending (ties: reverse catalog order); onTime rides that order.
+  // late sums to 56 (unchanged); catalog onTime ("success") sums to 58.
   byTest: [
-    { testName: 'SEND OUT TEST GLUCAGON PLASMA EIA', late: 1 },
-    { testName: 'SEND OUT TEST HLA PRA SCREENING SERUM ELISA', late: 1 },
-    { testName: 'SEND OUT TEST HLA PRA II SINGLE ANTIGEN SERUM ELISA', late: 1 },
-    { testName: 'SEND OUT TEST HLA PRA I SA SINGLE ANTIGEN SERUM ELISA', late: 1 },
-    { testName: 'SEND OUT TEST OLIGOCLONAL BANDING CSF AND SERUM TEST IMMUNOBLOT (IB)', late: 2 },
-    { testName: 'SEND OUT TEST GAD65 AB ASSAY SERUM RADIOIMMUNOASSAY (RIA)', late: 2 },
-    { testName: 'SEND OUT TEST TREPONEMA PALLIDUM (VDRL) ABS IGG IGM BLOOD EIA', late: 2 },
-    { testName: 'SEND OUT TEST KIDNEY STONE ANALYSIS INFRARED SPECTRUM ANALYSIS', late: 2 },
-    { testName: 'SEND OUT TEST IMMUNOFIXATION 24 HOUR URINE TURBIDIMETRIC IMMUNOASSAY', late: 3 },
-    { testName: 'SEND OUT TEST COPPER BLOOD DRC-ICP-MS', late: 4 },
-    { testName: 'SEND OUT TEST URINE ELECTROPHORESIS PROTEIN ELECTROPHORESIS 24 HOUR URINE', late: 7 },
-    { testName: 'SEND OUT TEST IMMUNOGLOBULIN FREE LIGHT CHAIN 24 HOURS URINE NEPHELOMETRY', late: 15 },
-    { testName: 'Kappa light chains.free/Lambda light chains.free [Mass Ratio] in Serum', late: 15 },
+    { testName: 'SEND OUT TEST BK VIRUS MOLECULAR DETECTION QUANTITATIVE PCR PLASMA', late: 0, onTime: 20 },
+    { testName: 'SEND OUT TEST MYELIN OLIGODENDROCYTE GLYCOPROTEIN (MOG) ABS IGG IFT BLOOD', late: 0, onTime: 1 },
+    { testName: 'SEND OUT TEST MYOGLOBIN IN URINE TURBIDIMETRIC IMMUNOASSAY', late: 0, onTime: 1 },
+    { testName: 'SEND OUT TEST HLA CLASS I GENOTYPING HIGH RESOLUTION DONOR / RECIPIENT VARIOUS SAMPLE NGS', late: 0, onTime: 9 },
+    { testName: 'SEND OUT TEST GLUCAGON PLASMA EIA', late: 1, onTime: 0 },
+    { testName: 'SEND OUT TEST HLA PRA SCREENING SERUM ELISA', late: 1, onTime: 2 },
+    { testName: 'SEND OUT TEST HLA PRA II SINGLE ANTIGEN SERUM ELISA', late: 1, onTime: 3 },
+    { testName: 'SEND OUT TEST HLA PRA I SA SINGLE ANTIGEN SERUM ELISA', late: 1, onTime: 3 },
+    { testName: 'SEND OUT TEST OLIGOCLONAL BANDING CSF AND SERUM TEST IMMUNOBLOT (IB)', late: 2, onTime: 0 },
+    { testName: 'SEND OUT TEST GAD65 AB ASSAY SERUM RADIOIMMUNOASSAY (RIA)', late: 2, onTime: 0 },
+    { testName: 'SEND OUT TEST TREPONEMA PALLIDUM (VDRL) ABS IGG IGM BLOOD EIA', late: 2, onTime: 0 },
+    { testName: 'SEND OUT TEST KIDNEY STONE ANALYSIS INFRARED SPECTRUM ANALYSIS', late: 2, onTime: 0 },
+    { testName: 'SEND OUT TEST IMMUNOFIXATION 24 HOUR URINE TURBIDIMETRIC IMMUNOASSAY', late: 3, onTime: 4 },
+    { testName: 'SEND OUT TEST COPPER BLOOD DRC-ICP-MS', late: 4, onTime: 1 },
+    { testName: 'SEND OUT TEST URINE ELECTROPHORESIS PROTEIN ELECTROPHORESIS 24 HOUR URINE', late: 7, onTime: 9 },
+    { testName: 'SEND OUT TEST IMMUNOGLOBULIN FREE LIGHT CHAIN 24 HOURS URINE NEPHELOMETRY', late: 15, onTime: 4 },
+    { testName: 'Kappa light chains.free/Lambda light chains.free [Mass Ratio] in Serum', late: 15, onTime: 1 },
   ],
   byTestSum: 56,
+  byTestOnTimeSum: 58,
 
   unmatchedTests: [], // every test in the data resolves in the TAT lookup
 

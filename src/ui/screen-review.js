@@ -242,7 +242,7 @@ export async function render(container, ctx) {
   const taskCols = [
     { key: 'task', label: STR.review.colTask, type: 'textarea', width: '45%' },
     { key: 'status', label: STR.review.colStatus, type: 'select', options: STATUS_OPTIONS, width: '110px' },
-    { key: 'dueDate', label: STR.review.colDate, type: 'text', width: '110px' },
+    { key: 'dueDate', label: STR.review.colDate, type: 'date', width: '110px' },
     { key: 'owner', label: STR.review.colOwner, type: 'text', width: '110px' },
   ];
   const newTask = () => ({ task: '', status: STATUS_OPTIONS[0], dueDate: '', owner: '', responsible: '', category: '', hidden: false });
@@ -344,9 +344,17 @@ export async function render(container, ctx) {
       el('div', { style: 'display:flex;align-items:center;gap:6px' }, [input, reset]),
     ]);
   }
-  const kpiCard = el('div', { class: 'card' }, [
-    el('div', { class: 'card__title', text: STR.review.kpiEditTitle }),
+  // Analyst note: surface how many lines the engine dropped for lacking a
+  // standard TAT — only when the engine actually excluded some.
+  const excludedNote = (kpi && kpi.excludedNoTat > 0)
+    ? el('p', { class: 'small muted', style: 'margin:0 0 10px', text: `استُبعد ${kpi.excludedNoTat} سطراً بدون مدة معيارية (TAT)` })
+    : null;
+  // Collapsed by default (daily flow rarely overrides numbers); styled like the
+  // labels card so it reads as an advanced/optional section.
+  const kpiCard = el('details', { class: 'card' }, [
+    el('summary', { class: 'card__title', style: 'cursor:pointer', text: STR.review.kpiEditTitle }),
     el('p', { class: 'small muted', style: 'margin:-4px 0 10px', text: STR.review.kpiEditHint }),
+    excludedNote,
     el('div', { class: 'kpi-list' }, OVERRIDE_FIELDS.map(overrideRow)),
   ]);
 
@@ -413,24 +421,26 @@ export async function render(container, ctx) {
     }
   })();
 
-  const generateBtn = el('div', { class: 'sticky-actions' }, [
-    el('button', {
-      class: 'btn btn--primary btn--block', text: STR.review.generate,
-      onClick: () => {
-        model.reportDate = state.reportDate; // beat the 260ms preview debounce
-        // Settings edited after the model was drafted (scorecard, display names)
-        // must reach the generated files.
-        const s = store.settings || {};
-        model.scorecard = s.scorecard || model.scorecard;
-        model.displayNames = s.displayNames || model.displayNames;
-        state.reportModel = model;
-        navigate('generate');
-      },
-    }),
-  ]);
+  const genButton = el('button', {
+    class: 'btn btn--primary btn--block', text: STR.review.generate,
+    onClick: () => {
+      genButton.disabled = true; // guard against a double-click launching two runs
+      model.reportDate = state.reportDate; // beat the 260ms preview debounce
+      // Settings edited after the model was drafted (scorecard, display names)
+      // must reach the generated files.
+      const s = store.settings || {};
+      model.scorecard = s.scorecard || model.scorecard;
+      model.displayNames = s.displayNames || model.displayNames;
+      state.reportModel = model;
+      navigate('generate');
+    },
+  });
+  const generateBtn = el('div', { class: 'sticky-actions' }, [genButton]);
 
+  // Daily-edited items first (date → support → tasks → challenges/risks), then the
+  // advanced KPI-override and label-customisation cards, then the generate action.
   const controls = el('div', { class: 'review-controls' }, [
-    dateField, kpiCard, panelsCard, tasksCurrentCard, tasksInternalCard, challengesCard, risksCard, labelsHost, generateBtn,
+    dateField, panelsCard, tasksCurrentCard, tasksInternalCard, challengesCard, risksCard, kpiCard, labelsHost, generateBtn,
   ]);
   const preview = el('div', { class: 'review-preview' }, [slideToggleRow, previewFrame]);
 

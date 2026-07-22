@@ -39,6 +39,10 @@ export const DEFAULT_LABELS = {
   kpiRejected: 'النتائج المرفوضة',
   kpiLate: 'الطلبات المتأخرة',
   kpiShipped: 'شُحنت ولم تُستلم',
+  // Exec slide — overall completion-rate line (label part; value appended as ': N%')
+  execCompletionRate: 'نسبة الاكتمال الإجمالية',
+  // Exec slide — delta-chip legend (rendered only when a green "+N" chip is visible)
+  execDeltaLegend: '▲ الأخضر = التغيّر منذ التقرير السابق',
   // Monthly table row labels (also reused as the monthly bar-chart series names)
   monthlyRowOrders: 'الطلبات',
   monthlyRowResults: 'النتائج المستلمة',
@@ -50,6 +54,7 @@ export const DEFAULT_LABELS = {
   compLab: 'المختبر',
   compTotal: 'مجموع الطلبات',
   compAwaiting: 'طلبات مستلمة بانتظار نتيجة',
+  compOnTime: 'ملتزمة',
   compRejected: 'مرفوضة',
   compLate: 'الطلبات المتأخرة',
   compLatePct: 'نسبة الطلبات المتأخرة',
@@ -70,7 +75,8 @@ export const DEFAULT_LABELS = {
   chartActual: 'الفعلي',            // turnaround line — actual series
   chartExpected: 'المتوقع',         // turnaround line — expected series
   chartDaysAxis: 'الأيام',          // turnaround line — value-axis title
-  chartLateSeries: 'الطلبات المتأخرة', // late-by-test bar series
+  chartLateSeries: 'المتأخرة',       // late-by-test bar series (late count)
+  chartOnTimeSeries: 'الملتزمة',      // late-by-test bar series (on-time / success count)
   overallAvgTitle: 'المتوسط العام لزمن الإنجاز', // overall-average card title
 };
 
@@ -90,6 +96,8 @@ export const LABEL_NAMES = {
   kpiRejected: 'بطاقة: النتائج المرفوضة',
   kpiLate: 'بطاقة: الطلبات المتأخرة',
   kpiShipped: 'بطاقة: شُحنت ولم تُستلم',
+  execCompletionRate: 'سطر نسبة الاكتمال الإجمالية (الملخص التنفيذي)',
+  execDeltaLegend: 'مفتاح رمز التغيّر الأخضر (الملخص التنفيذي)',
   monthlyRowOrders: 'صف الجدول الشهري: الطلبات',
   monthlyRowResults: 'صف الجدول الشهري: النتائج المستلمة',
   monthlyRowRejected: 'صف الجدول الشهري: النتائج المرفوضة',
@@ -99,6 +107,7 @@ export const LABEL_NAMES = {
   compLab: 'عمود الالتزام: المختبر',
   compTotal: 'عمود الالتزام: مجموع الطلبات',
   compAwaiting: 'عمود الالتزام: مستلمة بانتظار نتيجة',
+  compOnTime: 'عمود الالتزام: الطلبات الملتزمة',
   compRejected: 'عمود الالتزام: مرفوضة',
   compLate: 'عمود الالتزام: الطلبات المتأخرة',
   compLatePct: 'عمود الالتزام: نسبة الطلبات المتأخرة',
@@ -116,6 +125,7 @@ export const LABEL_NAMES = {
   chartExpected: 'سلسلة زمن الإنجاز: المتوقع',
   chartDaysAxis: 'عنوان محور الأيام',
   chartLateSeries: 'سلسلة الطلبات المتأخرة',
+  chartOnTimeSeries: 'سلسلة الطلبات الملتزمة',
   overallAvgTitle: 'عنوان بطاقة متوسط زمن الإنجاز',
 };
 
@@ -241,18 +251,30 @@ function buildExecFunnel(m) {
     ? (vAwait > 0 ? Math.round((vLate / vAwait) * 1000) / 10 : 0)
     : b.latePct;
 
+  // Total-card window: first→last month WITH orders (Arabic names), tracking the data
+  // instead of a pinned 'يناير – يوليو'. Empty when no month has orders.
+  const monthsWithOrders = (m.kpi.monthly || []).filter((x) => x.orders > 0);
+  const dataWindow = monthsWithOrders.length
+    ? `${arMonthLabel(monthsWithOrders[0].month)} – ${arMonthLabel(monthsWithOrders[monthsWithOrders.length - 1].month)}`
+    : '';
+
+  // Overall completion rate — SAME override-aware total/completed the cards use (guard /0).
+  const vTotalCard = V('total', m.kpi.totals.total);
+  const vCompletedCard = V('completed', b.completed);
+  const completionRate = vTotalCard > 0 ? Math.round((vCompletedCard / vTotalCard) * 100) : 0;
+
   // -- ZONE A: KPI cards in one row, right-to-left (total rightmost). المرفوضة sits
   // between المكتملة and المتأخرة. Card defs in RTL logical order (index 0 = rightmost).
   // dk = the delta/override/kpiCards key. A card renders unless kpiCards[dk] === false;
   // its value is the manual override (if finite) else the computed metric, and its green
   // "+N" chip is suppressed when that value was overridden.
   const cardDefs = [
-    { v: V('total', m.kpi.totals.total),                vc: C.blue,      lab: L('kpiTotal'),            sub: 'يناير – يوليو',            ac: C.blue,      dk: 'total' },
+    { v: V('total', m.kpi.totals.total),                vc: C.blue,      lab: L('kpiTotal'),            sub: dataWindow,                 ac: C.blue,      dk: 'total' },
     { v: V('awaitingDispatch', b.awaitingDispatch),     vc: C.greenSoft, lab: L('kpiAwaitingDispatch'),  sub: 'قبل الـ Dispatch',         ac: C.greenSoft, dk: 'awaitingDispatch' },
     { v: vAwait,                                        vc: C.amber,     lab: L('kpiAwaitingResults'),   sub: 'بعد الـ Dispatch',         ac: C.amber,     dk: 'awaitingResults' },
     { v: V('completed', b.completed),                   vc: C.green,     lab: L('kpiCompleted'),         sub: '',                         ac: C.green,     dk: 'completed' },
     { v: V('rejected', b.rejected),                     vc: C.redSoft,   lab: L('kpiRejected'),          sub: 'نتائج مرفوضة من المختبر',   ac: C.redSoft,   dk: 'rejected' },
-    { v: vLate,                                         vc: C.redPure,   lab: L('kpiLate'),              sub: `تمثل ${latePctShown}% من الطلبات`, ac: C.redPure, dk: 'lateNoResult' },
+    { v: vLate,                                         vc: C.redPure,   lab: L('kpiLate'),              sub: `تمثل ${latePctShown}% من الطلبات بانتظار النتيجة`, ac: C.redPure, dk: 'lateNoResult' },
     { v: V('shippedNotReceived', b.shippedNotReceived), vc: C.redSoft,   lab: L('kpiShipped'),           sub: '',                         ac: C.redSoft,   dk: 'shippedNotReceived' },
   ];
   const visible = cardDefs.filter((c) => m.reportOptions?.kpiCards?.[c.dk] !== false);
@@ -279,10 +301,17 @@ function buildExecFunnel(m) {
   const barY = [3.297, 3.947, 4.597, 5.247, 5.932];
   const trackX = 3.92, trackW = 5.0, barH = 0.3;
 
+  // A green "+N" chip is shown this run when a visible KPI card OR an intermediate
+  // funnel stage has a positive, non-overridden delta. Drives the legend (Fix 3).
+  const anyChip = visible.some((c) => d[c.dk] > 0 && !isOv(c.dk))
+    || rows.some((r) => d[r.key] > 0 && !KPI_DELTA_KEYS.has(r.key) && !isOv(r.ov));
+
   const els = [
     ...chrome(L('titleExec')),
     ...kpiEls,
     text(10.542, 2.55, 2.271, 0.32, `* ${V('cancelledNote', m.kpi.cancelledNote)} طلب ملغي`, 11, { bold: true, color: C.slate600, align: 'right', valign: 'middle', rtl: true }),
+    // Overall completion-rate line — mirrors the cancelled note on the left side.
+    text(0.5, 2.55, 2.271, 0.32, `${L('execCompletionRate')}: ${completionRate}%`, 11, { bold: true, color: C.navy, align: 'left', valign: 'middle', rtl: true }),
     // Funnel column labels
     text(9.05, 2.906, 3.0, 0.3, L('funnelStage'), 10, { bold: true, color: C.slate500, align: 'right', valign: 'middle', rtl: true }),
     text(8.629, 2.906, 1.0, 0.3, L('funnelCount'), 10, { bold: true, color: C.slate500, align: 'center', valign: 'middle', rtl: true }),
@@ -310,6 +339,10 @@ function buildExecFunnel(m) {
       els.push(text(7.75, rowY[i], 0.75, 0.55, '+' + d[r.key], 10, { bold: true, color: C.deltaGreen, align: 'center', valign: 'middle' }));
     }
   });
+  // Delta-chip legend — only when at least one green "+N" chip is visible this run.
+  if (anyChip) {
+    els.push(text(0.5, 0.72, 6.0, 0.18, L('execDeltaLegend'), 8.5, { color: C.deltaGreen, align: 'left', valign: 'middle', rtl: true }));
+  }
   return { id: 'execFunnel', bg: C.white, elements: els };
 }
 
@@ -396,61 +429,113 @@ function buildMonthly(m) {
     text(0.5, 5.4, 3.417, 0.7, `الفعلي: ${ovActual.toFixed(1)} يوم`, 24, { bold: true, color: C.white, align: 'center', valign: 'middle', rtl: true }),
     text(0.5, 6.2, 3.417, 0.7, `المتوقع: ${ovExpected.toFixed(1)} يوم`, 24, { bold: true, color: C.peach, align: 'center', valign: 'middle', rtl: true }),
   ];
+  // Variance vs target — actual − expected, sign always shown; only when both present.
+  if (Number.isFinite(ovActual) && Number.isFinite(ovExpected)) {
+    const diff = ovActual - ovExpected;
+    const diffStr = (diff >= 0 ? '+' : '-') + Math.abs(diff).toFixed(1);
+    els.push(text(0.5, 6.5, 3.417, 0.24, `الفارق: ${diffStr} يوم عن المستهدف`, 11, { bold: true, color: C.amber, align: 'center', valign: 'middle', rtl: true }));
+  }
+  // Sample size behind the averages — only when the engine reports measuredCount.
+  if (Number.isFinite(t.measuredCount)) {
+    els.push(text(0.5, 6.74, 3.417, 0.2, `(ن = ${t.measuredCount} طلب)`, 9, { color: CARD_TITLE, align: 'center', valign: 'middle', rtl: true }));
+  }
   return { id: 'monthly', bg: C.white, elements: els };
 }
 
 // ============================================================================
 // Slide 4 — Compliance measure / late orders
 // ============================================================================
+// Category cap for the late/on-time chart: keep at most this many test bars. Beyond
+// it, we surface the TOP N by combined (late+onTime) volume, re-sorted back into the
+// engine's byTest order, and spend one line on a '+ N فحوصات أخرى' note.
+const CAT_CAP = 13;
+
 function buildCompliance(m) {
   const L = labelOf(m);
   const lab = m.kpi.byLab;
-  // logical (deck rtl) order per row: [#, lab, total, awaitingResult, rejected, late, late%];
-  // reverse -> visual. 'مرفوضة' sits between 'مستلمة بانتظار نتيجة' and 'المتأخرة'.
+  // logical (deck rtl) order per row: [#, lab, total, awaitingResult, onTime, rejected, late, late%];
+  // reverse -> visual. 'ملتزمة' (on-time) sits right after 'مستلمة بانتظار نتيجة',
+  // and 'مرفوضة' between it and 'المتأخرة'.
+  // Column totals computed from the byLab rows (no hardcoded literals). late% is
+  // recomputed from the summed late/awaiting (round1, guard div-by-zero) so it stays
+  // consistent with any edited/filtered lab set.
+  const totalTot = lab.reduce((s, r) => s + (r.total || 0), 0);
+  const awaitTot = lab.reduce((s, r) => s + (r.awaitingResult || 0), 0);
+  const lateTot = lab.reduce((s, r) => s + (r.late || 0), 0);
   const rejTot = lab.reduce((s, r) => s + (r.rejected || 0), 0);
-  const header = rev([L('compHash'), L('compLab'), L('compTotal'), L('compAwaiting'), L('compRejected'), L('compLate'), L('compLatePct')]);
+  const onTimeTot = lab.reduce((s, r) => s + (r.onTime || 0), 0);
+  const latePctTot = awaitTot > 0 ? Math.round((lateTot / awaitTot) * 1000) / 10 : 0;
+  // On-time cell: green + bold when >0 (a success signal), plain otherwise.
+  const onTimeCell = (n) => (n > 0 ? { text: String(n), color: C.green, bold: true } : String(n || 0));
+  // Worst-lab highlight: bold + redPure on the late% cell when late% ≥ 50.
+  const latePctCell = (n) => (n >= 50 ? { text: pctLab(n), bold: true, color: C.redPure } : pctLab(n));
+  const header = rev([L('compHash'), L('compLab'), L('compTotal'), L('compAwaiting'), L('compOnTime'), L('compRejected'), L('compLate'), L('compLatePct')]);
   const labRows = lab.map((r, i) => rev([
     String(i + 1),
     { text: r.lab, align: 'right' },
     String(r.total),
     String(r.awaitingResult),
+    onTimeCell(r.onTime || 0),
     String(r.rejected || 0),
     String(r.late),
-    pctLab(r.latePct),
+    latePctCell(r.latePct),
   ]));
   const totalRow = rev([
     { text: '', fill: C.bgLighter },
     { text: 'المجموع', bold: true, fill: C.bgLighter, align: 'right' },
-    { text: '618', bold: true, fill: C.bgLighter },
-    { text: '159', bold: true, fill: C.bgLighter },
+    { text: String(totalTot), bold: true, fill: C.bgLighter },
+    { text: String(awaitTot), bold: true, fill: C.bgLighter },
+    { text: String(onTimeTot), bold: true, fill: C.bgLighter, ...(onTimeTot > 0 ? { color: C.green } : {}) },
     { text: String(rejTot), bold: true, fill: C.bgLighter },
-    { text: '67', bold: true, fill: C.bgLighter },
-    { text: '42.1%', bold: true, fill: C.bgLighter },
+    { text: String(lateTot), bold: true, fill: C.bgLighter },
+    { text: pctLab(latePctTot), bold: true, fill: C.bgLighter },
   ]);
 
-  // colW: shaved the wide lab-name column 3.264 -> 2.714 to fund a 0.55in 'مرفوضة'
-  // column; total width stays 11.667 (0.556+2.714+1.667+2.083+0.55+1.944+2.153).
+  // colW: shaved the lab-name column 2.714 -> 2.164 to fund a 0.55in 'ملتزمة'
+  // column; total width UNCHANGED = 11.667 (0.556+2.164+1.667+2.083+0.55+0.55+1.944+2.153).
   const labTable = {
     t: 'table', x: 0.833, y: 1.194, w: 11.667, rtl: true, rowH: 0.275,
     header: { fill: C.navy, color: C.white, bold: true },
-    colW: rev([0.556, 2.714, 1.667, 2.083, 0.55, 1.944, 2.153]),
+    colW: rev([0.556, 2.164, 1.667, 2.083, 0.55, 0.55, 1.944, 2.153]),
     rows: [header, ...labRows, totalRow],
   };
 
+  // Grouped late + on-time bars in one chart. Cap the category count to CAT_CAP:
+  // pick the top by (late+onTime), then restore byTest order so bars read naturally.
+  const byTest = m.kpi.byTest;
+  let cats = byTest, extraCats = 0;
+  if (byTest.length > CAT_CAP) {
+    const keep = new Set(byTest.slice()
+      .sort((a, b) => (b.late + b.onTime) - (a.late + a.onTime))
+      .slice(0, CAT_CAP));
+    cats = byTest.filter((x) => keep.has(x));
+    extraCats = byTest.length - CAT_CAP;
+  }
+  // Bar geometry: y bottom is pinned at 7.05 so grouped pairs never cross the footer
+  // border (7.10). Category labels shrink to 7pt past 10 categories to stay readable.
+  const CHART_Y = 4.5, CHART_BOTTOM = 7.05;
   const lateChart = {
-    t: 'chart', kind: 'barH', x: 0.806, y: 4.5, w: 11.694, h: 2.64,
-    categories: m.kpi.byTest.map((x) => m.displayNames[x.testName] || x.testName),
-    series: [{ name: L('chartLateSeries'), values: m.kpi.byTest.map((x) => x.late), color: C.navyBar }],
-    opts: { dataLabels: true, legend: 'none' },
+    t: 'chart', kind: 'barH', x: 0.806, y: CHART_Y, w: 11.694, h: CHART_BOTTOM - CHART_Y,
+    categories: cats.map((x) => m.displayNames[x.testName] || x.testName),
+    series: [
+      { name: L('chartLateSeries'), values: cats.map((x) => x.late), color: C.navyBar },
+      { name: L('chartOnTimeSeries'), values: cats.map((x) => x.onTime), color: C.greenBright },
+    ],
+    opts: { dataLabels: true, legend: 'bottom', catFont: cats.length > 10 ? 7 : 8 },
   };
 
   const els = [
     ...chrome(L('titleCompliance')),
     labTable,
     rect(0.6, 4.12, 12.3, 0.012, C.border),
-    text(0.6, 4.16, 12.3, 0.4, 'تفاصيل الطلبات المتأخرة', 14, { bold: true, color: C.navy, align: 'center', valign: 'middle', rtl: true }),
+    text(0.6, 4.16, 12.3, 0.4, 'تفاصيل الطلبات المتأخرة والملتزمة', 14, { bold: true, color: C.navy, align: 'center', valign: 'middle', rtl: true }),
     lateChart,
   ];
+  // Overflow note (top-left of the chart band, clear of the centered subtitle).
+  if (extraCats > 0) {
+    els.push(text(0.806, 4.18, 3.6, 0.30, `+ ${extraCats} فحوصات أخرى`, 9,
+      { italic: true, color: C.slate600, align: 'left', valign: 'middle', rtl: true }));
+  }
   return { id: 'compliance', bg: C.white, elements: els };
 }
 

@@ -244,9 +244,19 @@
 .st-file-label:hover {
   background: var(--st-bg-alt);
 }
+/* Visually hide the native input — its browser-locale "Choose File" text breaks
+   the all-Arabic UI. The Arabic .st-file-label IS the trigger (it wraps the input),
+   and the chosen filename surfaces via .st-file-msg. */
 .st-file {
-  font-size: 14px;
-  max-width: 200px;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 .st-file-msg {
   font-size: 14px;
@@ -305,6 +315,10 @@
 .st-td-name {
   max-width: 420px;
   word-break: break-word;
+  overflow-wrap: anywhere; /* long English names wrap instead of start-clipping in RTL */
+}
+@media (max-width: 700px) {
+  .st-td-name { max-width: none; min-width: 160px; }
 }
 .st-empty {
   text-align: center;

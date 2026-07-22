@@ -122,9 +122,9 @@ function addChart(slide, P, e) {
       barDir: 'bar', barGrouping: 'clustered', barGapWidthPct: 30,
       valAxisOrientation: 'maxMin', // RTL: zero baseline on the right, bars grow left
       chartColors: colors,
-      showLegend: false,
+      showLegend: e.opts?.legend === 'bottom', legendPos: 'b', legendFontFace: 'Cairo', legendFontSize: 8,
       showValue: !!e.opts?.dataLabels, dataLabelFontFace: 'Cairo', dataLabelFontSize: 8, dataLabelColor: hex(C.slate900), dataLabelPosition: 'outEnd',
-      catAxisLabelFontFace: 'Cairo', catAxisLabelFontSize: 8,
+      catAxisLabelFontFace: 'Cairo', catAxisLabelFontSize: e.opts?.catFont || 8,
       valAxisLabelFontFace: 'Cairo', valAxisLabelFontSize: 8,
       valGridLine: { color: 'D9D9D9', size: 1 },
     });
