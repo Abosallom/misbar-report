@@ -7,7 +7,7 @@
 // + included slides/KPI cards), live source (Grafana + cached-tracker), and
 // backup (export/import).
 
-import { SNAPSHOT_SEED, REPORT_OPTIONS_SEED } from '../seeds/defaults.js?v=v2026-07-22.7';
+import { SNAPSHOT_SEED, REPORT_OPTIONS_SEED } from '../seeds/defaults.js?v=v2026-07-22.8';
 
 const TABS = [
   { id: 'tat', label: 'مدة الفحوصات' },

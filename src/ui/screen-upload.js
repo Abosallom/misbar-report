@@ -1,9 +1,10 @@
 // ui/screen-upload.js — file upload + parse + engine kickoff (Track E).
-import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-07-22.7';
-import { el, dropZone, fileSummaryCard, toast } from './components.js?v=v2026-07-22.7';
-import { normTest } from '../contracts.js?v=v2026-07-22.7';
-import { getPapa, getXLSX } from '../vendor-loader.js?v=v2026-07-22.7';
-import { TAT_LOINC } from '../seeds/tat-lookup.js?v=v2026-07-22.7';
+import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-07-22.8';
+import { el, dropZone, fileSummaryCard, toast } from './components.js?v=v2026-07-22.8';
+import { normTest } from '../contracts.js?v=v2026-07-22.8';
+import { getPapa, getXLSX } from '../vendor-loader.js?v=v2026-07-22.8';
+import { TAT_LOINC } from '../seeds/tat-lookup.js?v=v2026-07-22.8';
+import { buildLateLabsSection } from './late-labs-section.js?v=v2026-07-22.8';
 
 /** Format an ISO timestamp as local 'HH:MM' for snapshot-freshness labels. */
 function fmtHHMM(iso) {
@@ -199,7 +200,7 @@ function normalizeTracker(res) {
 
 async function ingestCsv(file) {
   const Papa = await getPapa();
-  const mod = await tryImport('../ingest/csv.js?v=v2026-07-22.7');
+  const mod = await tryImport('../ingest/csv.js?v=v2026-07-22.8');
   const fn = pickFn(mod, ['parseKamcCsv', 'parseCsv', 'ingestCsv', 'parseOrders', 'parse']);
   if (fn) {
     const text = await file.text();
@@ -212,7 +213,7 @@ async function ingestCsv(file) {
 
 async function ingestTracker(file) {
   const XLSX = await getXLSX();
-  const mod = await tryImport('../ingest/xlsx.js?v=v2026-07-22.7');
+  const mod = await tryImport('../ingest/xlsx.js?v=v2026-07-22.8');
   const fn = pickFn(mod, ['parseTracker', 'ingestXlsx', 'parseXlsx', 'parse']);
   if (fn) {
     const buf = await file.arrayBuffer();
@@ -276,6 +277,7 @@ export async function render(container, ctx) {
   let proceedBtn = null; // the sticky proceed button (rebuilt each paint)
   let heroSeq = 0; // guards overlapping async hero runs — only the latest paints
   let unmatchedSeq = 0; // guards overlapping async suggestion runs on the unmatched panel
+  let lateLabsSeq = 0; // guards overlapping async late-labs Excel-card runs
   const errorsByKind = { csv: [], tracker: [] };
 
   const head = el('div', { class: 'screen__head' }, [
@@ -343,6 +345,7 @@ export async function render(container, ctx) {
 
   const heroHost = el('div'); // 'لمحة اليوم' hero strip (filled by paintHero once data lands)
   const summaryHost = el('div');
+  const lateLabsHost = el('div'); // per-lab 'Late & Due' Excel card (filled by paintLateLabs once data lands)
   const unmatchedHost = el('div');
   const actionsHost = el('div', { class: 'sticky-actions' });
 
@@ -353,7 +356,7 @@ export async function render(container, ctx) {
   ]) : null;
 
   container.appendChild(el('div', { class: 'screen' }, [
-    head, heroHost, grafanaBar, dropgrid, devBar, summaryHost, unmatchedHost, actionsHost,
+    head, heroHost, grafanaBar, dropgrid, devBar, summaryHost, lateLabsHost, unmatchedHost, actionsHost,
   ]));
 
   // Reuse the last-parsed Project Tracker when no fresh file was dropped —
@@ -380,7 +383,7 @@ export async function render(container, ctx) {
     const gcfg = (store.settings && store.settings.grafana) || {};
     const dataKey = (gcfg.dataKey || '').trim();
     try {
-      const mod = await import('../ingest/grafana.js?v=v2026-07-22.7');
+      const mod = await import('../ingest/grafana.js?v=v2026-07-22.8');
       const asOf = state.reportDate || todayISO();
       const directConfigured = !!(gcfg.baseUrl && gcfg.accessToken);
       try {
@@ -613,6 +616,52 @@ export async function render(container, ctx) {
 
     // The moment orders exist, transform the top of the screen into a mini-dashboard.
     paintHero();
+    // …and surface the ready-to-email per-lab 'Late & Due' Excel files right here,
+    // so the exec never has to run a full report to reach them.
+    paintLateLabs();
+  }
+
+  /* ---------------------------------------------------------------- *
+   * Per-lab 'Late & Due' Excel card — the SAME shared section the
+   * generate results screen shows, hoisted to the upload screen so the
+   * files are reachable the instant order data lands (live pull or CSV).
+   * asOf = now (only the calendar day matters to classification). Purely
+   * additive with a seq guard: if anything fails it renders nothing.
+   * ---------------------------------------------------------------- */
+  async function paintLateLabs() {
+    if (!lateLabsHost) return;
+    const seq = ++lateLabsSeq;
+    const orders = state.parsed.orders;
+    if (!orders || !orders.length) { lateLabsHost.innerHTML = ''; return; } // no data yet → card absent
+    let section;
+    try {
+      section = await buildLateLabsSection({
+        rows: orders,
+        tatTests: (store.settings || {}).tatLookup || {},
+        asOfMs: Date.now(),
+      });
+      if (seq !== lateLabsSeq) return; // a newer paint superseded this run
+    } catch (e) {
+      // Graceful by design: the card is a bonus, never a failure surface.
+      if (seq === lateLabsSeq) lateLabsHost.innerHTML = '';
+      return;
+    }
+    // Unwrap the shared section's own card chrome + drop its internal title so it
+    // reads as the body of this one prominent upload card (no nested double-card,
+    // no duplicate heading). Its counting-basis line, lab rows, per-lab تنزيل /
+    // نسخ نص البريد, and تنزيل الكل button are preserved verbatim.
+    section.classList.remove('card');
+    section.style.cssText = 'margin-top:4px;text-align:right';
+    if (section.firstChild) section.removeChild(section.firstChild);
+    lateLabsHost.innerHTML = '';
+    lateLabsHost.appendChild(el('div', { class: 'card', style: 'border-top:3px solid var(--red)' }, [
+      el('div', { class: 'card__title', text: '📥 ملفات المختبرات المتأخرة (Excel)' }),
+      el('p', {
+        class: 'small muted', style: 'margin:0 0 10px',
+        text: 'صدّر ملف Excel لكل مختبر لديه فحوصات متأخرة أو مستحقة خلال ٢٤ ساعة — جاهز للإرسال بالبريد.',
+      }),
+      section,
+    ]));
   }
 
   /* ---------------------------------------------------------------- *
@@ -636,7 +685,7 @@ export async function render(container, ctx) {
     const seq = ++unmatchedSeq;
     let mod;
     try {
-      mod = await import('../ingest/tat-suggest.js?v=v2026-07-22.7');
+      mod = await import('../ingest/tat-suggest.js?v=v2026-07-22.8');
     } catch { return; } // module not present yet — keep the plain panel behavior
     if (seq !== unmatchedSeq) return; // a newer paint superseded this run
     const fn = pickFn(mod, ['suggestTats']);
@@ -782,7 +831,7 @@ export async function render(container, ctx) {
     if (!orders || !orders.length) { heroHost.innerHTML = ''; return; }
     let out;
     try {
-      const mod = await import('../engine/engine.js?v=v2026-07-22.7');
+      const mod = await import('../engine/engine.js?v=v2026-07-22.8');
       if (seq !== heroSeq) return; // a newer run superseded this one
       const compute = pickFn(mod, ['compute', 'runEngine', 'run']);
       if (typeof compute !== 'function') { heroHost.innerHTML = ''; return; }
@@ -807,7 +856,7 @@ export async function render(container, ctx) {
       let out = (state.engineOutput && state.engineOutput.totals) ? state.engineOutput : null;
       if (!out) {
         try {
-          const mod = await tryImport('../engine/engine.js?v=v2026-07-22.7');
+          const mod = await tryImport('../engine/engine.js?v=v2026-07-22.8');
           const compute = pickFn(mod, ['compute', 'runEngine', 'run']);
           if (compute) {
             out = compute(state.parsed.orders, (store.settings || {}).tatLookup, engineOpts());

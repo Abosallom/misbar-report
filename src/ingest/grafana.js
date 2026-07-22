@@ -3,8 +3,8 @@
 // as ingest/csv.js. No auth (public dashboard, server-side-masked data). Pure module:
 // fetch is injectable (fetchImpl) and there are NO vendor/ or DOM imports.
 // PII (patient/staff fields) is read but NEVER copied into OrderRow or persisted.
-import { normFacility } from '../contracts.js?v=v2026-07-22.7';
-import { MAPPED_COLUMNS } from './csv.js?v=v2026-07-22.7';
+import { normFacility } from '../contracts.js?v=v2026-07-22.8';
+import { MAPPED_COLUMNS } from './csv.js?v=v2026-07-22.8';
 
 // ---- cell coercers (mirror csv.js semantics; Grafana cells may be null/number/string) ----
 const clean = (v) => {

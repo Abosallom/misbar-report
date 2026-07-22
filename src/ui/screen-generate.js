@@ -1,13 +1,12 @@
 // ui/screen-generate.js — build both variants, produce 4 files, trigger downloads (Track E).
-import { STR, todayISO, buildFileName, formatDateAr } from '../i18n/ar.js?v=v2026-07-22.7';
-import { el, progressBar, toast } from './components.js?v=v2026-07-22.7';
-import { VARIANTS } from '../contracts.js?v=v2026-07-22.7';
-import { getGenLibs, getXLSX } from '../vendor-loader.js?v=v2026-07-22.7';
-import { resetRunData } from '../state.js?v=v2026-07-22.7';
-import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-07-22.7';
-import { autoDraft } from '../model/drafts.js?v=v2026-07-22.7';
-import { buildLateLabWorkbooks } from '../export/late-labs.js?v=v2026-07-22.7';
-import { parseDateTime } from '../engine/workday.js?v=v2026-07-22.7';
+import { STR, todayISO, buildFileName, formatDateAr } from '../i18n/ar.js?v=v2026-07-22.8';
+import { el, progressBar, toast } from './components.js?v=v2026-07-22.8';
+import { VARIANTS } from '../contracts.js?v=v2026-07-22.8';
+import { getGenLibs } from '../vendor-loader.js?v=v2026-07-22.8';
+import { resetRunData } from '../state.js?v=v2026-07-22.8';
+import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-07-22.8';
+import { autoDraft } from '../model/drafts.js?v=v2026-07-22.8';
+import { buildLateLabsSection, triggerDownload } from './late-labs-section.js?v=v2026-07-22.8';
 
 async function tryImport(path) { try { return await import(path); } catch { return null; } }
 function pickFn(mod, names) {
@@ -86,7 +85,7 @@ function fallbackModel(state, store) {
 // Build the SlideSpec per VARIANT — the variant changes slide-5 content
 // (task rows), so one shared spec would leak internal tasks into NUPCO files.
 async function buildVariantSpec(model, variant) {
-  const mod = await tryImport('../slidespec/build-spec.js?v=v2026-07-22.7');
+  const mod = await tryImport('../slidespec/build-spec.js?v=v2026-07-22.8');
   const fn = pickFn(mod, ['buildSpec', 'build', 'makeSpec', 'toSpec']);
   if (!fn) return null;
   let spec = fn(model, { variant });
@@ -112,7 +111,7 @@ async function toBlob(result, kind) {
 // renderPptx(spec, {variant, PptxGenJS}) -> Promise<Blob>
 async function makePptx(spec, variant, libs) {
   if (!spec) return null;
-  const mod = await tryImport('../render/pptx-renderer.js?v=v2026-07-22.7');
+  const mod = await tryImport('../render/pptx-renderer.js?v=v2026-07-22.8');
   const fn = pickFn(mod, ['renderPptx', 'buildPptx', 'toPptx', 'makePptx', 'render']);
   if (!fn) return null;
   const r = await fn(spec, { variant, PptxGenJS: libs.PptxGenJS });
@@ -166,9 +165,9 @@ function makeThumbStrip() {
 // renderSlides(spec, {variant}) -> fragment of .sl-slide; exportPdf(slideEls, {jsPDF, html2canvas, onProgress})
 async function makePdf(spec, variant, libs, host, onProgress, thumbs) {
   if (!spec) return null;
-  const rMod = await tryImport('../render/html-renderer.js?v=v2026-07-22.7');
+  const rMod = await tryImport('../render/html-renderer.js?v=v2026-07-22.8');
   const renderSlides = pickFn(rMod, ['renderSlides', 'renderSpec', 'renderHtml', 'render']);
-  const pMod = await tryImport('../render/pdf-export.js?v=v2026-07-22.7');
+  const pMod = await tryImport('../render/pdf-export.js?v=v2026-07-22.8');
   const exportPdf = pickFn(pMod, ['exportPdf', 'renderPdf', 'toPdf', 'buildPdf', 'render']);
   if (!renderSlides || !exportPdf) return null;
   host.innerHTML = '';
@@ -239,126 +238,6 @@ function buildShareCard(model, date, fileCount) {
     ta,
     copyBtn,
   ]);
-}
-
-// English email template the team pastes when notifying a lab — verbatim wording.
-function labEmailText(lab) {
-  const subject = `${lab} | Late Test Results — Action Required`;
-  const body = [
-    'Dear all,',
-    'This is a reminder regarding laboratory orders that require your attention.',
-    'Some orders in the attached report are approaching their SLA deadline and will breach within the next 24 hours. These are flagged for priority and should be actioned urgently to avoid an SLA breach.',
-    'Please confirm once the listed orders have been addressed. If you have any questions or are facing issues preventing fulfillment, let us know so we can support you.',
-    'Please find the attachment for more info about the orders.',
-    'Thank you for your cooperation.',
-  ].join('\n\n');
-  return `Subject: ${subject}\n\n${body}`;
-}
-
-// Copy text to the clipboard with an execCommand fallback (keeps user activation
-// on browsers where navigator.clipboard is unavailable). Mirrors buildShareCard.
-async function copyText(text) {
-  const fallback = () => {
-    try {
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      ta.style.cssText = 'position:fixed;top:-1000px;opacity:0';
-      document.body.appendChild(ta);
-      ta.focus(); ta.select();
-      const ok = document.execCommand('copy');
-      ta.remove();
-      return ok;
-    } catch { return false; }
-  };
-  try {
-    if (navigator.clipboard && navigator.clipboard.writeText) { await navigator.clipboard.writeText(text); return true; }
-  } catch { /* fall through */ }
-  return fallback();
-}
-
-// Per-lab "Late & Due" Excel export section. Built from the SAME dataset the
-// generate run used (state.parsed.orders + settings.tatLookup + report date), so
-// it works in live-snapshot mode too. Returns a DOM node, or the empty-state card.
-async function buildLateLabsSection(model, state, store) {
-  const title = 'ملفات المختبرات — المتأخر والمستحق (Excel)';
-  const rows = (state.parsed && state.parsed.orders) || null;
-  const tatTests = (store.settings && store.settings.tatLookup) || {};
-  const asOfMs = parseDateTime(model.reportDate || todayISO());
-
-  const emptyCard = (msg) => el('div', { class: 'card', style: 'margin-top:16px;text-align:right' }, [
-    el('div', { class: 'card__title', text: title }),
-    el('p', { class: 'small muted', style: 'margin:0', text: msg }),
-  ]);
-
-  if (!rows || !rows.length || asOfMs == null) return emptyCard('لا توجد فحوصات متأخرة أو مستحقة خلال 24 ساعة ✅');
-
-  let XLSX;
-  let wbs = [];
-  try {
-    XLSX = await getXLSX();
-    wbs = buildLateLabWorkbooks({ rows, tatTests, asOfMs, XLSX });
-  } catch (e) {
-    console.warn('[generate] late-labs build failed', e);
-    return emptyCard('تعذّر إنشاء ملفات المختبرات.');
-  }
-  if (!wbs.length) return emptyCard('لا توجد فحوصات متأخرة أو مستحقة خلال 24 ساعة ✅');
-
-  const SHEET_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-  const downloadOne = (w) => {
-    const buf = XLSX.write(w.wb, { type: 'array', bookType: 'xlsx' });
-    triggerDownload(new Blob([buf], { type: SHEET_MIME }), w.fileName);
-  };
-
-  const labRows = wbs.map((w) => el('div', { class: 'dl-link', style: 'flex-wrap:wrap;gap:8px' }, [
-    el('div', { style: 'display:flex;flex-direction:column;gap:2px;min-width:0;flex:1' }, [
-      el('span', { dir: 'ltr', style: 'font-weight:600;overflow-wrap:anywhere', text: w.lab }),
-      el('span', { class: 'small muted' }, [
-        'فحص متأخر: ', el('span', { dir: 'ltr', text: String(w.late) }),
-        ' • مستحق خلال ٢٤ ساعة: ', el('span', { dir: 'ltr', text: String(w.dueSoon) }),
-      ]),
-    ]),
-    el('div', { style: 'display:flex;gap:6px;flex-shrink:0' }, [
-      el('button', {
-        class: 'btn btn--ghost', text: '⬇ تنزيل',
-        onClick: () => downloadOne(w),
-      }),
-      el('button', {
-        class: 'btn btn--ghost', text: '✉ نسخ نص البريد',
-        onClick: async () => { if (await copyText(labEmailText(w.lab))) toast('تم نسخ نص البريد', 'ok'); },
-      }),
-    ]),
-  ]));
-
-  const children = [
-    el('div', { class: 'card__title', text: title }),
-    el('p', { class: 'small muted', style: 'margin:0 0 4px', text: 'الأعداد بعدد الفحوصات (سطور الطلبات) وليس بعدد الطلبات.' }),
-    ...labRows,
-  ];
-  if (wbs.length > 1) {
-    children.push(el('button', {
-      class: 'btn btn--primary btn--block', style: 'margin-top:10px', text: 'تنزيل الكل',
-      // Sequential downloads ~300ms apart so browsers don't drop stacked clicks.
-      onClick: async () => {
-        for (let i = 0; i < wbs.length; i++) {
-          downloadOne(wbs[i]);
-          if (i < wbs.length - 1) await new Promise((r) => setTimeout(r, 300));
-        }
-      },
-    }));
-  }
-  return el('div', { class: 'card', style: 'margin-top:16px;text-align:right' }, children);
-}
-
-function triggerDownload(blob, name) {
-  // Lab names come from CSV data — strip path separators and other
-  // filesystem-illegal characters before using them as a download name.
-  const safe = String(name).replace(/[/\\<>:"|?*\u0000-\u001f]/g, '-');
-  const url = URL.createObjectURL(blob);
-  const a = el('a', { href: url, download: safe });
-  document.body.appendChild(a);
-  a.click();
-  setTimeout(() => { a.remove(); }, 4000);
-  return url;
 }
 
 export async function render(container, ctx) {
@@ -541,7 +420,11 @@ export async function render(container, ctx) {
   // Per-lab "Late & Due" Excel export — built from the SAME dataset this run used
   // (works whether or not the four report files were produced, incl. live-snapshot).
   try {
-    resultHost.appendChild(await buildLateLabsSection(model, state, store));
+    resultHost.appendChild(await buildLateLabsSection({
+      rows: (state.parsed && state.parsed.orders) || null,
+      tatTests: (store.settings && store.settings.tatLookup) || {},
+      reportDate: model.reportDate,
+    }));
   } catch (e) {
     console.warn('[generate] late-labs section failed', e);
   }
