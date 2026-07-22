@@ -72,18 +72,28 @@ export function runGoldenAssertions(computeFn) {
     const got = (out.monthly || []).find((m) => m.month === exp.month);
     check(`monthly ${exp.month}`, exp, got);
   }
+  // Per-month PARTITION identity: orders = results + rejected + pending.
+  for (const m of out.monthly || []) {
+    check(`monthly partition ${m.month}`, m.orders, m.results + m.rejected + m.pending);
+  }
   // derived monthly totals
   const mt = (out.monthly || []).reduce(
     (a, m) => ({
       orders: a.orders + m.orders,
       results: a.results + m.results,
+      rejected: a.rejected + m.rejected,
+      pending: a.pending + m.pending,
       incomplete: a.incomplete + m.incomplete,
     }),
-    { orders: 0, results: 0, incomplete: 0 },
+    { orders: 0, results: 0, rejected: 0, pending: 0, incomplete: 0 },
   );
   check('monthly totals: orders', G.monthlyTotals.orders, mt.orders);
   check('monthly totals: results', G.monthlyTotals.results, mt.results);
+  check('monthly totals: rejected', G.monthlyTotals.rejected, mt.rejected);
+  check('monthly totals: pending', G.monthlyTotals.pending, mt.pending);
   check('monthly totals: incomplete', G.monthlyTotals.incomplete, mt.incomplete);
+  // Totals-level partition identity.
+  check('monthly totals partition', mt.orders, mt.results + mt.rejected + mt.pending);
   check(
     'monthly totals: completionPct',
     G.monthlyTotals.completionPct,
@@ -103,23 +113,48 @@ export function runGoldenAssertions(computeFn) {
 
   // 6. byLab
   check('byLab (ordered array)', G.byLab, out.byLab);
+  // Partition identity: every row's disjoint states sum to its total, and the
+  // resulted subtotal = onTime + resultedLate. This is the user-visible coherence
+  // the compliance table depends on.
+  for (const l of out.byLab || []) {
+    check(
+      `byLab partition ${l.lab}`,
+      l.total,
+      l.pipeline + l.awaitingResult + l.onTime + l.resultedLate + l.rejected,
+    );
+    check(`byLab resulted subtotal ${l.lab}`, l.resulted, l.onTime + l.resultedLate);
+  }
   const lt = (out.byLab || []).reduce(
     (a, l) => ({
       total: a.total + l.total,
+      pipeline: a.pipeline + l.pipeline,
       awaitingResult: a.awaitingResult + l.awaitingResult,
       onTime: a.onTime + l.onTime,
+      resulted: a.resulted + l.resulted,
+      resultedLate: a.resultedLate + l.resultedLate,
+      rejected: a.rejected + l.rejected,
       late: a.late + l.late,
     }),
-    { total: 0, awaitingResult: 0, onTime: 0, late: 0 },
+    { total: 0, pipeline: 0, awaitingResult: 0, onTime: 0, resulted: 0, resultedLate: 0, rejected: 0, late: 0 },
   );
   check('byLab totals: total', G.byLabTotals.total, lt.total);
+  check('byLab totals: pipeline', G.byLabTotals.pipeline, lt.pipeline);
   check('byLab totals: awaitingResult', G.byLabTotals.awaitingResult, lt.awaitingResult);
   check('byLab totals: onTime', G.byLabTotals.onTime, lt.onTime);
+  check('byLab totals: resulted', G.byLabTotals.resulted, lt.resulted);
+  check('byLab totals: resultedLate', G.byLabTotals.resultedLate, lt.resultedLate);
+  check('byLab totals: rejected', G.byLabTotals.rejected, lt.rejected);
   check('byLab totals: late', G.byLabTotals.late, lt.late);
   check(
     'byLab totals: latePct',
     G.byLabTotals.latePct,
     lt.awaitingResult ? Math.round((lt.late / lt.awaitingResult) * 1000) / 10 : 0,
+  );
+  // Totals-level partition identity.
+  check(
+    'byLab totals partition',
+    lt.total,
+    lt.pipeline + lt.awaitingResult + lt.onTime + lt.resultedLate + lt.rejected,
   );
 
   // 7. byTest (exact ordered array + late sum + onTime sum)

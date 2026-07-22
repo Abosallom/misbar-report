@@ -68,14 +68,15 @@ export function buildMockEngineOutput(settings) {
     totals: { lines: 628, cancelledInData: 10, total: 618 },
     funnel: { created: 618, collected: 612, dispatched: 608, received: 596, resulted: 422 },
     buckets: { awaitingDispatch: 10, shippedNotReceived: 12, awaitingResults: 159, completed: 422, rejected: 15, lateNoResult: 67, latePct: 42.1 },
+    // PARTITION: orders = results + rejected + pending; incomplete (= orders−results) is legacy.
     monthly: [
-      { month: '2026-01', orders: 0, results: 0, rejected: 0, incomplete: 0, completionPct: null, cancelled: 8 },
-      { month: '2026-02', orders: 0, results: 0, rejected: 0, incomplete: 0, completionPct: null, cancelled: 1 },
-      { month: '2026-03', orders: 0, results: 0, rejected: 0, incomplete: 0, completionPct: null, cancelled: 30 },
-      { month: '2026-04', orders: 3, results: 3, rejected: 0, incomplete: 0, completionPct: 100, cancelled: 4 },
-      { month: '2026-05', orders: 105, results: 76, rejected: 14, incomplete: 29, completionPct: 72.4, cancelled: 6 },
-      { month: '2026-06', orders: 410, results: 340, rejected: 1, incomplete: 70, completionPct: 82.9, cancelled: 4 },
-      { month: '2026-07', orders: 100, results: 3, rejected: 0, incomplete: 97, completionPct: 3, cancelled: 0 },
+      { month: '2026-01', orders: 0, results: 0, rejected: 0, pending: 0, incomplete: 0, completionPct: null, cancelled: 8 },
+      { month: '2026-02', orders: 0, results: 0, rejected: 0, pending: 0, incomplete: 0, completionPct: null, cancelled: 1 },
+      { month: '2026-03', orders: 0, results: 0, rejected: 0, pending: 0, incomplete: 0, completionPct: null, cancelled: 30 },
+      { month: '2026-04', orders: 3, results: 3, rejected: 0, pending: 0, incomplete: 0, completionPct: 100, cancelled: 4 },
+      { month: '2026-05', orders: 105, results: 76, rejected: 14, pending: 15, incomplete: 29, completionPct: 72.4, cancelled: 6 },
+      { month: '2026-06', orders: 410, results: 340, rejected: 1, pending: 69, incomplete: 70, completionPct: 82.9, cancelled: 4 },
+      { month: '2026-07', orders: 100, results: 3, rejected: 0, pending: 97, incomplete: 97, completionPct: 3, cancelled: 0 },
     ],
     cancelledNote: 53,
     turnaround: {
@@ -90,13 +91,15 @@ export function buildMockEngineOutput(settings) {
         { month: '2026-07', actual: 2.0, expected: 2.5 },
       ],
     },
+    // pipeline/resultedLate derived from the partition (total = pipeline +
+    // awaitingResult + onTime + resultedLate + rejected); resulted = onTime + resultedLate.
     byLab: [
-      { lab: 'Advanced Laboratory Services .Co', total: 301, awaitingResult: 89, rejected: 14, onTime: 29, late: 60, latePct: 67.4 },
-      { lab: 'Fal Specialized Medical Lab', total: 151, awaitingResult: 21, rejected: 1, onTime: 75, late: 2, latePct: 9.5 },
-      { lab: 'king Abdullaziz Medical city in Riyadh', total: 113, awaitingResult: 35, rejected: 0, onTime: 42, late: 3, latePct: 8.6 },
-      { lab: 'Eurofins clinical', total: 27, awaitingResult: 0, rejected: 0, onTime: 20, late: 0, latePct: 0 },
-      { lab: 'Saudi Diagnostics Limited Company', total: 19, awaitingResult: 7, rejected: 0, onTime: 4, late: 2, latePct: 28.6 },
-      { lab: 'Anwa  Medical Company', total: 7, awaitingResult: 7, rejected: 0, onTime: 0, late: 0, latePct: 0 },
+      { lab: 'Advanced Laboratory Services .Co', total: 301, pipeline: 11, awaitingResult: 89, onTime: 29, resulted: 187, resultedLate: 158, rejected: 14, late: 60, latePct: 67.4 },
+      { lab: 'Fal Specialized Medical Lab', total: 151, pipeline: 6, awaitingResult: 21, onTime: 75, resulted: 123, resultedLate: 48, rejected: 1, late: 2, latePct: 9.5 },
+      { lab: 'king Abdullaziz Medical city in Riyadh', total: 113, pipeline: 1, awaitingResult: 35, onTime: 42, resulted: 77, resultedLate: 35, rejected: 0, late: 3, latePct: 8.6 },
+      { lab: 'Eurofins clinical', total: 27, pipeline: 3, awaitingResult: 0, onTime: 20, resulted: 24, resultedLate: 4, rejected: 0, late: 0, latePct: 0 },
+      { lab: 'Saudi Diagnostics Limited Company', total: 19, pipeline: 1, awaitingResult: 7, onTime: 4, resulted: 11, resultedLate: 7, rejected: 0, late: 2, latePct: 28.6 },
+      { lab: 'Anwa  Medical Company', total: 7, pipeline: 0, awaitingResult: 7, onTime: 0, resulted: 0, resultedLate: 0, rejected: 0, late: 0, latePct: 0 },
     ],
     byTest: [
       { testName: 'BK Virus Quantitative PCR', late: 0, onTime: 20 },

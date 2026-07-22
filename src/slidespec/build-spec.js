@@ -2,14 +2,14 @@
 // buildSpec(reportModel, { variant }) -> SlideSpec (see src/contracts.js).
 // One builder per slide. ALL geometry is in inches, derived by converting EMU->inches
 // (÷914400) from the original deck OOXML (تقرير مسبار 09072026.pptx).
-// SIX-slide deck (both variants): cover · execFunnel · monthly · compliance · action · thanks.
+// SEVEN-slide deck (both variants): cover · execFunnel · monthly · compliance · action · definitions · thanks.
 // The variant no longer changes slide PRESENCE — it changes slide-5 (action) task ROWS:
 // nupco shows tasksCurrent (non-لين actions); internal shows tasksInternal ONLY (لين-category
 // actions — user decision 2026-07-19). No slide is internalOnly.
 //
 // PRESENTATION OPTIONS (all read from the model, safe defaults when absent):
 //   m.reportOptions.labels[key]   overrides DEFAULT_LABELS static text (byte-stable when absent)
-//   m.reportOptions.slides[key]   toggles the 4 middle slides (cover/thanks always render)
+//   m.reportOptions.slides[key]   toggles the 5 middle slides (cover/thanks always render)
 //   m.reportOptions.kpiCards[key] toggles the 7 exec KPI cards (row geometry repacks)
 //   m.overrides[key]              per-run manual NUMBER overrides (suppresses that delta chip)
 import { COLORS as C, GEOM } from '../theme.js';
@@ -43,21 +43,31 @@ export const DEFAULT_LABELS = {
   execCompletionRate: 'نسبة الاكتمال الإجمالية',
   // Exec slide — delta-chip legend (rendered only when a green "+N" chip is visible)
   execDeltaLegend: '▲ الأخضر = التغيّر منذ التقرير السابق',
-  // Monthly table row labels (also reused as the monthly bar-chart series names)
+  // Monthly table row labels (also reused as the monthly bar-chart series names).
+  // monthlyRowIncomplete now surfaces the engine's `pending` partition value
+  // (orders = results + rejected + pending), renamed accordingly.
   monthlyRowOrders: 'الطلبات',
   monthlyRowResults: 'النتائج المستلمة',
   monthlyRowRejected: 'النتائج المرفوضة',
-  monthlyRowIncomplete: 'النتائج غير المكتملة',
+  monthlyRowIncomplete: 'قيد المعالجة (بدون نتيجة)',
   monthlyRowCompletion: 'نسبة الاكتمال',
-  // Compliance (byLab) table headers
+  // Monthly partition footnote (under the table) — the orders add-up identity.
+  monthlyPartition: 'الطلبات = النتائج المستلمة + المرفوضة + قيد المعالجة',
+  // Compliance (byLab) table headers. The count columns ADD UP to الإجمالي:
+  //   total = pipeline + awaitingResult + onTime + resultedLate + rejected.
+  // compLate (منها متأخرة) is a SUBSET of بانتظار النتيجة (overdue, still awaiting a
+  // result) — shown for context, NOT part of the add-up. compHash is retained in the
+  // registry (labels-editor key) but the '#' column was dropped from the table.
   compHash: '#',
   compLab: 'المختبر',
-  compTotal: 'مجموع الطلبات',
-  compAwaiting: 'طلبات مستلمة بانتظار نتيجة',
+  compTotal: 'الإجمالي',
+  compPipeline: 'قبل الاستلام',
+  compAwaiting: 'بانتظار النتيجة',
+  compLate: 'منها متأخرة',
   compOnTime: 'ملتزمة',
+  compResultedLate: 'صدرت متأخرة',
   compRejected: 'مرفوضة',
-  compLate: 'الطلبات المتأخرة',
-  compLatePct: 'نسبة الطلبات المتأخرة',
+  compLatePct: 'نسبة التأخر',
   // Tasks table headers
   taskStatus: 'الحالة',
   taskDue: 'تاريخ الإكتمال',
@@ -78,6 +88,34 @@ export const DEFAULT_LABELS = {
   chartLateSeries: 'المتأخرة',       // late-by-test bar series (late count)
   chartOnTimeSeries: 'الملتزمة',      // late-by-test bar series (on-time / success count)
   overallAvgTitle: 'المتوسط العام لزمن الإنجاز', // overall-average card title
+  // Exec KPI-row partition footnote (mirrors the compliance equation footnote).
+  execPartition: 'الإجمالي = بانتظار الشحن + شُحنت ولم تُستلم + بانتظار النتائج + مكتملة + مرفوضة',
+  // Cancelled note — split into parts so the historical-before-April breakdown is
+  // registry-driven: '* {N} {execCancelledLabel} ({execCancelledHistPre} {hist} {execCancelledHistPost})'.
+  execCancelledLabel: 'طلب ملغي',
+  execCancelledHistPre: 'منها',
+  execCancelledHistPost: 'قبل أبريل',
+  // Compliance by-test catalog footnote (under the late/on-time chart).
+  catalogNote: '* وفق قائمة الفحوصات المعتمدة',
+  // Definitions slide ('منهجية الأرقام') — title, column headers, and per-row
+  // metric + one-line definition. Definitions mirror the engine's documented rules.
+  defsTitle: 'منهجية الأرقام',
+  defsColMetric: 'المؤشر',
+  defsColDef: 'التعريف',
+  defMTotal: 'الإجمالي',                         defDTotal: 'سطور الطلبات غير الملغاة',
+  defMAwaitDispatch: 'بانتظار الشحن',            defDAwaitDispatch: 'أُنشئ الطلب ولم تُشحن العينة بعد',
+  defMShipped: 'شُحنت ولم تُستلم',               defDShipped: 'شُحنت العينة ولم يستلمها المختبر',
+  defMAwaitResults: 'بانتظار النتائج',           defDAwaitResults: 'استلمها المختبر وبانتظار النتيجة',
+  defMLate: '↳ منها متأخرة',                     defDLate: 'تجاوزت الاستحقاق بلا نتيجة',
+  defMCompleted: 'نتائج مكتملة',                 defDCompleted: 'لها تاريخ نتيجة',
+  defMRejected: 'المرفوضة',                      defDRejected: 'رفض المختبر نتيجتها',
+  defMOnTime: 'ملتزمة',                          defDOnTime: 'صدرت ضمن المدة المعيارية',
+  defMResultedLate: 'صدرت متأخرة',               defDResultedLate: 'صدرت النتيجة بعد الاستحقاق',
+  defMPipeline: 'قبل الاستلام',                  defDPipeline: 'لم تصل المختبر بعد',
+  defMPending: 'قيد المعالجة',                   defDPending: 'بلا نتيجة ولا رفض بعد',
+  defMLatePct: 'نسبة التأخر',                    defDLatePct: 'المتأخرة ÷ بانتظار النتيجة',
+  defMTurnaround: 'معدل الدوران الفعلي/المتوقع',  defDTurnaround: 'متوسط أيام؛ ن = عدد الطلبات المقاسة',
+  defMCancelled: 'الملغاة',                      defDCancelled: 'من الملف + سجل تاريخي قبل أبريل',
 };
 
 export const LABEL_NAMES = {
@@ -105,12 +143,14 @@ export const LABEL_NAMES = {
   monthlyRowCompletion: 'صف الجدول الشهري: نسبة الاكتمال',
   compHash: 'عمود الالتزام: الرقم',
   compLab: 'عمود الالتزام: المختبر',
-  compTotal: 'عمود الالتزام: مجموع الطلبات',
-  compAwaiting: 'عمود الالتزام: مستلمة بانتظار نتيجة',
+  compTotal: 'عمود الالتزام: الإجمالي',
+  compPipeline: 'عمود الالتزام: قبل الاستلام',
+  compAwaiting: 'عمود الالتزام: بانتظار النتيجة',
+  compLate: 'عمود الالتزام: منها متأخرة (جزء من بانتظار النتيجة)',
   compOnTime: 'عمود الالتزام: الطلبات الملتزمة',
+  compResultedLate: 'عمود الالتزام: صدرت متأخرة',
   compRejected: 'عمود الالتزام: مرفوضة',
-  compLate: 'عمود الالتزام: الطلبات المتأخرة',
-  compLatePct: 'عمود الالتزام: نسبة الطلبات المتأخرة',
+  compLatePct: 'عمود الالتزام: نسبة التأخر',
   taskStatus: 'عمود المهام: الحالة',
   taskDue: 'عمود المهام: تاريخ الإكتمال',
   taskOwner: 'عمود المهام: المالك',
@@ -127,6 +167,28 @@ export const LABEL_NAMES = {
   chartLateSeries: 'سلسلة الطلبات المتأخرة',
   chartOnTimeSeries: 'سلسلة الطلبات الملتزمة',
   overallAvgTitle: 'عنوان بطاقة متوسط زمن الإنجاز',
+  execPartition: 'حاشية معادلة الإجمالي (الملخص التنفيذي)',
+  execCancelledLabel: 'نص ملاحظة الطلبات الملغاة',
+  execCancelledHistPre: 'ملاحظة الملغاة: بادئة الجزء التاريخي',
+  execCancelledHistPost: 'ملاحظة الملغاة: لاحقة الجزء التاريخي',
+  catalogNote: 'حاشية قائمة الفحوصات (مقياس الالتزام)',
+  defsTitle: 'عنوان شريحة منهجية الأرقام',
+  defsColMetric: 'منهجية الأرقام: ترويسة عمود المؤشر',
+  defsColDef: 'منهجية الأرقام: ترويسة عمود التعريف',
+  defMTotal: 'منهجية: مؤشر الإجمالي',            defDTotal: 'منهجية: تعريف الإجمالي',
+  defMAwaitDispatch: 'منهجية: مؤشر بانتظار الشحن', defDAwaitDispatch: 'منهجية: تعريف بانتظار الشحن',
+  defMShipped: 'منهجية: مؤشر شُحنت ولم تُستلم',   defDShipped: 'منهجية: تعريف شُحنت ولم تُستلم',
+  defMAwaitResults: 'منهجية: مؤشر بانتظار النتائج', defDAwaitResults: 'منهجية: تعريف بانتظار النتائج',
+  defMLate: 'منهجية: مؤشر منها متأخرة',          defDLate: 'منهجية: تعريف منها متأخرة',
+  defMCompleted: 'منهجية: مؤشر نتائج مكتملة',     defDCompleted: 'منهجية: تعريف نتائج مكتملة',
+  defMRejected: 'منهجية: مؤشر المرفوضة',          defDRejected: 'منهجية: تعريف المرفوضة',
+  defMOnTime: 'منهجية: مؤشر ملتزمة',             defDOnTime: 'منهجية: تعريف ملتزمة',
+  defMResultedLate: 'منهجية: مؤشر صدرت متأخرة',   defDResultedLate: 'منهجية: تعريف صدرت متأخرة',
+  defMPipeline: 'منهجية: مؤشر قبل الاستلام',      defDPipeline: 'منهجية: تعريف قبل الاستلام',
+  defMPending: 'منهجية: مؤشر قيد المعالجة',       defDPending: 'منهجية: تعريف قيد المعالجة',
+  defMLatePct: 'منهجية: مؤشر نسبة التأخر',        defDLatePct: 'منهجية: تعريف نسبة التأخر',
+  defMTurnaround: 'منهجية: مؤشر معدل الدوران',     defDTurnaround: 'منهجية: تعريف معدل الدوران',
+  defMCancelled: 'منهجية: مؤشر الملغاة',          defDCancelled: 'منهجية: تعريف الملغاة',
 };
 
 // Per-model label lookup: user override wins, else the built-in default.
@@ -306,10 +368,22 @@ function buildExecFunnel(m) {
   const anyChip = visible.some((c) => d[c.dk] > 0 && !isOv(c.dk))
     || rows.some((r) => d[r.key] > 0 && !KPI_DELTA_KEYS.has(r.key) && !isOv(r.ov));
 
+  // Cancelled note — displayed count is override-aware; the historical (pre-April)
+  // breakdown is hist = raw cancelledNote − cancelledInData (rows counted from the
+  // CSV), appended only when positive. Text parts are registry-driven.
+  const vCancelled = V('cancelledNote', m.kpi.cancelledNote);
+  const cancelledHist = m.kpi.cancelledNote - (m.kpi.totals?.cancelledInData ?? 0);
+  const cancelledText = `* ${vCancelled} ${L('execCancelledLabel')}`
+    + (cancelledHist > 0 ? ` (${L('execCancelledHistPre')} ${cancelledHist} ${L('execCancelledHistPost')})` : '');
+
   const els = [
     ...chrome(L('titleExec')),
     ...kpiEls,
-    text(10.542, 2.55, 2.271, 0.32, `* ${V('cancelledNote', m.kpi.cancelledNote)} طلب ملغي`, 11, { bold: true, color: C.slate600, align: 'right', valign: 'middle', rtl: true }),
+    text(9.0, 2.55, 3.813, 0.32, cancelledText, 10, { bold: true, color: C.slate600, align: 'right', valign: 'middle', rtl: true }),
+    // KPI-row partition footnote (mirrors the compliance equation footnote) —
+    // spells out that the seven buckets add up to the total, centered between the
+    // completion-rate (left) and cancelled (right) notes.
+    text(3.0, 2.55, 7.3, 0.32, L('execPartition'), 9, { color: C.slate600, align: 'center', valign: 'middle', rtl: true }),
     // Overall completion-rate line — mirrors the cancelled note on the left side.
     text(0.5, 2.55, 2.271, 0.32, `${L('execCompletionRate')}: ${completionRate}%`, 11, { bold: true, color: C.navy, align: 'left', valign: 'middle', rtl: true }),
     // Funnel column labels
@@ -362,7 +436,11 @@ function buildMonthly(m) {
   const oTot = mo.reduce((s, x) => s + x.orders, 0);
   const rTot = mo.reduce((s, x) => s + x.results, 0);
   const rejTot = mo.reduce((s, x) => s + (x.rejected || 0), 0);
-  const iTot = mo.reduce((s, x) => s + x.incomplete, 0);
+  // Partition field: orders = results + rejected + pending. Use the engine's
+  // `pending` when present, else derive it (older models carried only `incomplete`,
+  // which double-counts rejected and must NOT be used for the partition).
+  const pendingOf = (x) => (Number.isFinite(x.pending) ? x.pending : x.orders - x.results - (x.rejected || 0));
+  const pTot = mo.reduce((s, x) => s + pendingOf(x), 0);
   const cPct = oTot > 0 ? Math.round((rTot / oTot) * 1000) / 10 : null; // round1(results/orders*100)
   const cTot = pctMonthly(cPct);
   // logical (deck) order: [label, months…, total]; reverse -> visual L->R
@@ -370,7 +448,7 @@ function buildMonthly(m) {
   const rowOrders = rev([{ text: L('monthlyRowOrders'), align: 'right' }, ...mo.map((x) => String(x.orders)), { text: String(oTot), fill: bg, bold: true }]);
   const rowResults = rev([{ text: L('monthlyRowResults'), align: 'right' }, ...mo.map((x) => String(x.results)), { text: String(rTot), fill: bg, bold: true }]);
   const rowRejected = rev([{ text: L('monthlyRowRejected'), align: 'right' }, ...mo.map((x) => String(x.rejected || 0)), { text: String(rejTot), fill: bg, bold: true }]);
-  const rowIncomplete = rev([{ text: L('monthlyRowIncomplete'), align: 'right' }, ...mo.map((x) => String(x.incomplete)), { text: String(iTot), fill: bg, bold: true }]);
+  const rowIncomplete = rev([{ text: L('monthlyRowIncomplete'), align: 'right' }, ...mo.map((x) => String(pendingOf(x))), { text: String(pTot), fill: bg, bold: true }]);
   const rowCompletion = rev([{ text: L('monthlyRowCompletion'), align: 'right' }, ...mo.map((x) => pctMonthly(x.completionPct)), { text: cTot, fill: bg, bold: true }]);
 
   // Column widths: label + N month cols + total over the fixed table width. The
@@ -396,7 +474,7 @@ function buildMonthly(m) {
     series: [
       { name: L('monthlyRowOrders'), values: mo.map((x) => x.orders), color: CHART_BLUE },
       { name: L('monthlyRowResults'), values: mo.map((x) => x.results), color: C.greenBright },
-      { name: L('monthlyRowIncomplete'), values: mo.map((x) => x.incomplete), color: CHART_GRAY },
+      { name: L('monthlyRowIncomplete'), values: mo.map((x) => pendingOf(x)), color: CHART_GRAY },
     ],
     opts: { dataLabels: true, legend: 'bottom' },
   };
@@ -422,6 +500,8 @@ function buildMonthly(m) {
   const els = [
     ...chrome(L('titleMonthly')),
     table,
+    // Partition footnote directly under the monthly table (table bottom ≈ 3.81).
+    text(6.604, 3.82, 6.661, 0.24, L('monthlyPartition'), 9, { color: C.slate600, align: 'right', valign: 'middle', rtl: true }),
     monthlyChart,
     turnaroundChart,
     rect(0.5, 4.583, 3.417, 2.389, C.navyChart, { radius: 0.1 }),
@@ -453,52 +533,76 @@ const CAT_CAP = 13;
 function buildCompliance(m) {
   const L = labelOf(m);
   const lab = m.kpi.byLab;
-  // logical (deck rtl) order per row: [#, lab, total, awaitingResult, onTime, rejected, late, late%];
-  // reverse -> visual. 'ملتزمة' (on-time) sits right after 'مستلمة بانتظار نتيجة',
-  // and 'مرفوضة' between it and 'المتأخرة'.
-  // Column totals computed from the byLab rows (no hardcoded literals). late% is
-  // recomputed from the summed late/awaiting (round1, guard div-by-zero) so it stays
-  // consistent with any edited/filtered lab set.
+  // Logical (deck RTL, right→left reading) order per row — the '#' column is DROPPED:
+  //   [lab, total, pipeline, awaitingResult, late, onTime, resultedLate, rejected, latePct]
+  // rev() -> visual L→R. The count columns ADD UP: total = pipeline + awaitingResult +
+  // onTime + resultedLate + rejected. 'late' (منها متأخرة) is a SUBSET of بانتظار النتيجة
+  // (overdue, still awaiting) — marked as a subcolumn (↳ prefix + lighter header, light
+  // body fill) and NOT part of the add-up. Every column total is computed from the rows
+  // (no hardcoded literals); latePct = lateTot/awaitTot (round1, guard div-by-zero).
   const totalTot = lab.reduce((s, r) => s + (r.total || 0), 0);
+  const pipelineTot = lab.reduce((s, r) => s + (r.pipeline || 0), 0);
   const awaitTot = lab.reduce((s, r) => s + (r.awaitingResult || 0), 0);
   const lateTot = lab.reduce((s, r) => s + (r.late || 0), 0);
-  const rejTot = lab.reduce((s, r) => s + (r.rejected || 0), 0);
   const onTimeTot = lab.reduce((s, r) => s + (r.onTime || 0), 0);
+  const resultedLateTot = lab.reduce((s, r) => s + (r.resultedLate || 0), 0);
+  const rejTot = lab.reduce((s, r) => s + (r.rejected || 0), 0);
   const latePctTot = awaitTot > 0 ? Math.round((lateTot / awaitTot) * 1000) / 10 : 0;
-  // On-time cell: green + bold when >0 (a success signal), plain otherwise.
-  const onTimeCell = (n) => (n > 0 ? { text: String(n), color: C.green, bold: true } : String(n || 0));
-  // Worst-lab highlight: bold + redPure on the late% cell when late% ≥ 50.
-  const latePctCell = (n) => (n >= 50 ? { text: pctLab(n), bold: true, color: C.redPure } : pctLab(n));
-  const header = rev([L('compHash'), L('compLab'), L('compTotal'), L('compAwaiting'), L('compOnTime'), L('compRejected'), L('compLate'), L('compLatePct')]);
-  const labRows = lab.map((r, i) => rev([
-    String(i + 1),
+
+  // Per-column body-cell styles.
+  const pipelineCell = (n) => ({ text: String(n || 0), color: C.slate500 });            // قبل الاستلام: muted
+  const lateCell = (n) => (n > 0                                                          // منها متأخرة: subset of await
+    ? { text: String(n), color: C.redPure, bold: true, fill: C.bgLighter }               //   red when >0
+    : { text: String(n || 0), color: C.slate500, fill: C.bgLighter });                    //   muted when 0
+  const onTimeCell = (n) => (n > 0 ? { text: String(n), color: C.green, bold: true } : String(n || 0));       // ملتزمة: green+bold
+  const resultedLateCell = (n) => (n > 0 ? { text: String(n), color: C.amber, bold: true } : String(n || 0)); // صدرت متأخرة: amber when >0
+  const latePctCell = (n) => (n >= 50 ? { text: pctLab(n), bold: true, color: C.redPure } : pctLab(n));       // worst-lab highlight
+
+  // Header — the 'منها متأخرة' subcolumn gets a '↳' prefix + a lighter-navy fill so its
+  // subset-of-بانتظار-النتيجة relationship reads at a glance.
+  const header = rev([
+    L('compLab'), L('compTotal'), L('compPipeline'), L('compAwaiting'),
+    { text: '↳ ' + L('compLate'), fill: C.taskNavy },
+    L('compOnTime'), L('compResultedLate'), L('compRejected'), L('compLatePct'),
+  ]);
+  const labRows = lab.map((r) => rev([
     { text: r.lab, align: 'right' },
     String(r.total),
+    pipelineCell(r.pipeline || 0),
     String(r.awaitingResult),
+    lateCell(r.late || 0),
     onTimeCell(r.onTime || 0),
+    resultedLateCell(r.resultedLate || 0),
     String(r.rejected || 0),
-    String(r.late),
     latePctCell(r.latePct),
   ]));
   const totalRow = rev([
-    { text: '', fill: C.bgLighter },
     { text: 'المجموع', bold: true, fill: C.bgLighter, align: 'right' },
     { text: String(totalTot), bold: true, fill: C.bgLighter },
+    { text: String(pipelineTot), bold: true, fill: C.bgLighter, color: C.slate500 },
     { text: String(awaitTot), bold: true, fill: C.bgLighter },
+    { text: String(lateTot), bold: true, fill: C.bgLighter, ...(lateTot > 0 ? { color: C.redPure } : {}) },
     { text: String(onTimeTot), bold: true, fill: C.bgLighter, ...(onTimeTot > 0 ? { color: C.green } : {}) },
+    { text: String(resultedLateTot), bold: true, fill: C.bgLighter, ...(resultedLateTot > 0 ? { color: C.amber } : {}) },
     { text: String(rejTot), bold: true, fill: C.bgLighter },
-    { text: String(lateTot), bold: true, fill: C.bgLighter },
     { text: pctLab(latePctTot), bold: true, fill: C.bgLighter },
   ]);
 
-  // colW: shaved the lab-name column 2.714 -> 2.164 to fund a 0.55in 'ملتزمة'
-  // column; total width UNCHANGED = 11.667 (0.556+2.164+1.667+2.083+0.55+0.55+1.944+2.153).
+  // colW: '#' dropped. 8 count columns at 1.0in each; the lab-name column takes the
+  // remainder (3.667in — un-truncated for the 6 known labs at the body font). Total
+  // table width UNCHANGED = 11.667 (3.667 + 8×1.0).
+  const LAB_W = 3.667, NUM_W = 1.0;
   const labTable = {
-    t: 'table', x: 0.833, y: 1.194, w: 11.667, rtl: true, rowH: 0.275,
+    t: 'table', x: 0.833, y: 1.194, w: 11.667, rtl: true, rowH: 0.275, headerSize: 9, bodySize: 9.5,
     header: { fill: C.navy, color: C.white, bold: true },
-    colW: rev([0.556, 2.164, 1.667, 2.083, 0.55, 0.55, 1.944, 2.153]),
+    colW: rev([LAB_W, NUM_W, NUM_W, NUM_W, NUM_W, NUM_W, NUM_W, NUM_W, NUM_W]),
     rows: [header, ...labRows, totalRow],
   };
+  // Equation footnote directly under the table (small, slate, rtl) — spells out the
+  // add-up so the columns visibly reconcile. Built from the labels so it tracks overrides.
+  const eqFootnote = text(0.833, 3.70, 11.667, 0.24,
+    `${L('compTotal')} = ${L('compPipeline')} + ${L('compAwaiting')} + ${L('compOnTime')} + ${L('compResultedLate')} + ${L('compRejected')}`,
+    9, { color: C.slate600, align: 'right', valign: 'middle', rtl: true });
 
   // Grouped late + on-time bars in one chart. Cap the category count to CAT_CAP:
   // pick the top by (late+onTime), then restore byTest order so bars read naturally.
@@ -527,9 +631,13 @@ function buildCompliance(m) {
   const els = [
     ...chrome(L('titleCompliance')),
     labTable,
+    eqFootnote,
     rect(0.6, 4.12, 12.3, 0.012, C.border),
     text(0.6, 4.16, 12.3, 0.4, 'تفاصيل الطلبات المتأخرة والملتزمة', 14, { bold: true, color: C.navy, align: 'center', valign: 'middle', rtl: true }),
     lateChart,
+    // Catalog footnote for the by-test chart (top-right of the band, opposite the
+    // overflow note) — the bars reflect only the approved test catalog.
+    text(8.9, 4.18, 3.6, 0.30, L('catalogNote'), 9, { italic: true, color: C.slate600, align: 'right', valign: 'middle', rtl: true }),
   ];
   // Overflow note (top-left of the chart band, clear of the centered subtitle).
   if (extraCats > 0) {
@@ -682,6 +790,47 @@ function buildAction(m, variant) {
 }
 
 // ============================================================================
+// Slide — Definitions ('منهجية الأرقام'), inserted before the closing thanks slide
+// ============================================================================
+// Each row is [metric-label key, definition key]; every report metric gets one
+// line, and the definitions mirror the engine's documented rules (see the JSDoc
+// in src/engine/engine.js). Registry-driven so both columns are editable.
+const DEF_ROWS = [
+  ['defMTotal', 'defDTotal'],
+  ['defMAwaitDispatch', 'defDAwaitDispatch'],
+  ['defMShipped', 'defDShipped'],
+  ['defMAwaitResults', 'defDAwaitResults'],
+  ['defMLate', 'defDLate'],
+  ['defMCompleted', 'defDCompleted'],
+  ['defMRejected', 'defDRejected'],
+  ['defMOnTime', 'defDOnTime'],
+  ['defMResultedLate', 'defDResultedLate'],
+  ['defMPipeline', 'defDPipeline'],
+  ['defMPending', 'defDPending'],
+  ['defMLatePct', 'defDLatePct'],
+  ['defMTurnaround', 'defDTurnaround'],
+  ['defMCancelled', 'defDCancelled'],
+];
+
+function buildDefinitions(m) {
+  const L = labelOf(m);
+  // 2-column table (المؤشر | التعريف). rtl → visual columns are [التعريف, المؤشر],
+  // so the metric reads first (rightmost). 14 rows + header at rowH 0.4 span
+  // y 0.95 → 6.95, inside the 7.05 content band; fonts 8.5/9pt.
+  const METRIC_W = 3.0, DEF_W = 8.667;
+  const header = rev([L('defsColMetric'), L('defsColDef')]);
+  const rows = DEF_ROWS.map(([mk, dk]) =>
+    rev([{ text: L(mk), align: 'right', bold: true }, { text: L(dk), align: 'right' }]));
+  const table = {
+    t: 'table', x: 0.833, y: 0.95, w: 11.667, rtl: true, rowH: 0.4, headerSize: 9, bodySize: 8.5,
+    header: { fill: C.navy, color: C.white, bold: true },
+    colW: rev([METRIC_W, DEF_W]),
+    rows: [header, ...rows],
+  };
+  return { id: 'definitions', bg: C.white, elements: [...chrome(L('defsTitle')), table] };
+}
+
+// ============================================================================
 // Slide 6 — Thanks
 // ============================================================================
 function buildThanks(m) {
@@ -703,7 +852,7 @@ function buildThanks(m) {
  */
 export function buildSpec(reportModel, { variant = 'internal' } = {}) {
   const m = reportModel;
-  // SLIDE TOGGLES — the 4 middle slides are filtered by m.reportOptions.slides
+  // SLIDE TOGGLES — the 5 middle slides are filtered by m.reportOptions.slides
   // (absent → all on). Cover + thanks ALWAYS render. Page numbers are assigned AFTER
   // filtering so they renumber sequentially (1..n) over the INCLUDED content slides.
   const slides = m.reportOptions?.slides;
@@ -713,6 +862,9 @@ export function buildSpec(reportModel, { variant = 'internal' } = {}) {
     { key: 'monthly', build: () => buildMonthly(m) },
     { key: 'compliance', build: () => buildCompliance(m) },
     { key: 'action', build: () => buildAction(m, variant) },
+    // Definitions ('منهجية الأرقام') — default ON; rendered just before thanks and
+    // participates in the sequential footer numbering like the other middle slides.
+    { key: 'definitions', build: () => buildDefinitions(m) },
   ];
   const middle = middleDefs.filter((x) => on(x.key)).map((x) => x.build());
   middle.forEach((s, i) => s.elements.push(pageFooter(i + 1)));

@@ -39,17 +39,19 @@ export const GOLDEN_EXPECTED = {
   },
 
   // order-month, excl. cancelled; cancelled = merged max(stored, computed-in-data)
-  // rejected is per order-month (own value); does not change incomplete = orders − results.
+  // rejected is per order-month (own value). PARTITION: orders = results + rejected
+  // + pending (pending = orders−results−rejected). incomplete (= orders−results) is
+  // LEGACY and double-counts rejected (May 29 vs pending 15, Jun 70 vs pending 69).
   monthly: [
-    { month: '2026-01', orders: 0, results: 0, rejected: 0, incomplete: 0, completionPct: null, cancelled: 8 },
-    { month: '2026-02', orders: 0, results: 0, rejected: 0, incomplete: 0, completionPct: null, cancelled: 1 },
-    { month: '2026-03', orders: 0, results: 0, rejected: 0, incomplete: 0, completionPct: null, cancelled: 30 },
-    { month: '2026-04', orders: 3, results: 3, rejected: 0, incomplete: 0, completionPct: 100, cancelled: 4 },
-    { month: '2026-05', orders: 105, results: 76, rejected: 14, incomplete: 29, completionPct: 72.4, cancelled: 6 },
-    { month: '2026-06', orders: 410, results: 340, rejected: 1, incomplete: 70, completionPct: 82.9, cancelled: 4 },
-    { month: '2026-07', orders: 100, results: 3, rejected: 0, incomplete: 97, completionPct: 3.0, cancelled: 0 },
+    { month: '2026-01', orders: 0, results: 0, rejected: 0, pending: 0, incomplete: 0, completionPct: null, cancelled: 8 },
+    { month: '2026-02', orders: 0, results: 0, rejected: 0, pending: 0, incomplete: 0, completionPct: null, cancelled: 1 },
+    { month: '2026-03', orders: 0, results: 0, rejected: 0, pending: 0, incomplete: 0, completionPct: null, cancelled: 30 },
+    { month: '2026-04', orders: 3, results: 3, rejected: 0, pending: 0, incomplete: 0, completionPct: 100, cancelled: 4 },
+    { month: '2026-05', orders: 105, results: 76, rejected: 14, pending: 15, incomplete: 29, completionPct: 72.4, cancelled: 6 },
+    { month: '2026-06', orders: 410, results: 340, rejected: 1, pending: 69, incomplete: 70, completionPct: 82.9, cancelled: 4 },
+    { month: '2026-07', orders: 100, results: 3, rejected: 0, pending: 97, incomplete: 97, completionPct: 3.0, cancelled: 0 },
   ],
-  monthlyTotals: { orders: 618, results: 422, incomplete: 196, completionPct: 68.3 },
+  monthlyTotals: { orders: 618, results: 422, rejected: 15, pending: 181, incomplete: 196, completionPct: 68.3 },
   cancelledNote: 53,
 
   // resulted rows excl. Rejected (n = 422); 1-decimal report rounding
@@ -66,18 +68,21 @@ export const GOLDEN_EXPECTED = {
   },
 
   // facility-normalized, excl. cancelled; sorted total-desc (workbook table order).
-  // latePct = late / awaitingResult (0 when awaitingResult = 0).
-  // rejected per lab (own value): Advanced 14, Fal 1, others 0.
-  // onTime per lab (day-granular "success" = resulted within TAT); sums to 170.
+  // TRUE PARTITION: total = pipeline + awaitingResult + onTime + resultedLate + rejected.
+  //   pipeline     = no received date yet (pre-receipt); sums to 22 (= total 618 − received 596).
+  //   resulted     = onTime + resultedLate (non-rejected rows with a result); sums to 422.
+  //   resultedLate = resulted − onTime (issued after due + No-Match resulted); sums to 252.
+  // latePct = late / awaitingResult (0 when awaitingResult = 0); late is a subset of awaitingResult.
+  // rejected per lab (own value): Advanced 14, Fal 1, others 0. onTime sums to 170.
   byLab: [
-    { lab: 'Advanced Laboratory Services .Co', total: 301, awaitingResult: 89, rejected: 14, onTime: 29, late: 60, latePct: 67.4 },
-    { lab: 'Fal Specialized Medical Lab', total: 151, awaitingResult: 21, rejected: 1, onTime: 75, late: 2, latePct: 9.5 },
-    { lab: 'king Abdullaziz Medical city in Riyadh', total: 113, awaitingResult: 35, rejected: 0, onTime: 42, late: 3, latePct: 8.6 },
-    { lab: 'Eurofins clinical', total: 27, awaitingResult: 0, rejected: 0, onTime: 20, late: 0, latePct: 0 },
-    { lab: 'Saudi Diagnostics Limited Company', total: 19, awaitingResult: 7, rejected: 0, onTime: 4, late: 2, latePct: 28.6 },
-    { lab: 'Anwa Medical Company', total: 7, awaitingResult: 7, rejected: 0, onTime: 0, late: 0, latePct: 0 },
+    { lab: 'Advanced Laboratory Services .Co', total: 301, pipeline: 11, awaitingResult: 89, onTime: 29, resulted: 187, resultedLate: 158, rejected: 14, late: 60, latePct: 67.4 },
+    { lab: 'Fal Specialized Medical Lab', total: 151, pipeline: 6, awaitingResult: 21, onTime: 75, resulted: 123, resultedLate: 48, rejected: 1, late: 2, latePct: 9.5 },
+    { lab: 'king Abdullaziz Medical city in Riyadh', total: 113, pipeline: 1, awaitingResult: 35, onTime: 42, resulted: 77, resultedLate: 35, rejected: 0, late: 3, latePct: 8.6 },
+    { lab: 'Eurofins clinical', total: 27, pipeline: 3, awaitingResult: 0, onTime: 20, resulted: 24, resultedLate: 4, rejected: 0, late: 0, latePct: 0 },
+    { lab: 'Saudi Diagnostics Limited Company', total: 19, pipeline: 1, awaitingResult: 7, onTime: 4, resulted: 11, resultedLate: 7, rejected: 0, late: 2, latePct: 28.6 },
+    { lab: 'Anwa Medical Company', total: 7, pipeline: 0, awaitingResult: 7, onTime: 0, resulted: 0, resultedLate: 0, rejected: 0, late: 0, latePct: 0 },
   ],
-  byLabTotals: { total: 618, awaitingResult: 159, onTime: 170, late: 67, latePct: 42.1 },
+  byLabTotals: { total: 618, pipeline: 22, awaitingResult: 159, onTime: 170, resulted: 422, resultedLate: 252, rejected: 15, late: 67, latePct: 42.1 },
 
   // curated catalog restricted; a row appears when late>0 OR onTime>0. Sorted
   // late-ascending (ties: reverse catalog order); onTime rides that order.

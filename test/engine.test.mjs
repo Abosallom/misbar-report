@@ -89,6 +89,32 @@ test('monthly + cancelledNote', () => {
   assert.equal(out.cancelledNote, GOLDEN_EXPECTED.cancelledNote);
 });
 
+test('monthly partition: orders = results + rejected + pending (per month AND total)', () => {
+  const out = compute(GOLDEN_ORDERS, TAT_LOOKUP, goldenOpts());
+  const acc = { orders: 0, results: 0, rejected: 0, pending: 0 };
+  for (const m of out.monthly) {
+    // Every month's three disjoint states partition its orders exactly.
+    assert.equal(
+      m.results + m.rejected + m.pending,
+      m.orders,
+      `partition holds for ${m.month}`,
+    );
+    // incomplete stays LEGACY (= orders − results) and double-counts rejected.
+    assert.equal(m.incomplete, m.orders - m.results, `legacy incomplete for ${m.month}`);
+    for (const k of Object.keys(acc)) acc[k] += m[k];
+  }
+  // Totals partition too, and total pending = 181.
+  assert.equal(acc.results + acc.rejected + acc.pending, acc.orders);
+  assert.equal(acc.orders, 618);
+  assert.equal(acc.pending, 181);
+  // May is where the incoherence was visible: pending 15 vs legacy incomplete 29.
+  const may = out.monthly.find((m) => m.month === '2026-05');
+  assert.deepEqual(
+    { orders: may.orders, results: may.results, rejected: may.rejected, pending: may.pending, incomplete: may.incomplete },
+    { orders: 105, results: 76, rejected: 14, pending: 15, incomplete: 29 },
+  );
+});
+
 test('turnaround (order-month; expected = calendar span of WORKDAY window)', () => {
   const out = compute(GOLDEN_ORDERS, TAT_LOOKUP, goldenOpts());
   assert.equal(out.turnaround.overallActual, 12.0);
@@ -102,6 +128,37 @@ test('byLab + byTest (curated catalog, sum 56)', () => {
   assert.deepEqual(out.byLab, GOLDEN_EXPECTED.byLab);
   assert.deepEqual(out.byTest, GOLDEN_EXPECTED.byTest);
   assert.equal(out.byTest.reduce((s, t) => s + t.late, 0), 56);
+});
+
+test('byLab partition: total = pipeline + awaitingResult + onTime + resultedLate + rejected (per lab AND totals)', () => {
+  const out = compute(GOLDEN_ORDERS, TAT_LOOKUP, goldenOpts());
+  const acc = { total: 0, pipeline: 0, awaitingResult: 0, onTime: 0, resulted: 0, resultedLate: 0, rejected: 0 };
+  for (const l of out.byLab) {
+    // Every row's disjoint states partition its total exactly.
+    assert.equal(
+      l.pipeline + l.awaitingResult + l.onTime + l.resultedLate + l.rejected,
+      l.total,
+      `partition holds for ${l.lab}`,
+    );
+    // resulted is the onTime + resultedLate subtotal.
+    assert.equal(l.resulted, l.onTime + l.resultedLate, `resulted subtotal for ${l.lab}`);
+    for (const k of Object.keys(acc)) acc[k] += l[k];
+  }
+  // Totals partition too.
+  assert.equal(acc.pipeline + acc.awaitingResult + acc.onTime + acc.resultedLate + acc.rejected, acc.total);
+  assert.equal(acc.total, 618);
+  assert.equal(acc.pipeline, 22); // = total 618 − received 596 (all pre-receipt lines)
+  assert.equal(acc.resulted, 422); // matches completed / funnel.resulted
+  assert.equal(acc.resultedLate, 252);
+  // Spot values for the top lab (Advanced), where the incoherence was most visible.
+  const adv = out.byLab.find((l) => l.lab.startsWith('Advanced'));
+  assert.deepEqual(
+    {
+      total: adv.total, pipeline: adv.pipeline, awaitingResult: adv.awaitingResult,
+      onTime: adv.onTime, resulted: adv.resulted, resultedLate: adv.resultedLate, rejected: adv.rejected,
+    },
+    { total: 301, pipeline: 11, awaitingResult: 89, onTime: 29, resulted: 187, resultedLate: 158, rejected: 14 },
+  );
 });
 
 test('onTime "success" metric: byLab column sums to 170; byTest catalog sums to 58', () => {

@@ -140,6 +140,14 @@ function buildBuckets(nonCancelled) {
  * (resultedMs != null); Rejected rows are NO LONGER added (user decision
  * 2026-07-19), superseding the old workbook C6 behavior that folded
  * rejectedAll into each month's results.
+ *
+ * PARTITION (user decision 2026-07-22): each month's orders split into three
+ * disjoint states — orders = results + rejected + pending — so the monthly
+ * table columns actually add up. `pending = orders − results − rejected` is the
+ * canonical partition field (rows received/dispatched/created but neither
+ * resulted nor rejected). `incomplete = orders − results` is kept ONLY for
+ * backward compatibility; it silently DOUBLE-COUNTS the rejected rows (which is
+ * the incoherence pending fixes) and must not be used for the partition.
  * @returns {{monthly: object[], cancelledNote: number}}
  */
 function buildMonthly(nonCancelled, cancelledEnriched, cancelledByMonth) {
@@ -170,13 +178,17 @@ function buildMonthly(nonCancelled, cancelledEnriched, cancelledByMonth) {
     const orders = nonCancelled.filter((e) => e.hasCreated && monthKey(e.orderMs) === m).length;
     const results =
       nonCancelled.filter((e) => e.resultedMs != null && monthKey(e.orderMs) === m).length;
-    // rejected per order-month (own value; does NOT affect the incomplete = orders − results rule).
+    // rejected per order-month (own value; part of the orders partition below).
     const rejected =
       nonCancelled.filter((e) => e.rejected && monthKey(e.orderMs) === m).length;
     const cancelled = merged.get(m) || 0;
+    // pending: canonical partition field — orders = results + rejected + pending.
+    const pending = orders - results - rejected;
+    // incomplete: LEGACY only (= orders − results); double-counts rejected. Kept
+    // for backward compatibility; use pending for the partition.
     const incomplete = orders - results;
     const completionPct = orders > 0 ? round1((results / orders) * 100) : null;
-    return { month: m, orders, results, rejected, incomplete, completionPct, cancelled };
+    return { month: m, orders, results, rejected, pending, incomplete, completionPct, cancelled };
   });
 
   return { monthly, cancelledNote };
@@ -214,25 +226,58 @@ function buildTurnaround(nonCancelled) {
   return { overallActual, overallExpected, perMonth, measuredCount: measured.length };
 }
 
-/** Slide-5 by-lab table (facility-normalized, excl. cancelled), total-desc. */
+/**
+ * Slide-5 by-lab table (facility-normalized, excl. cancelled), total-desc.
+ * Each row is a TRUE PARTITION of that lab's non-cancelled lines — the five
+ * disjoint states below sum to `total`, so the compliance table's columns
+ * actually add up to the total (user-visible coherence):
+ *   total = pipeline + awaitingResult + onTime + resultedLate + rejected
+ *   • pipeline       = NO received date yet (pre-receipt: awaiting dispatch / in transit)
+ *   • awaitingResult = received, no result yet, not rejected
+ *   • onTime         = resulted within due (day-granular "success")
+ *   • resultedLate   = resulted − onTime: resulted AFTER the due date. Resulted
+ *                      rows with NO due (No-Match TAT, dueMs null) also land here
+ *                      so the partition stays exact.
+ *   • rejected       = Result Rejected (own value)
+ * `resulted` (= onTime + resultedLate, non-rejected rows with a result date) is
+ * carried as a convenience subtotal. `late` (late-no-result, a SUBSET of
+ * awaitingResult) and `latePct` are unchanged from before.
+ */
 function buildByLab(nonCancelled) {
   const labs = new Map();
   const get = (name) => {
-    if (!labs.has(name)) labs.set(name, { lab: name, total: 0, awaitingResult: 0, rejected: 0, onTime: 0, late: 0 });
+    if (!labs.has(name)) {
+      labs.set(name, {
+        lab: name, total: 0, pipeline: 0, awaitingResult: 0,
+        onTime: 0, resulted: 0, rejected: 0, late: 0,
+      });
+    }
     return labs.get(name);
   };
   for (const e of nonCancelled) {
     const L = get(e.facility ?? 'غير محدد');
     L.total++;
+    // pipeline: no received date (and not rejected) — pre-receipt lines.
+    if (!e.rejected && e.receivedMs == null) L.pipeline++;
     if (e.receivedMs != null && e.resultedMs == null && !e.rejected) L.awaitingResult++;
-    if (e.rejected) L.rejected++; // rejected count per lab (own value)
+    // resulted: parent of the onTime / resultedLate split (non-rejected, has a result).
+    if (!e.rejected && e.resultedMs != null) L.resulted++;
     if (e.onTime) L.onTime++; // resulted within TAT (day-granular "success")
+    if (e.rejected) L.rejected++; // rejected count per lab (own value)
     // late = COUNTIFS(D=lab, T="Late", N="") — "Late" already excludes cancelled/rejected
     if (e.status === STATUS.LATE && e.resultedMs == null) L.late++;
   }
   return [...labs.values()]
     .map((L) => ({
-      ...L,
+      lab: L.lab,
+      total: L.total,
+      pipeline: L.pipeline,
+      awaitingResult: L.awaitingResult,
+      onTime: L.onTime,
+      resulted: L.resulted,
+      resultedLate: L.resulted - L.onTime, // resulted after due (+ No-Match resulted)
+      rejected: L.rejected,
+      late: L.late,
       latePct: L.awaitingResult > 0 ? round1((L.late / L.awaitingResult) * 100) : 0,
     }))
     .sort((a, b) => b.total - a.total || String(a.lab ?? '').localeCompare(String(b.lab ?? '')));

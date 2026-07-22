@@ -22,7 +22,7 @@ export const HISTORICAL_CONSTANTS_SEED = {
 // per-report label overrides (edited from the review screen). See contracts.js.
 export const REPORT_OPTIONS_SEED = {
   excludeNoTat: false,
-  slides: { execFunnel: true, monthly: true, compliance: true, action: true },
+  slides: { execFunnel: true, monthly: true, compliance: true, action: true, definitions: true },
   kpiCards: {
     total: true,
     awaitingDispatch: true,

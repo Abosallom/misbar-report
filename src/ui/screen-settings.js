@@ -26,6 +26,7 @@ const REPORT_SLIDE_FIELDS = [
   { key: 'monthly', label: 'الطلبات الشهرية' },
   { key: 'compliance', label: 'مقياس الالتزام' },
   { key: 'action', label: 'المهام والتحديات' },
+  { key: 'definitions', label: 'منهجية الأرقام' },
 ];
 const REPORT_CARD_FIELDS = [
   { key: 'total', label: 'إجمالي الطلبات' },

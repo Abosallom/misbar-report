@@ -64,14 +64,22 @@ const TURNAROUND = {
   ],
 };
 
-// Late-by-lab table (slide 5). onTime = results delivered within due (sum 170).
+// Late-by-lab table (slide 4 compliance). Each row satisfies the ADD-UP identity
+//   total = pipeline + awaitingResult + onTime + resultedLate + rejected
+// where pipeline = قبل الاستلام (not yet received by the lab) and resultedLate =
+// صدرت متأخرة (resulted after the due date). 'late' (منها متأخرة) is a SUBSET of
+// awaitingResult (overdue, still awaiting) and is NOT part of the sum. pipeline &
+// resultedLate are DERIVED here to split each row's residual (total − awaitingResult
+// − onTime − rejected) while preserving the deck's existing column sums:
+//   total 618, awaitingResult 159, onTime 170, rejected 15, late 67 (latePct 42.1).
+// Resulting new sums: pipeline 193, resultedLate 81 (193+159+170+81+15 = 618).
 const BY_LAB = [
-  { lab: 'Advanced Laboratory Services .Co',      total: 301, awaitingResult: 89, onTime: 29, rejected: 14, late: 60, latePct: 67.4 },
-  { lab: 'Eurofins clinical',                     total: 27,  awaitingResult: 0,  onTime: 20, rejected: 0,  late: 0,  latePct: 0 },
-  { lab: 'king Abdullaziz Medical city in Riyadh',total: 113, awaitingResult: 35, onTime: 42, rejected: 0,  late: 3,  latePct: 8.6 },
-  { lab: 'Fal Specialized Medical Lab',           total: 151, awaitingResult: 21, onTime: 75, rejected: 1,  late: 2,  latePct: 9.5 },
-  { lab: 'Saudi Diagnostics Limited Company',     total: 19,  awaitingResult: 7,  onTime: 4,  rejected: 0,  late: 2,  latePct: 28.6 },
-  { lab: 'Anwa  Medical Company',                 total: 7,   awaitingResult: 7,  onTime: 0,  rejected: 0,  late: 0,  latePct: 0 },
+  { lab: 'Advanced Laboratory Services .Co',      total: 301, pipeline: 120, awaitingResult: 89, onTime: 29, resultedLate: 49, rejected: 14, late: 60, latePct: 67.4 },
+  { lab: 'Eurofins clinical',                     total: 27,  pipeline: 0,   awaitingResult: 0,  onTime: 20, resultedLate: 7,  rejected: 0,  late: 0,  latePct: 0 },
+  { lab: 'king Abdullaziz Medical city in Riyadh',total: 113, pipeline: 24,  awaitingResult: 35, onTime: 42, resultedLate: 12, rejected: 0,  late: 3,  latePct: 8.6 },
+  { lab: 'Fal Specialized Medical Lab',           total: 151, pipeline: 44,  awaitingResult: 21, onTime: 75, resultedLate: 10, rejected: 1,  late: 2,  latePct: 9.5 },
+  { lab: 'Saudi Diagnostics Limited Company',     total: 19,  pipeline: 5,   awaitingResult: 7,  onTime: 4,  resultedLate: 3,  rejected: 0,  late: 2,  latePct: 28.6 },
+  { lab: 'Anwa  Medical Company',                 total: 7,   pipeline: 0,   awaitingResult: 7,  onTime: 0,  resultedLate: 0,  rejected: 0,  late: 0,  latePct: 0 },
 ];
 
 // slide 7 — current (external) tasks. PLACEHOLDER content (public repo):
@@ -112,7 +120,10 @@ const RISKS = [
 export const MOCK_REPORT_MODEL = {
   reportDate: '2026-07-09',
   kpi: {
-    totals: { lines: 671, cancelledInData: 53, total: 618 },
+    // Matches golden-expected: 618 live + 10 cancelled rows counted from the CSV =
+    // 628 lines. cancelledNote (53) − cancelledInData (10) = 43 historical (pre-April)
+    // cancellations from the manual constants, surfaced in the exec cancelled note.
+    totals: { lines: 628, cancelledInData: 10, total: 618 },
     funnel: { created: 618, collected: 612, dispatched: 608, received: 596, resulted: 422 },
     buckets: {
       awaitingDispatch: 10,        // 10 — في انتظار شحن العينة (المستشفى)

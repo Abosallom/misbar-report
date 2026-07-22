@@ -441,7 +441,7 @@ const IMPORT_KEYS = ['schemaVersion', 'tatLookup', 'displayNames', 'scorecard', 
 
 // The exact reportOptions subkeys that may be imported. Unknown slide/card keys
 // are dropped; label values must be strings. Keys mirror REPORT_OPTIONS_SEED.
-const REPORT_OPTION_SLIDE_KEYS = ['execFunnel', 'monthly', 'compliance', 'action'];
+const REPORT_OPTION_SLIDE_KEYS = ['execFunnel', 'monthly', 'compliance', 'action', 'definitions'];
 const REPORT_OPTION_CARD_KEYS = [
   'total', 'awaitingDispatch', 'awaitingResults', 'completed', 'rejected', 'lateNoResult', 'shippedNotReceived',
 ];
