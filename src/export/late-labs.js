@@ -20,10 +20,11 @@
 //   • GRAIN = per test LINE (order line): counts (late/dueSoon) and data rows are
 //     NEVER deduplicated by order — one order with 3 qualifying tests contributes
 //     3 rows and counts as 3, not 1.
-import { buildTatIndex, resolveTat } from '../engine/tat.js?v=v2026-07-22.8';
+import { buildTatIndex, resolveTat } from '../engine/tat.js?v=v2026-07-22.9';
 import {
   parseDateTime, toEpochDay, workday, dayDiff,
-} from '../engine/workday.js?v=v2026-07-22.8';
+} from '../engine/workday.js?v=v2026-07-22.9';
+import { writeStyledXlsx } from './xlsx-styled.js?v=v2026-07-22.9';
 
 /** The 20 export columns, VERBATIM (keep the 'Lonic code' typo — established format). */
 export const LATE_LAB_HEADERS = Object.freeze([
@@ -49,53 +50,70 @@ export const LATE_LAB_HEADERS = Object.freeze([
   'Late Risk (next 24h)',
 ]);
 
-// Column widths copied from the reference file's !cols wch values (20 columns).
-const COL_WCH = Object.freeze([
-  16.67, 21.67, 23.67, 25.67, 13.67, 18.67, 11.67, 54.17, 12.67, 29.67,
-  12.67, 19.67, 19.67, 24.67, 26.67, 29.67, 9.67, 13.67, 8.17, 21.67,
+// Column widths — the EXACT <col width="…"> values from the reference sheet1.xml
+// (20 columns). These are raw OOXML width units (as LibreOffice wrote them); when
+// re-read by SheetJS they yield the wch char-widths the prior export used
+// (17.5 → 16.67, etc.), so the columns render identically to the reference.
+const COL_WIDTH = Object.freeze([
+  17.5, 22.5, 24.51, 26.5, 14.51, 19.51, 12.5, 55, 13.5, 30.51,
+  13.5, 20.51, 20.51, 25.51, 27.5, 30.51, 10.51, 14.51, 9, 22.5,
 ]);
 
 const DUE_SOON_FLAG = '⚠ DUE ≤24H';
 
-const MS_PER_DAY = 86400000;
-// Excel serial 25569 == 1970-01-01 (both are naïve/UTC-anchored here, so no TZ drift).
-const EXCEL_EPOCH_OFFSET = 25569;
-const toSerial = (ms) => ms / MS_PER_DAY + EXCEL_EPOCH_OFFSET;
+// Per-column DATA cell style indices (into xlsx-styled.js cellXfs), replicating the
+// reference workbook's per-column map A..T. See xlsx-styled.js for what each means.
+//   3 date · 4 general · 5 int · 6 test-name(wrap/top) · 7 datetime
+//   8 navy general · 9 navy date · 10 navy int
+const DATA_STYLE = Object.freeze([
+  3, 4, 4, 4, 5, 4, 4, 6, 4, 7, 7, 7, 7, 7, 8, 8, 9, 10, 8, 8,
+]);
+// Header row styles: A..N = 1 (plain body font, no fill); O..T = 2 (navy header).
+const HEADER_STYLE = Object.freeze([
+  1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2,
+]);
+const EMPTY = Object.freeze({ t: 'empty' });
 
-/** Date-only cell (M/D/YYYY): integer Excel serial from a 'YYYY-MM-DD' string. */
+/**
+ * Typed cells for the writer. d/dt carry epoch-ms (converted to Excel serials by
+ * xlsx-styled.js); s (string) / n (number) carry the literal value; empty cells
+ * are still emitted so they keep their column style — matching the reference.
+ */
+/** Date-only cell from a 'YYYY-MM-DD[ HH:MM]' string (INT applied by the writer). */
 function dateCell(str) {
   const ms = parseDateTime(str);
-  if (ms == null) return null;
-  return { t: 'n', v: toSerial(toEpochDay(ms)), z: 'm/d/yyyy' };
+  return ms == null ? EMPTY : { t: 'd', v: ms };
 }
-/** Full-datetime cell (M/D/YYYY H:mm): fractional Excel serial, time preserved. */
+/** Full-datetime cell from a datetime string (fractional serial, time preserved). */
 function dtCell(str) {
   const ms = parseDateTime(str);
-  if (ms == null) return null;
-  return { t: 'n', v: toSerial(ms), z: 'm/d/yyyy\\ h:mm' };
+  return ms == null ? EMPTY : { t: 'dt', v: ms };
 }
 /** Date-only cell straight from a midnight epoch-ms (Due Date). */
 function dueCell(ms) {
-  if (ms == null) return null;
-  return { t: 'n', v: toSerial(ms), z: 'm/d/yyyy' };
+  return ms == null ? EMPTY : { t: 'd', v: ms };
 }
-/** A string cell, or null for empty. */
+/** A string cell, or an (empty-but-styled) cell for null/''. */
 function strCell(v) {
-  if (v == null) return null;
+  if (v == null) return EMPTY;
   const s = String(v);
-  return s === '' ? null : { t: 's', v: s };
+  return s === '' ? EMPTY : { t: 's', v: s };
+}
+/** A number cell. */
+function numCell(v) {
+  return { t: 'n', v };
 }
 /**
  * An identifier cell. Reference stores these as numbers (leading zeros dropped by
  * Excel) when purely numeric; fall back to a string for non-numeric or oversized
  * ids (>15 digits would lose precision as an IEEE double).
- * @param {*} v @param {string} [z]  number format (default 'General')
+ * @param {*} v
  */
-function idCell(v, z) {
-  if (v == null) return null;
+function idCell(v) {
+  if (v == null) return EMPTY;
   const s = String(v);
-  if (s === '') return null;
-  if (/^\d+$/.test(s) && s.length <= 15) return { t: 'n', v: Number(s), z: z || 'General' };
+  if (s === '') return EMPTY;
+  if (/^\d+$/.test(s) && s.length <= 15) return { t: 'n', v: Number(s) };
   return { t: 's', v: s };
 }
 
@@ -144,52 +162,60 @@ function classifyRow(row, tatIndex, asOfDay, opts) {
   const risk = dueSoon ? DUE_SOON_FLAG : '';
 
   const cells = [
-    dateCell(row.orderDate),                                   // 0  Order date time
-    idCell(row.orderingFacilityId),                            // 1  Ordering facility ID
-    idCell(row.performingFacilityId),                          // 2  Performing facility id
-    strCell(row.facility),                                     // 3  Performing facility name
-    idCell(row.orderId, '0'),                                  // 4  Order ID
-    strCell(`${row.orderId}:${row.lineNo}`),                   // 5  Order line number
-    strCell(row.loinc),                                        // 6  Lonic code
-    strCell(row.testName),                                     // 7  Test name
-    idCell(row.specimenNo),                                    // 8  Specimen no
-    dtCell(row.collected),                                     // 9  Specimen collected date time
-    strCell(row.shipmentId),                                   // 10 Shipment ID
-    dtCell(row.dispatched),                                    // 11 Dispatch date time
-    dtCell(row.received),                                      // 12 Received date time
-    null,                                                      // 13 Result report date time (empty by scope)
-    strCell(row.rawStatus),                                    // 14 Order Status
-    { t: 'n', v: tat, z: 'General' },                          // 15 Standard TAT (business days)
-    dueCell(dueMs),                                            // 16 Due Date
-    { t: 'n', v: delay, z: '0' },                              // 17 Delay (days)
-    strCell(status),                                           // 18 Status
-    risk ? { t: 's', v: risk } : null,                         // 19 Late Risk (next 24h)
+    dateCell(row.orderDate),                                   // 0  A Order date time
+    idCell(row.orderingFacilityId),                            // 1  B Ordering facility ID
+    idCell(row.performingFacilityId),                          // 2  C Performing facility id
+    strCell(row.facility),                                     // 3  D Performing facility name
+    idCell(row.orderId),                                       // 4  E Order ID (number, fmt 0)
+    strCell(`${row.orderId}:${row.lineNo}`),                   // 5  F Order line number
+    strCell(row.loinc),                                        // 6  G Lonic code
+    strCell(row.testName),                                     // 7  H Test name
+    idCell(row.specimenNo),                                    // 8  I Specimen no
+    dtCell(row.collected),                                     // 9  J Specimen collected date time
+    strCell(row.shipmentId),                                   // 10 K Shipment ID (string, datetime col style)
+    dtCell(row.dispatched),                                    // 11 L Dispatch date time
+    dtCell(row.received),                                      // 12 M Received date time
+    EMPTY,                                                     // 13 N Result report date time (empty by scope)
+    strCell(row.rawStatus),                                    // 14 O Order Status
+    numCell(tat),                                              // 15 P Standard TAT (business days)
+    dueCell(dueMs),                                            // 16 Q Due Date
+    numCell(delay),                                            // 17 R Delay (days)
+    strCell(status),                                           // 18 S Status
+    risk ? { t: 's', v: risk } : EMPTY,                        // 19 T Late Risk (next 24h)
   ];
 
   return { late, dueSoon, cells };
 }
 
-/** Assemble a SheetJS worksheet object from the pre-built 20-cell data rows. */
-function buildSheet(sheetName, dataRows, XLSX) {
-  const ws = {};
+const COL_A = 'A'.charCodeAt(0);
+/** 0-based column index → A1 column letters (A..T only needs a single letter). */
+function colLetter(c) {
+  let n = c;
+  let s = '';
+  do {
+    s = String.fromCharCode(COL_A + (n % 26)) + s;
+    n = Math.floor(n / 26) - 1;
+  } while (n >= 0);
+  return s;
+}
+
+/**
+ * Build the styled XLSX bytes for one lab from the pre-built 20-cell data rows.
+ * Every cell (header + data, including empties) carries its per-column style so
+ * the workbook reproduces the reference formatting exactly.
+ */
+function buildXlsxBytes(sheetName, dataRows) {
   const nCols = LATE_LAB_HEADERS.length;
-  LATE_LAB_HEADERS.forEach((h, c) => {
-    ws[XLSX.utils.encode_cell({ r: 0, c })] = { t: 's', v: h };
+  const headerCells = LATE_LAB_HEADERS.map((h, c) => ({ t: 's', v: h, s: HEADER_STYLE[c] }));
+  const styledRows = dataRows.map((cells) => cells.map((cell, c) => ({ ...cell, s: DATA_STYLE[c] })));
+  const autofilterRef = `A1:${colLetter(nCols - 1)}${dataRows.length + 1}`;
+  return writeStyledXlsx({
+    sheetName,
+    headerCells,
+    dataRows: styledRows,
+    colWidths: COL_WIDTH,
+    autofilterRef,
   });
-  dataRows.forEach((cells, ri) => {
-    cells.forEach((cell, c) => {
-      if (cell == null) return;                   // empty cells are simply absent
-      ws[XLSX.utils.encode_cell({ r: ri + 1, c })] = cell;
-    });
-  });
-  const ref = XLSX.utils.encode_range({
-    s: { r: 0, c: 0 },
-    e: { r: dataRows.length, c: nCols - 1 },
-  });
-  ws['!ref'] = ref;
-  ws['!autofilter'] = { ref };                    // autofilter spans the used range
-  ws['!cols'] = COL_WCH.map((wch) => ({ wch }));
-  return ws;
 }
 
 /**
@@ -198,20 +224,20 @@ function buildSheet(sheetName, dataRows, XLSX) {
  * @param {import('../contracts.js').OrderRow[]} args.rows
  * @param {Object<string,number>} [args.tatTests]  test name → business days (TAT lookup)
  * @param {number} args.asOfMs                     the report/as-of instant (epoch-ms; injected)
- * @param {*} args.XLSX                            the SheetJS library
  * @param {{tatFallbackFromCsv?:boolean}} [args.opts]  passed to resolveTat (fallback ON by default)
- * @returns {{lab:string, sheetName:string, fileName:string, late:number, dueSoon:number, wb:Object}[]}
+ * @returns {{lab:string, sheetName:string, fileName:string, late:number, dueSoon:number, xlsxBytes:Uint8Array}[]}
  *   one entry per lab with ≥1 included row, sorted by total desc then lab name asc.
+ *
+ * NOTE: the workbook bytes are produced by the dependency-free styled writer
+ * (src/export/xlsx-styled.js) — SheetJS is NOT used on the write path (it drops
+ * cell styling). SheetJS remains only as a PARSER elsewhere (ingest, tests).
  */
 export function buildLateLabWorkbooks({
-  rows, tatTests, asOfMs, XLSX, opts = {},
+  rows, tatTests, asOfMs, opts = {},
 } = {}) {
   if (!Array.isArray(rows) || rows.length === 0) return [];
   if (asOfMs == null || !Number.isFinite(Number(asOfMs))) {
     throw new Error('buildLateLabWorkbooks: asOfMs (epoch-ms) is required');
-  }
-  if (!XLSX || !XLSX.utils || typeof XLSX.utils.encode_cell !== 'function') {
-    throw new Error('buildLateLabWorkbooks: XLSX (SheetJS) must be injected');
   }
   const asOfDay = toEpochDay(Number(asOfMs));
   const tatIndex = buildTatIndex(tatTests);
@@ -232,10 +258,9 @@ export function buildLateLabWorkbooks({
   const out = [];
   for (const [lab, g] of byLab) {
     const sheetName = labSheetName(lab);
-    const ws = buildSheet(sheetName, g.dataRows, XLSX);
-    const wb = { SheetNames: [sheetName], Sheets: { [sheetName]: ws } };
+    const xlsxBytes = buildXlsxBytes(sheetName, g.dataRows);
     out.push({
-      lab, sheetName, fileName: labFileName(lab), late: g.late, dueSoon: g.dueSoon, wb,
+      lab, sheetName, fileName: labFileName(lab), late: g.late, dueSoon: g.dueSoon, xlsxBytes,
     });
   }
   // Deterministic order: worst (largest total) first, ties broken by lab name.

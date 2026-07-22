@@ -67,6 +67,45 @@ function independentInclude(rows) {
 const usedRange = (ws) => XLSX.utils.decode_range(ws['!ref']);
 const cellAt = (ws, r, c) => ws[XLSX.utils.encode_cell({ r, c })];
 
+// The new export returns raw XLSX bytes (a dependency-free styled writer replaced
+// SheetJS on the WRITE path). SheetJS remains the PARSER: re-read the bytes to
+// verify values/headers/autofilter/counts exactly as before. Plain read → empty
+// styled cells are absent (undefined); styled read (cellStyles) → !cols is
+// populated (SheetJS only parses <cols> when cellStyles is on).
+const readWs = (w) => {
+  const wb = XLSX.read(w.xlsxBytes, { type: 'array' });
+  return wb.Sheets[wb.SheetNames[0]];
+};
+const readWsStyled = (w) => {
+  const wb = XLSX.read(w.xlsxBytes, { type: 'array', cellStyles: true });
+  return wb.Sheets[wb.SheetNames[0]];
+};
+const readSheetNames = (w) => XLSX.read(w.xlsxBytes, { type: 'array' }).SheetNames;
+
+// Extract one entry's text from a STORE-method (uncompressed) ZIP by scanning
+// local-file-header signatures (PK\x03\x04) — the styled writer never deflates,
+// so each entry's bytes are the raw part contents. ~20 lines, no dependencies.
+function unzipEntry(bytes, wantName) {
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const dec = new TextDecoder();
+  let i = 0;
+  while (i + 4 <= bytes.length && dv.getUint32(i, true) === 0x04034b50) {
+    const method = dv.getUint16(i + 8, true);
+    const size = dv.getUint32(i + 18, true);   // compressed size (== raw size for STORE)
+    const nameLen = dv.getUint16(i + 26, true);
+    const extraLen = dv.getUint16(i + 28, true);
+    const nameStart = i + 30;
+    const name = dec.decode(bytes.subarray(nameStart, nameStart + nameLen));
+    const dataStart = nameStart + nameLen + extraLen;
+    if (name === wantName) {
+      assert.equal(method, 0, 'STORE method expected (no compression)');
+      return dec.decode(bytes.subarray(dataStart, dataStart + size));
+    }
+    i = dataStart + size;
+  }
+  return null;
+}
+
 // Synthetic OrderRow builder — only the fields the export reads; the rest default
 // to null. Matches the OrderRow shape in src/contracts.js. Empty tatTests → the
 // export resolves StdTAT from tatDaysCsv (the CSV "TAT - Days" fallback).
@@ -90,14 +129,16 @@ test('counts are per TEST line, not per order', () => {
     orderRow({ orderId: '000777', lineNo: 1, testName: 'DELTA TEST', received: '2026-07-09 09:00:00', tatDaysCsv: 0 }),
   ];
 
-  const wbs = buildLateLabWorkbooks({ rows, tatTests: {}, asOfMs, XLSX });
+  const wbs = buildLateLabWorkbooks({ rows, tatTests: {}, asOfMs });
   assert.equal(wbs.length, 1, 'all rows share one facility ⇒ a single workbook');
   const w = wbs[0];
   assert.equal(w.lab, 'Synthetic Lab');
   assert.equal(w.late, 3, 'three LATE test LINES counted (order not collapsed to 1)');
   assert.equal(w.dueSoon, 1, 'one due-soon test line');
+  assert.ok(w.xlsxBytes instanceof Uint8Array, 'workbook returned as raw bytes');
+  assert.doesNotThrow(() => XLSX.read(w.xlsxBytes, { type: 'array' }), 'SheetJS re-reads the bytes');
 
-  const ws = w.wb.Sheets[w.sheetName];
+  const ws = readWs(w);
   const rng = usedRange(ws);
   assert.equal(rng.e.r - rng.s.r, 4, 'four data rows = 3 late + 1 due-soon (per LINE, order never deduped)');
 
@@ -108,8 +149,70 @@ test('counts are per TEST line, not per order', () => {
   assert.equal(orderIds.filter((v) => v === 777).length, 1, 'the other order contributes one row');
 });
 
+test('reference styling — styles.xml + sheet1.xml reproduce the navy computed block', () => {
+  // Synthetic rows (no CSV needed): one LATE row and one DUE-SOON row, with the
+  // datetime/id columns populated so we can assert their per-column cell styles.
+  const rows = [
+    orderRow({
+      orderId: '000501', lineNo: 1, testName: 'ALPHA TEST',
+      orderDate: '2026-06-01', collected: '2026-06-01 07:30:00',
+      dispatched: '2026-06-01 08:00:00', received: '2026-06-01 08:30:00',
+      specimenNo: '9900000526', rawStatus: 'Received', tatDaysCsv: 1,
+    }),
+    orderRow({
+      orderId: '000777', lineNo: 1, testName: 'DELTA TEST',
+      received: '2026-07-09 09:00:00', tatDaysCsv: 0,
+    }),
+  ];
+  const [w] = buildLateLabWorkbooks({ rows, tatTests: {}, asOfMs });
+  const styles = unzipEntry(w.xlsxBytes, 'xl/styles.xml');
+  const sheet = unzipEntry(w.xlsxBytes, 'xl/worksheets/sheet1.xml');
+  assert.ok(styles && sheet, 'styles.xml and sheet1.xml present in the STORE zip');
+
+  // styles.xml: navy fill, white-bold font, the three custom number formats.
+  assert.ok(styles.includes('FF1F4E78'), 'navy fill fgColor FF1F4E78 present');
+  assert.ok(styles.includes('bgColor rgb="FF003366"'), 'navy fill bgColor FF003366 present');
+  assert.match(
+    styles,
+    /<b val="true"\/><sz val="11"\/><color rgb="FFFFFFFF"\/><name val="Aptos Narrow"\/>/,
+    'white bold Aptos Narrow font present',
+  );
+  for (const id of ['165', '166', '167']) {
+    assert.ok(styles.includes(`numFmtId="${id}"`), `numFmt ${id} present`);
+  }
+  assert.ok(styles.includes('formatCode="m/d/yyyy"'), 'numFmt 165 = m/d/yyyy');
+  assert.ok(styles.includes('m/d/yyyy\\ h:mm'), 'numFmt 167 = datetime');
+
+  // Header row: A1–N1 plain (s=1), O1–T1 navy (s=2).
+  for (const col of ['A', 'B', 'H', 'N']) assert.ok(sheet.includes(`<c r="${col}1" s="1"`), `${col}1 header s=1`);
+  for (const col of ['O', 'P', 'Q', 'R', 'S', 'T']) assert.ok(sheet.includes(`<c r="${col}1" s="2"`), `${col}1 navy header s=2`);
+
+  // Data row 2: A date xf (3); E numeric int xf (5); J/M datetime xf (7);
+  // O,P,S,T navy general (8); Q navy date (9); R navy int (10).
+  assert.ok(sheet.includes('<c r="A2" s="3">'), 'A2 date xf');
+  assert.match(sheet, /<c r="E2" s="5"><v>501<\/v><\/c>/, 'E2 numeric Order ID, int xf');
+  assert.ok(sheet.includes('<c r="J2" s="7">'), 'J2 datetime xf');
+  assert.ok(sheet.includes('<c r="M2" s="7">'), 'M2 datetime xf');
+  for (const col of ['O', 'P', 'S', 'T']) assert.ok(sheet.includes(`<c r="${col}2" s="8"`), `${col}2 navy general xf`);
+  assert.ok(sheet.includes('<c r="Q2" s="9">'), 'Q2 navy date xf');
+  assert.ok(sheet.includes('<c r="R2" s="10">'), 'R2 navy int xf');
+
+  // Empty cells still carry their column style (reference behaviour): N is empty
+  // by scope but keeps the datetime column style (s=7), self-closing (no <v>).
+  assert.match(sheet, /<c r="N2" s="7"\/>/, 'empty N2 keeps its column style');
+
+  // autoFilter over the used range; 20 custom-width columns with the ref widths.
+  assert.ok(sheet.includes('<autoFilter ref="A1:T3"/>'), 'autofilter spans used range');
+  assert.ok(sheet.includes('<col min="1" max="1" width="17.5" customWidth="true"/>'), 'col A ref width');
+  assert.ok(sheet.includes('<col min="8" max="8" width="55" customWidth="true"/>'), 'col H ref width');
+
+  // Inline strings (no sharedStrings part) carry the unicode flag verbatim.
+  assert.ok(unzipEntry(w.xlsxBytes, 'xl/sharedStrings.xml') === null, 'no sharedStrings part (inline strings)');
+  assert.ok(sheet.includes('⚠ DUE ≤24H'), 'due-soon flag written inline');
+});
+
 test('per-lab counts + which labs qualify (deterministic, CSV-fallback TAT)', { skip: SKIP }, () => {
-  const wbs = buildLateLabWorkbooks({ rows: load(), tatTests: {}, asOfMs, XLSX });
+  const wbs = buildLateLabWorkbooks({ rows: load(), tatTests: {}, asOfMs });
   const byLab = Object.fromEntries(wbs.map((w) => [w.lab, { late: w.late, dueSoon: w.dueSoon }]));
 
   // Exactly three labs get a file (labs with zero qualifying rows are absent).
@@ -124,10 +227,10 @@ test('per-lab counts + which labs qualify (deterministic, CSV-fallback TAT)', { 
 });
 
 test('header row is exactly the 20 verbatim strings', { skip: SKIP }, () => {
-  const wbs = buildLateLabWorkbooks({ rows: load(), tatTests: {}, asOfMs, XLSX });
+  const wbs = buildLateLabWorkbooks({ rows: load(), tatTests: {}, asOfMs });
   assert.equal(LATE_LAB_HEADERS.length, 20);
   for (const w of wbs) {
-    const ws = w.wb.Sheets[w.sheetName];
+    const ws = readWs(w);
     const rng = usedRange(ws);
     const hdr = [];
     for (let c = rng.s.c; c <= rng.e.c; c++) hdr.push(cellAt(ws, 0, c)?.v ?? null);
@@ -136,28 +239,33 @@ test('header row is exactly the 20 verbatim strings', { skip: SKIP }, () => {
 });
 
 test('sheet name = lab (sanitized ≤31); autofilter + ref span the used range; !cols present', { skip: SKIP }, () => {
-  const wbs = buildLateLabWorkbooks({ rows: load(), tatTests: {}, asOfMs, XLSX });
+  const wbs = buildLateLabWorkbooks({ rows: load(), tatTests: {}, asOfMs });
   for (const w of wbs) {
-    assert.equal(w.wb.SheetNames.length, 1);
-    assert.equal(w.wb.SheetNames[0], labSheetName(w.lab), 'sheet named the (sanitized) lab');
+    const names = readSheetNames(w);
+    assert.equal(names.length, 1);
+    assert.equal(names[0], labSheetName(w.lab), 'sheet named the (sanitized) lab');
+    assert.equal(w.sheetName, labSheetName(w.lab), 'entry sheetName is the sanitized lab');
     assert.ok(w.sheetName.length <= 31, 'sheet name ≤ 31 chars');
-    const ws = w.wb.Sheets[w.sheetName];
+    const ws = readWs(w);
     const nRows = w.late + w.dueSoon; // data rows
     const expectRef = `A1:T${nRows + 1}`; // header + data, 20 cols (A..T)
     assert.equal(ws['!ref'], expectRef, `!ref for ${w.lab}`);
     assert.deepEqual(ws['!autofilter'], { ref: expectRef }, `autofilter for ${w.lab}`);
-    assert.ok(Array.isArray(ws['!cols']) && ws['!cols'].length === 20, '!cols has 20 entries');
-    assert.ok(ws['!cols'].every((c) => typeof c.wch === 'number'), 'every col has a wch width');
+    // !cols only surfaces when SheetJS parses styles (cellStyles); it round-trips
+    // the reference widths to their char-width (wch) equivalents.
+    const wsStyled = readWsStyled(w);
+    assert.ok(Array.isArray(wsStyled['!cols']) && wsStyled['!cols'].length === 20, '!cols has 20 entries');
+    assert.ok(wsStyled['!cols'].every((c) => typeof c.wch === 'number'), 'every col has a wch width');
   }
 });
 
 test('every included row is in scope (received && !resulted, not cancelled/rejected) and obeys the Status/flag rules', { skip: SKIP }, () => {
   const rows = load();
-  const wbs = buildLateLabWorkbooks({ rows, tatTests: {}, asOfMs, XLSX });
+  const wbs = buildLateLabWorkbooks({ rows, tatTests: {}, asOfMs });
   const expected = independentInclude(rows);
 
   for (const w of wbs) {
-    const ws = w.wb.Sheets[w.sheetName];
+    const ws = readWs(w);
     const rng = usedRange(ws);
     let lateSeen = 0;
     let dueSoonSeen = 0;
@@ -208,9 +316,9 @@ test('delay math spot-check — recompute one row by hand with workday()', { ski
   assert.equal(delay, first.delay, 'independent + hand delays agree');
 
   // The workbook cell must carry that exact delay, in the same lab's data row 1.
-  const wbs = buildLateLabWorkbooks({ rows, tatTests: {}, asOfMs, XLSX });
+  const wbs = buildLateLabWorkbooks({ rows, tatTests: {}, asOfMs });
   const w = wbs.find((x) => x.lab === 'Advanced Laboratory Services .Co');
-  const ws = w.wb.Sheets[w.sheetName];
+  const ws = readWs(w);
   assert.equal(cellAt(ws, 1, 17).v, delay, 'Delay cell equals the hand-computed delay');
   assert.equal(cellAt(ws, 1, 18).v, delay > 0 ? 'Late' : 'On Time', 'Status matches delay sign');
   // Due Date cell is the Excel serial of dueMs (integer day).
@@ -220,8 +328,8 @@ test('delay math spot-check — recompute one row by hand with workday()', { ski
 
 test('deterministic, correct file names — same output across runs', { skip: SKIP }, () => {
   const rows = load();
-  const a = buildLateLabWorkbooks({ rows, tatTests: {}, asOfMs, XLSX });
-  const b = buildLateLabWorkbooks({ rows, tatTests: {}, asOfMs, XLSX });
+  const a = buildLateLabWorkbooks({ rows, tatTests: {}, asOfMs });
+  const b = buildLateLabWorkbooks({ rows, tatTests: {}, asOfMs });
   assert.deepEqual(a.map((w) => w.fileName), b.map((w) => w.fileName), 'stable order + names');
   for (const w of a) {
     assert.equal(w.fileName, `${w.lab} - TAT Late & Due.xlsx`);
@@ -239,8 +347,8 @@ test('new OrderRow identifier fields are populated (specimenNo etc.) and perform
   // 'Performing facility id' column is absent from this CSV export → always null.
   assert.ok(rows.every((r) => r.performingFacilityId == null), 'performingFacilityId null (column absent)');
   // The identifiers must survive into the workbook (Specimen no = col 8, non-empty somewhere).
-  const wbs = buildLateLabWorkbooks({ rows, tatTests: {}, asOfMs, XLSX });
-  const ws = wbs[0].wb.Sheets[wbs[0].sheetName];
+  const wbs = buildLateLabWorkbooks({ rows, tatTests: {}, asOfMs });
+  const ws = readWs(wbs[0]);
   const rng = usedRange(ws);
   let sawSpecimen = false;
   for (let r = rng.s.r + 1; r <= rng.e.r; r++) if (cellAt(ws, r, 8) != null) sawSpecimen = true;
@@ -266,10 +374,10 @@ test('PII value guard — no patient/staff value from the raw CSV appears in any
   }
   assert.ok(piiValues.size > 0, 'harvested at least one PII value to guard against');
 
-  const wbs = buildLateLabWorkbooks({ rows: load(), tatTests: {}, asOfMs, XLSX });
+  const wbs = buildLateLabWorkbooks({ rows: load(), tatTests: {}, asOfMs });
   assert.ok(wbs.length > 0);
   for (const w of wbs) {
-    const ws = w.wb.Sheets[w.sheetName];
+    const ws = readWs(w);
     const rng = usedRange(ws);
     for (let r = rng.s.r; r <= rng.e.r; r++) {
       for (let c = rng.s.c; c <= rng.e.c; c++) {

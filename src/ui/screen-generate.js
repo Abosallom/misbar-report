@@ -1,12 +1,12 @@
 // ui/screen-generate.js — build both variants, produce 4 files, trigger downloads (Track E).
-import { STR, todayISO, buildFileName, formatDateAr } from '../i18n/ar.js?v=v2026-07-22.8';
-import { el, progressBar, toast } from './components.js?v=v2026-07-22.8';
-import { VARIANTS } from '../contracts.js?v=v2026-07-22.8';
-import { getGenLibs } from '../vendor-loader.js?v=v2026-07-22.8';
-import { resetRunData } from '../state.js?v=v2026-07-22.8';
-import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-07-22.8';
-import { autoDraft } from '../model/drafts.js?v=v2026-07-22.8';
-import { buildLateLabsSection, triggerDownload } from './late-labs-section.js?v=v2026-07-22.8';
+import { STR, todayISO, buildFileName, formatDateAr } from '../i18n/ar.js?v=v2026-07-22.9';
+import { el, progressBar, toast } from './components.js?v=v2026-07-22.9';
+import { VARIANTS } from '../contracts.js?v=v2026-07-22.9';
+import { getGenLibs } from '../vendor-loader.js?v=v2026-07-22.9';
+import { resetRunData } from '../state.js?v=v2026-07-22.9';
+import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-07-22.9';
+import { autoDraft } from '../model/drafts.js?v=v2026-07-22.9';
+import { buildLateLabsSection, triggerDownload } from './late-labs-section.js?v=v2026-07-22.9';
 
 async function tryImport(path) { try { return await import(path); } catch { return null; } }
 function pickFn(mod, names) {
@@ -85,7 +85,7 @@ function fallbackModel(state, store) {
 // Build the SlideSpec per VARIANT — the variant changes slide-5 content
 // (task rows), so one shared spec would leak internal tasks into NUPCO files.
 async function buildVariantSpec(model, variant) {
-  const mod = await tryImport('../slidespec/build-spec.js?v=v2026-07-22.8');
+  const mod = await tryImport('../slidespec/build-spec.js?v=v2026-07-22.9');
   const fn = pickFn(mod, ['buildSpec', 'build', 'makeSpec', 'toSpec']);
   if (!fn) return null;
   let spec = fn(model, { variant });
@@ -111,7 +111,7 @@ async function toBlob(result, kind) {
 // renderPptx(spec, {variant, PptxGenJS}) -> Promise<Blob>
 async function makePptx(spec, variant, libs) {
   if (!spec) return null;
-  const mod = await tryImport('../render/pptx-renderer.js?v=v2026-07-22.8');
+  const mod = await tryImport('../render/pptx-renderer.js?v=v2026-07-22.9');
   const fn = pickFn(mod, ['renderPptx', 'buildPptx', 'toPptx', 'makePptx', 'render']);
   if (!fn) return null;
   const r = await fn(spec, { variant, PptxGenJS: libs.PptxGenJS });
@@ -165,9 +165,9 @@ function makeThumbStrip() {
 // renderSlides(spec, {variant}) -> fragment of .sl-slide; exportPdf(slideEls, {jsPDF, html2canvas, onProgress})
 async function makePdf(spec, variant, libs, host, onProgress, thumbs) {
   if (!spec) return null;
-  const rMod = await tryImport('../render/html-renderer.js?v=v2026-07-22.8');
+  const rMod = await tryImport('../render/html-renderer.js?v=v2026-07-22.9');
   const renderSlides = pickFn(rMod, ['renderSlides', 'renderSpec', 'renderHtml', 'render']);
-  const pMod = await tryImport('../render/pdf-export.js?v=v2026-07-22.8');
+  const pMod = await tryImport('../render/pdf-export.js?v=v2026-07-22.9');
   const exportPdf = pickFn(pMod, ['exportPdf', 'renderPdf', 'toPdf', 'buildPdf', 'render']);
   if (!renderSlides || !exportPdf) return null;
   host.innerHTML = '';

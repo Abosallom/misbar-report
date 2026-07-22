@@ -18,7 +18,7 @@
 //   4. OBSERVED (low)    — median actual (resulted-received) calendar days, ceil>=1.
 //   5. none              — insufficient data.
 
-import { normTest } from '../contracts.js?v=v2026-07-22.8';
+import { normTest } from '../contracts.js?v=v2026-07-22.9';
 
 const MS_PER_DAY = 86400000;
 const SIMILARITY_THRESHOLD = 0.5;

@@ -5,11 +5,10 @@
 // basis, empty-state, and the sanitized triggerDownload helper. Built from the
 // SAME dataset a generate run uses (order rows + TAT lookup + an as-of instant),
 // so it works in live-snapshot mode and on the upload screen too.
-import { el, toast } from './components.js?v=v2026-07-22.8';
-import { todayISO } from '../i18n/ar.js?v=v2026-07-22.8';
-import { getXLSX } from '../vendor-loader.js?v=v2026-07-22.8';
-import { buildLateLabWorkbooks } from '../export/late-labs.js?v=v2026-07-22.8';
-import { parseDateTime } from '../engine/workday.js?v=v2026-07-22.8';
+import { el, toast } from './components.js?v=v2026-07-22.9';
+import { todayISO } from '../i18n/ar.js?v=v2026-07-22.9';
+import { buildLateLabWorkbooks } from '../export/late-labs.js?v=v2026-07-22.9';
+import { parseDateTime } from '../engine/workday.js?v=v2026-07-22.9';
 
 // English email template the team pastes when notifying a lab — verbatim wording.
 function labEmailText(lab) {
@@ -80,11 +79,9 @@ export async function buildLateLabsSection({ rows, tatTests, reportDate, asOfMs 
 
   if (!orderRows || !orderRows.length || ms == null) return emptyCard('لا توجد فحوصات متأخرة أو مستحقة خلال 24 ساعة ✅');
 
-  let XLSX;
   let wbs = [];
   try {
-    XLSX = await getXLSX();
-    wbs = buildLateLabWorkbooks({ rows: orderRows, tatTests: tests, asOfMs: ms, XLSX });
+    wbs = buildLateLabWorkbooks({ rows: orderRows, tatTests: tests, asOfMs: ms });
   } catch (e) {
     console.warn('[late-labs] build failed', e);
     return emptyCard('تعذّر إنشاء ملفات المختبرات.');
@@ -93,8 +90,7 @@ export async function buildLateLabsSection({ rows, tatTests, reportDate, asOfMs 
 
   const SHEET_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
   const downloadOne = (w) => {
-    const buf = XLSX.write(w.wb, { type: 'array', bookType: 'xlsx' });
-    triggerDownload(new Blob([buf], { type: SHEET_MIME }), w.fileName);
+    triggerDownload(new Blob([w.xlsxBytes], { type: SHEET_MIME }), w.fileName);
   };
 
   const labRows = wbs.map((w) => el('div', { class: 'dl-link', style: 'flex-wrap:wrap;gap:8px' }, [
