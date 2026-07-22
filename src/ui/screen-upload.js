@@ -1,9 +1,9 @@
 // ui/screen-upload.js — file upload + parse + engine kickoff (Track E).
-import { STR, todayISO, formatDateAr } from '../i18n/ar.js';
-import { el, dropZone, fileSummaryCard, toast } from './components.js';
-import { normTest } from '../contracts.js';
-import { getPapa, getXLSX } from '../vendor-loader.js';
-import { TAT_LOINC } from '../seeds/tat-lookup.js';
+import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-07-22.7';
+import { el, dropZone, fileSummaryCard, toast } from './components.js?v=v2026-07-22.7';
+import { normTest } from '../contracts.js?v=v2026-07-22.7';
+import { getPapa, getXLSX } from '../vendor-loader.js?v=v2026-07-22.7';
+import { TAT_LOINC } from '../seeds/tat-lookup.js?v=v2026-07-22.7';
 
 /** Format an ISO timestamp as local 'HH:MM' for snapshot-freshness labels. */
 function fmtHHMM(iso) {
@@ -199,7 +199,7 @@ function normalizeTracker(res) {
 
 async function ingestCsv(file) {
   const Papa = await getPapa();
-  const mod = await tryImport('../ingest/csv.js');
+  const mod = await tryImport('../ingest/csv.js?v=v2026-07-22.7');
   const fn = pickFn(mod, ['parseKamcCsv', 'parseCsv', 'ingestCsv', 'parseOrders', 'parse']);
   if (fn) {
     const text = await file.text();
@@ -212,7 +212,7 @@ async function ingestCsv(file) {
 
 async function ingestTracker(file) {
   const XLSX = await getXLSX();
-  const mod = await tryImport('../ingest/xlsx.js');
+  const mod = await tryImport('../ingest/xlsx.js?v=v2026-07-22.7');
   const fn = pickFn(mod, ['parseTracker', 'ingestXlsx', 'parseXlsx', 'parse']);
   if (fn) {
     const buf = await file.arrayBuffer();
@@ -380,7 +380,7 @@ export async function render(container, ctx) {
     const gcfg = (store.settings && store.settings.grafana) || {};
     const dataKey = (gcfg.dataKey || '').trim();
     try {
-      const mod = await import('../ingest/grafana.js');
+      const mod = await import('../ingest/grafana.js?v=v2026-07-22.7');
       const asOf = state.reportDate || todayISO();
       const directConfigured = !!(gcfg.baseUrl && gcfg.accessToken);
       try {
@@ -636,7 +636,7 @@ export async function render(container, ctx) {
     const seq = ++unmatchedSeq;
     let mod;
     try {
-      mod = await import('../ingest/tat-suggest.js');
+      mod = await import('../ingest/tat-suggest.js?v=v2026-07-22.7');
     } catch { return; } // module not present yet — keep the plain panel behavior
     if (seq !== unmatchedSeq) return; // a newer paint superseded this run
     const fn = pickFn(mod, ['suggestTats']);
@@ -782,7 +782,7 @@ export async function render(container, ctx) {
     if (!orders || !orders.length) { heroHost.innerHTML = ''; return; }
     let out;
     try {
-      const mod = await import('../engine/engine.js');
+      const mod = await import('../engine/engine.js?v=v2026-07-22.7');
       if (seq !== heroSeq) return; // a newer run superseded this one
       const compute = pickFn(mod, ['compute', 'runEngine', 'run']);
       if (typeof compute !== 'function') { heroHost.innerHTML = ''; return; }
@@ -807,7 +807,7 @@ export async function render(container, ctx) {
       let out = (state.engineOutput && state.engineOutput.totals) ? state.engineOutput : null;
       if (!out) {
         try {
-          const mod = await tryImport('../engine/engine.js');
+          const mod = await tryImport('../engine/engine.js?v=v2026-07-22.7');
           const compute = pickFn(mod, ['compute', 'runEngine', 'run']);
           if (compute) {
             out = compute(state.parsed.orders, (store.settings || {}).tatLookup, engineOpts());

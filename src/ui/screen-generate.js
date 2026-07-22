@@ -1,13 +1,13 @@
 // ui/screen-generate.js — build both variants, produce 4 files, trigger downloads (Track E).
-import { STR, todayISO, buildFileName, formatDateAr } from '../i18n/ar.js';
-import { el, progressBar, toast } from './components.js';
-import { VARIANTS } from '../contracts.js';
-import { getGenLibs, getXLSX } from '../vendor-loader.js';
-import { resetRunData } from '../state.js';
-import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js';
-import { autoDraft } from '../model/drafts.js';
-import { buildLateLabWorkbooks } from '../export/late-labs.js';
-import { parseDateTime } from '../engine/workday.js';
+import { STR, todayISO, buildFileName, formatDateAr } from '../i18n/ar.js?v=v2026-07-22.7';
+import { el, progressBar, toast } from './components.js?v=v2026-07-22.7';
+import { VARIANTS } from '../contracts.js?v=v2026-07-22.7';
+import { getGenLibs, getXLSX } from '../vendor-loader.js?v=v2026-07-22.7';
+import { resetRunData } from '../state.js?v=v2026-07-22.7';
+import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-07-22.7';
+import { autoDraft } from '../model/drafts.js?v=v2026-07-22.7';
+import { buildLateLabWorkbooks } from '../export/late-labs.js?v=v2026-07-22.7';
+import { parseDateTime } from '../engine/workday.js?v=v2026-07-22.7';
 
 async function tryImport(path) { try { return await import(path); } catch { return null; } }
 function pickFn(mod, names) {
@@ -86,7 +86,7 @@ function fallbackModel(state, store) {
 // Build the SlideSpec per VARIANT — the variant changes slide-5 content
 // (task rows), so one shared spec would leak internal tasks into NUPCO files.
 async function buildVariantSpec(model, variant) {
-  const mod = await tryImport('../slidespec/build-spec.js');
+  const mod = await tryImport('../slidespec/build-spec.js?v=v2026-07-22.7');
   const fn = pickFn(mod, ['buildSpec', 'build', 'makeSpec', 'toSpec']);
   if (!fn) return null;
   let spec = fn(model, { variant });
@@ -112,7 +112,7 @@ async function toBlob(result, kind) {
 // renderPptx(spec, {variant, PptxGenJS}) -> Promise<Blob>
 async function makePptx(spec, variant, libs) {
   if (!spec) return null;
-  const mod = await tryImport('../render/pptx-renderer.js');
+  const mod = await tryImport('../render/pptx-renderer.js?v=v2026-07-22.7');
   const fn = pickFn(mod, ['renderPptx', 'buildPptx', 'toPptx', 'makePptx', 'render']);
   if (!fn) return null;
   const r = await fn(spec, { variant, PptxGenJS: libs.PptxGenJS });
@@ -166,9 +166,9 @@ function makeThumbStrip() {
 // renderSlides(spec, {variant}) -> fragment of .sl-slide; exportPdf(slideEls, {jsPDF, html2canvas, onProgress})
 async function makePdf(spec, variant, libs, host, onProgress, thumbs) {
   if (!spec) return null;
-  const rMod = await tryImport('../render/html-renderer.js');
+  const rMod = await tryImport('../render/html-renderer.js?v=v2026-07-22.7');
   const renderSlides = pickFn(rMod, ['renderSlides', 'renderSpec', 'renderHtml', 'render']);
-  const pMod = await tryImport('../render/pdf-export.js');
+  const pMod = await tryImport('../render/pdf-export.js?v=v2026-07-22.7');
   const exportPdf = pickFn(pMod, ['exportPdf', 'renderPdf', 'toPdf', 'buildPdf', 'render']);
   if (!renderSlides || !exportPdf) return null;
   host.innerHTML = '';
@@ -313,8 +313,8 @@ async function buildLateLabsSection(model, state, store) {
     el('div', { style: 'display:flex;flex-direction:column;gap:2px;min-width:0;flex:1' }, [
       el('span', { dir: 'ltr', style: 'font-weight:600;overflow-wrap:anywhere', text: w.lab }),
       el('span', { class: 'small muted' }, [
-        'متأخر: ', el('span', { dir: 'ltr', text: String(w.late) }),
-        ' • مستحق ≤24س: ', el('span', { dir: 'ltr', text: String(w.dueSoon) }),
+        'فحص متأخر: ', el('span', { dir: 'ltr', text: String(w.late) }),
+        ' • مستحق خلال ٢٤ ساعة: ', el('span', { dir: 'ltr', text: String(w.dueSoon) }),
       ]),
     ]),
     el('div', { style: 'display:flex;gap:6px;flex-shrink:0' }, [
@@ -329,7 +329,11 @@ async function buildLateLabsSection(model, state, store) {
     ]),
   ]));
 
-  const children = [el('div', { class: 'card__title', text: title }), ...labRows];
+  const children = [
+    el('div', { class: 'card__title', text: title }),
+    el('p', { class: 'small muted', style: 'margin:0 0 4px', text: 'الأعداد بعدد الفحوصات (سطور الطلبات) وليس بعدد الطلبات.' }),
+    ...labRows,
+  ];
   if (wbs.length > 1) {
     children.push(el('button', {
       class: 'btn btn--primary btn--block', style: 'margin-top:10px', text: 'تنزيل الكل',

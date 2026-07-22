@@ -17,10 +17,13 @@
 //   • Late Risk (next 24h) = '⚠ DUE ≤24H' when NOT late and −1 ≤ delay ≤ 0; else ''.
 //   • A row is INCLUDED when Late OR flagged due-soon; a lab gets a file only if
 //     it has ≥1 included row.
-import { buildTatIndex, resolveTat } from '../engine/tat.js';
+//   • GRAIN = per test LINE (order line): counts (late/dueSoon) and data rows are
+//     NEVER deduplicated by order — one order with 3 qualifying tests contributes
+//     3 rows and counts as 3, not 1.
+import { buildTatIndex, resolveTat } from '../engine/tat.js?v=v2026-07-22.7';
 import {
   parseDateTime, toEpochDay, workday, dayDiff,
-} from '../engine/workday.js';
+} from '../engine/workday.js?v=v2026-07-22.7';
 
 /** The 20 export columns, VERBATIM (keep the 'Lonic code' typo — established format). */
 export const LATE_LAB_HEADERS = Object.freeze([

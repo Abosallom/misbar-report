@@ -1,7 +1,7 @@
 // src/render/pptx-renderer.js
 // renderPptx(spec, {variant, PptxGenJS}) -> Blob (.pptx). Maps SlideSpec elements 1:1 to
 // PptxGenJS on a 13.333 x 7.5 in wide layout. internalOnly slides are dropped for 'nupco'.
-import { COLORS as C } from '../theme.js';
+import { COLORS as C } from '../theme.js?v=v2026-07-22.7';
 
 const hex = (c) => (c ? String(c).replace('#', '') : c);
 const isArabic = (s) => /[؀-ۿ]/.test(String(s));

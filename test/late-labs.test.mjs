@@ -67,6 +67,47 @@ function independentInclude(rows) {
 const usedRange = (ws) => XLSX.utils.decode_range(ws['!ref']);
 const cellAt = (ws, r, c) => ws[XLSX.utils.encode_cell({ r, c })];
 
+// Synthetic OrderRow builder — only the fields the export reads; the rest default
+// to null. Matches the OrderRow shape in src/contracts.js. Empty tatTests → the
+// export resolves StdTAT from tatDaysCsv (the CSV "TAT - Days" fallback).
+const orderRow = (o) => ({
+  orderDate: '2026-06-01', facility: 'Synthetic Lab',
+  orderId: null, lineNo: null, loinc: null, testName: null,
+  collected: null, dispatched: null, received: null, resulted: null,
+  rawStatus: 'Received', tatDaysCsv: null,
+  specimenNo: null, shipmentId: null, orderingFacilityId: null, performingFacilityId: null,
+  ...o,
+});
+
+test('counts are per TEST line, not per order', () => {
+  const rows = [
+    // ONE order (000501) with THREE test lines — all LATE: received long before
+    // asOf with a 1-business-day StdTAT ⇒ delay ≫ 0 for each line.
+    orderRow({ orderId: '000501', lineNo: 1, testName: 'ALPHA TEST', received: '2026-06-01 08:00:00', tatDaysCsv: 1 }),
+    orderRow({ orderId: '000501', lineNo: 2, testName: 'BETA TEST',  received: '2026-06-01 09:00:00', tatDaysCsv: 1 }),
+    orderRow({ orderId: '000501', lineNo: 3, testName: 'GAMMA TEST', received: '2026-06-01 10:00:00', tatDaysCsv: 1 }),
+    // A DIFFERENT order with a single DUE-SOON line — due on asOf day (delay 0).
+    orderRow({ orderId: '000777', lineNo: 1, testName: 'DELTA TEST', received: '2026-07-09 09:00:00', tatDaysCsv: 0 }),
+  ];
+
+  const wbs = buildLateLabWorkbooks({ rows, tatTests: {}, asOfMs, XLSX });
+  assert.equal(wbs.length, 1, 'all rows share one facility ⇒ a single workbook');
+  const w = wbs[0];
+  assert.equal(w.lab, 'Synthetic Lab');
+  assert.equal(w.late, 3, 'three LATE test LINES counted (order not collapsed to 1)');
+  assert.equal(w.dueSoon, 1, 'one due-soon test line');
+
+  const ws = w.wb.Sheets[w.sheetName];
+  const rng = usedRange(ws);
+  assert.equal(rng.e.r - rng.s.r, 4, 'four data rows = 3 late + 1 due-soon (per LINE, order never deduped)');
+
+  // Order ID column (col 4): the SAME order (000501 → 501) appears on THREE rows.
+  const orderIds = [];
+  for (let r = rng.s.r + 1; r <= rng.e.r; r++) orderIds.push(cellAt(ws, r, 4)?.v);
+  assert.equal(orderIds.filter((v) => v === 501).length, 3, 'one order contributes three rows');
+  assert.equal(orderIds.filter((v) => v === 777).length, 1, 'the other order contributes one row');
+});
+
 test('per-lab counts + which labs qualify (deterministic, CSV-fallback TAT)', { skip: SKIP }, () => {
   const wbs = buildLateLabWorkbooks({ rows: load(), tatTests: {}, asOfMs, XLSX });
   const byLab = Object.fromEntries(wbs.map((w) => [w.lab, { late: w.late, dueSoon: w.dueSoon }]));
