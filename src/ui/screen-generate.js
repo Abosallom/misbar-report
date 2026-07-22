@@ -1,5 +1,5 @@
 // ui/screen-generate.js — build both variants, produce 4 files, trigger downloads (Track E).
-import { STR, todayISO, buildFileName } from '../i18n/ar.js';
+import { STR, todayISO, buildFileName, formatDateAr } from '../i18n/ar.js';
 import { el, progressBar, toast } from './components.js';
 import { VARIANTS } from '../contracts.js';
 import { getGenLibs } from '../vendor-loader.js';
@@ -105,8 +105,52 @@ async function makePptx(spec, variant, libs) {
   return toBlob(r, 'pptx');
 }
 
+// Live slide thumbnails — during PDF capture the full-size slides already exist in
+// the offscreen .render-host. We clone each into a cheap ~160x90 scaled-down live
+// preview (CSS transform, pointer-events none) so the user WATCHES the report being
+// assembled. Cloned once per variant render (not per progress tick).
+function makeThumbStrip() {
+  const strip = el('div', { class: 'gen-thumbs', 'aria-hidden': 'true' }); // decorative live preview
+  strip.style.cssText = 'display:none;gap:8px;overflow-x:auto;overflow-y:hidden;margin-top:14px;padding:4px 2px 8px;-webkit-overflow-scrolling:touch';
+  let wraps = [];
+  const SCALE = 160 / 1280; // 0.125 -> 160x90 from a 1280x720 (.sl-slide) preview
+  const paint = (w, state) => {
+    if (state === 'done') { w.style.opacity = '1'; w.style.borderColor = 'var(--green)'; w.style.boxShadow = 'none'; }
+    else if (state === 'active') { w.style.opacity = '1'; w.style.borderColor = 'var(--blue)'; w.style.boxShadow = '0 0 0 3px rgba(37,99,235,.28)'; }
+    else { w.style.opacity = '.5'; w.style.borderColor = 'var(--border)'; w.style.boxShadow = 'none'; }
+  };
+  const api = {
+    el: strip,
+    // Clear + redraw for the current variant's freshly-rendered slides.
+    load(slideEls) {
+      strip.innerHTML = '';
+      wraps = [];
+      slideEls.forEach((sl) => {
+        const clone = sl.cloneNode(true);
+        clone.style.transform = `scale(${SCALE})`;
+        clone.style.transformOrigin = 'top left';
+        clone.style.pointerEvents = 'none';
+        clone.style.margin = '0';
+        const wrap = el('div', { class: 'gen-thumb' });
+        wrap.style.cssText = 'flex:0 0 auto;width:160px;height:90px;overflow:hidden;border-radius:6px;border:2px solid var(--border);background:#fff;pointer-events:none;transition:border-color .2s,box-shadow .2s,opacity .2s';
+        wrap.appendChild(clone);
+        strip.appendChild(wrap);
+        wraps.push(wrap);
+      });
+      strip.style.display = wraps.length ? 'flex' : 'none';
+      api.highlight(0, wraps.length); // slide 0 captures first — mark it active up front
+    },
+    // onProgress(done,total) fires AFTER capturing slide index done-1, so slides
+    // 0..done-1 are captured and index `done` is the one currently being captured.
+    highlight(done, total) {
+      wraps.forEach((w, idx) => paint(w, idx < done ? 'done' : (idx === done && done < total ? 'active' : 'idle')));
+    },
+  };
+  return api;
+}
+
 // renderSlides(spec, {variant}) -> fragment of .sl-slide; exportPdf(slideEls, {jsPDF, html2canvas, onProgress})
-async function makePdf(spec, variant, libs, host, onProgress) {
+async function makePdf(spec, variant, libs, host, onProgress, thumbs) {
   if (!spec) return null;
   const rMod = await tryImport('../render/html-renderer.js');
   const renderSlides = pickFn(rMod, ['renderSlides', 'renderSpec', 'renderHtml', 'render']);
@@ -117,9 +161,70 @@ async function makePdf(spec, variant, libs, host, onProgress) {
   const frag = renderSlides(spec, { variant });
   if (frag instanceof Node) host.appendChild(frag);
   const slideEls = Array.from(host.querySelectorAll('.sl-slide'));
-  const r = await exportPdf(slideEls, { jsPDF: libs.jsPDF, html2canvas: libs.html2canvas, onProgress });
+  if (thumbs) thumbs.load(slideEls); // clone once per variant, before capture starts
+  const onTick = thumbs
+    ? (done, tot) => { thumbs.highlight(done, tot); if (onProgress) onProgress(done, tot); }
+    : onProgress;
+  const r = await exportPdf(slideEls, { jsPDF: libs.jsPDF, html2canvas: libs.html2canvas, onProgress: onTick });
   host.innerHTML = '';
   return toBlob(r, 'pdf');
+}
+
+// Share-ready summary card shown after success. Numbers mirror build-spec's
+// valueOf: override wins when finite, else the computed KPI value.
+function buildShareCard(model, date, fileCount) {
+  const V = (key, computed) => (Number.isFinite(model.overrides && model.overrides[key]) ? model.overrides[key] : computed);
+  const k = model.kpi || {};
+  const b = k.buckets || {};
+  const num = (v) => (Number.isFinite(v) ? v : 0);
+  const total = num(V('total', k.totals && k.totals.total));
+  const completed = num(V('completed', b.completed));
+  const awaiting = num(V('awaitingResults', b.awaitingResults));
+  const late = num(V('lateNoResult', b.lateNoResult));
+  const rejected = num(V('rejected', b.rejected));
+  const cancelled = num(V('cancelledNote', k.cancelledNote));
+  const pct = total ? Math.round((completed / total) * 100) : 0;
+  const text =
+    `تقرير مسبار اليومي — ${formatDateAr(date) || date}\n` +
+    `• إجمالي الطلبات: ${total}\n` +
+    `• نتائج مكتملة: ${completed} (${pct}%)\n` +
+    `• بانتظار النتائج: ${awaiting}\n` +
+    `• متأخرة: ${late}\n` +
+    `• مرفوضة: ${rejected}\n` +
+    `• ملغاة: ${cancelled}\n` +
+    `الملفات: ${fileCount} (نسختا PPTX و PDF داخلية ونوبكو)`;
+
+  const ta = el('textarea', {
+    dir: 'rtl', readOnly: true, rows: 6, value: text,
+    style: 'width:100%;box-sizing:border-box;resize:vertical;font-family:inherit;font-size:.9rem;line-height:1.8;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-light);color:var(--slate-500)',
+  });
+
+  const copyBtn = el('button', {
+    class: 'btn btn--ghost btn--block', style: 'margin-top:8px', text: 'نسخ الملخص',
+    // Runs synchronously inside the tap so the fallback path keeps user activation.
+    onClick: async () => {
+      const fallback = () => {
+        try {
+          ta.focus(); ta.select();
+          const ok = document.execCommand('copy');
+          ta.setSelectionRange(0, 0); ta.blur();
+          return ok;
+        } catch { return false; }
+      };
+      let ok = false;
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) { await navigator.clipboard.writeText(text); ok = true; }
+        else ok = fallback();
+      } catch { ok = fallback(); }
+      if (ok) toast('تم النسخ', 'ok');
+    },
+  });
+
+  return el('div', { style: 'margin-top:16px;text-align:right;width:100%' }, [
+    el('div', { style: 'font-weight:700;font-size:.95rem;margin-bottom:8px;color:var(--navy)', text: 'ملخص جاهز للمشاركة' }),
+    ta,
+    copyBtn,
+  ]);
 }
 
 function triggerDownload(blob, name) {
@@ -156,6 +261,7 @@ export async function render(container, ctx) {
   }));
 
   const bar = progressBar();
+  const thumbs = makeThumbStrip(); // live scaled-down previews of slides during PDF capture
   const resultHost = el('div');
   const host = el('div', { class: 'render-host' }); // full-size, offscreen, for html2canvas capture
 
@@ -169,7 +275,7 @@ export async function render(container, ctx) {
 
   container.appendChild(el('div', { class: 'screen' }, [
     head,
-    el('div', { class: 'card' }, [bar.el, fileList]),
+    el('div', { class: 'card' }, [bar.el, fileList, thumbs.el]),
     resultHost,
     host,
   ]));
@@ -205,7 +311,7 @@ export async function render(container, ctx) {
           : makePdf(spec, f.variant, libs, host, (done, tot) => {
             const frac = tot ? done / tot : 0;
             bar.set(base + frac * (100 / total), `${f.label} — ${STR.generate.capturing} ${done}/${tot || '?'}`);
-          });
+          }, thumbs);
         // Generous ceilings: background-tab setTimeout throttling can stretch
         // JSZip/canvas work from seconds to minutes; only a true hang should trip this.
         blob = await withTimeout(job, 300000, f.id);
@@ -293,9 +399,14 @@ export async function render(container, ctx) {
           el('span', { class: 'small', text: '⬇ ' + STR.generate.downloadAgain }),
         ]))),
     ]));
+    // Share-ready summary — a copy/paste-friendly Arabic message built from the
+    // FINAL (override-aware) numbers, read exactly the way build-spec does: the
+    // manual override wins when finite, else the computed KPI value.
+    const panel = resultHost.querySelector('.success-panel');
+    if (panel) panel.appendChild(buildShareCard(model, date, produced.length));
+
     // Bring the success panel above the sticky action bar — the moment of success
     // must not render half-hidden behind it.
-    const panel = resultHost.querySelector('.success-panel');
     if (panel && typeof panel.scrollIntoView === 'function') {
       panel.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }

@@ -106,6 +106,94 @@ input, select, textarea { font-family: inherit; font-size: 1rem; }
 .navbtn:hover { background: rgba(255, 255, 255, .12); opacity: 1; }
 .navbtn[aria-current="page"] { background: rgba(255, 255, 255, .18); opacity: 1; }
 
+/* Build-version chip — pinned to the end (leftmost in RTL) of the app bar so the
+   running build is always visible; muted so it never competes with the nav. */
+.appbar__version {
+  flex: none;
+  align-self: center;
+  font-size: .68rem;
+  font-weight: 600;
+  letter-spacing: .02em;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 999px;
+  color: rgba(255, 255, 255, .72);
+  background: rgba(255, 255, 255, .1);
+  border: 1px solid rgba(255, 255, 255, .16);
+  white-space: nowrap;
+  cursor: default;
+}
+
+/* ---------- Journey step-bar ---------- */
+.journey-wrap {
+  background: var(--white);
+  border-bottom: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  padding: 12px 14px;
+}
+.journey-wrap[hidden] { display: none; }
+.journey {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+.journey-step {
+  appearance: none;
+  font-family: inherit;
+  flex: 0 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px 6px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: transparent;
+  font-size: .9rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.journey-marker {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  font-size: .82rem;
+  font-weight: 800;
+  border: 2px solid currentColor;
+}
+.journey-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.journey-label--short { display: none; }
+
+/* Upcoming — muted outline */
+.journey-step.is-upcoming { color: var(--slate-500); }
+.journey-step.is-upcoming .journey-marker { border-color: var(--border-dark); color: var(--slate-500); }
+
+/* Current — filled navy pill, white text */
+.journey-step.is-current { background: var(--navy); color: var(--white); }
+.journey-step.is-current .journey-marker { border-color: rgba(255, 255, 255, .7); color: var(--white); }
+
+/* Completed — green, clickable (button) */
+.journey-step.is-done { color: var(--green); cursor: pointer; }
+.journey-step.is-done .journey-marker { border-color: var(--green); background: var(--green); color: var(--white); }
+.journey-step.is-done:hover { background: #f0fdf4; border-color: #bbf7d0; }
+.journey-step.is-done:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+
+/* Connector line between steps; green once traversed */
+.journey-line {
+  flex: 1 1 auto;
+  height: 3px;
+  min-width: 8px;
+  border-radius: 999px;
+  background: var(--border-dark);
+}
+.journey-line.is-done { background: var(--green); }
+
 /* Storage-warning slot */
 .storage-warn {
   background: #FFF7ED;
@@ -123,7 +211,11 @@ input, select, textarea { font-family: inherit; font-size: 1rem; }
   margin: 0 auto;
   padding: 16px 14px 48px;
 }
-.screen { animation: fade .18s ease; }
+/* Gentle fade-in on each screen mount (~180ms). #app is re-populated on every
+   navigation, so its direct child animates fresh each time. */
+@media (prefers-reduced-motion: no-preference) {
+  #app > * { animation: fade .18s ease both; }
+}
 @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 
 .screen__head { margin-bottom: 16px; }
@@ -449,8 +541,20 @@ input, select, textarea { font-family: inherit; font-size: 1rem; }
   /* RTL: controls first = right column, preview = left/main. Source order handles it. */
 }
 
+/* Compact journey: numbers + short labels so three steps never overflow small
+   screens (verified clean at 375px). */
+@media (max-width: 600px) {
+  .journey-label--full { display: none; }
+  .journey-label--short { display: inline; }
+  .journey-step { font-size: .82rem; font-weight: 600; padding: 5px 9px 5px 6px; gap: 5px; }
+  .journey-marker { width: 23px; height: 23px; font-size: .76rem; }
+  .journey-wrap { padding: 10px 12px; }
+  .journey { gap: 5px; }
+}
+
 @media (max-width: 420px) {
   .summary { grid-template-columns: 1fr; }
   .kpi-list { grid-template-columns: 1fr; }
   .appbar__title { font-size: .92rem; }
+  .appbar__version { font-size: .62rem; padding: 3px 6px; }
 }

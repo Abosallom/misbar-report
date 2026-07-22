@@ -84,6 +84,37 @@ const chipStyle = (on) => 'border-radius:999px;padding:6px 14px;font-weight:700;
     ? 'background:var(--navy);color:#fff;border:1px solid var(--navy);'
     : 'background:var(--white);color:var(--slate-500);border:1px solid var(--border-dark);text-decoration:line-through;opacity:.75;');
 
+/* 'ما الجديد' banner — delta keys → Arabic '+N' chip label + colour intent. Keys
+ * mirror EngineOutput.deltas; labels are tuned for the '+N {label}' phrasing.
+ * Order = display order (headline & concerns first, flow counts last). */
+const DELTA_META = [
+  { key: 'completed', label: 'نتائج مكتملة', intent: 'good' },
+  { key: 'total', label: 'طلبات جديدة', intent: 'info' },
+  { key: 'rejected', label: 'مرفوضة', intent: 'bad' },
+  { key: 'lateNoResult', label: 'متأخرة', intent: 'bad' },
+  { key: 'awaitingResults', label: 'بانتظار النتائج', intent: 'wait' },
+  { key: 'awaitingDispatch', label: 'بانتظار الإرسال', intent: 'wait' },
+  { key: 'shippedNotReceived', label: 'أُرسلت ولم تُستلم', intent: 'wait' },
+  { key: 'collected', label: 'تم سحبها', intent: 'info' },
+  { key: 'dispatched', label: 'تم إرسالها', intent: 'info' },
+  { key: 'received', label: 'تم استلامها', intent: 'info' },
+];
+const DELTA_CHIP_TONE = {
+  good: 'background:#DCFCE7;color:#166534;border:1px solid rgba(22,163,74,.35)',
+  bad: 'background:#FEE2E2;color:#991B1B;border:1px solid rgba(220,38,38,.35)',
+  wait: 'background:#FEF3C7;color:#92400E;border:1px solid rgba(245,158,11,.45)',
+  info: 'background:#E0E7FF;color:#1E3A8A;border:1px solid rgba(30,58,138,.30)',
+};
+const DELTA_CHIP_BASE = 'display:inline-flex;align-items:center;gap:4px;border-radius:999px;padding:6px 13px;font-weight:800;font-size:.82rem;line-height:1.3;white-space:nowrap';
+
+/* Slide-pager (preview) chrome. */
+const PAGER_BAR_STYLE = 'display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap';
+const PAGER_ARROW_STYLE = 'min-width:40px;height:40px;flex:0 0 auto;border:1px solid var(--border-dark);background:var(--white);color:var(--navy);border-radius:8px;font-size:1.1rem;line-height:1;cursor:pointer;display:inline-flex;align-items:center;justify-content:center';
+const PAGER_COUNT_STYLE = 'font-weight:700;color:var(--slate-600);font-size:.85rem;white-space:nowrap';
+const pagerDotStyle = (on) => 'min-width:30px;height:30px;flex:0 0 auto;border-radius:6px;font-size:.78rem;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;'
+  + (on ? 'background:var(--navy);color:#fff;border:1px solid var(--navy)'
+        : 'background:var(--white);color:var(--slate-600);border:1px solid var(--border-dark)');
+
 /* Assemble an editable ReportModel from engineOutput + tracker + settings. */
 function buildDraftReportModel(state, store) {
   const kpi = state.engineOutput || buildMockEngineOutput(store.settings);
@@ -143,12 +174,19 @@ export async function render(container, ctx) {
 
   /* ---------- Preview machinery ---------- */
   const scaleEl = el('div', { class: 'preview-scale' });
-  const viewport = el('div', { class: 'preview-viewport', style: 'position:relative;overflow:hidden' }, [scaleEl]);
+  // A one-slide-tall scroll window: the full slide stack scrolls inside it and the
+  // pager pages between slides (see applyScale + the slide-pager block below).
+  const viewport = el('div', { class: 'preview-viewport', style: 'position:relative;overflow-y:auto;overflow-x:hidden' }, [scaleEl]);
   const previewHead = el('div', { class: 'preview-frame__head' }, [
     el('div', { class: 'card__title', style: 'margin:0', text: STR.review.previewTitle }),
     el('span', { class: 'small muted', text: STR.review.variantsNote }),
   ]);
-  const previewFrame = el('div', { class: 'preview-frame' }, [previewHead, viewport]);
+  const pagerBar = el('div', { class: 'preview-pager', style: PAGER_BAR_STYLE });
+  const previewFrame = el('div', { class: 'preview-frame' }, [previewHead, pagerBar, viewport]);
+
+  // Pager state — mounted slides + the active index (shared with applyScale).
+  let slideEls = [];
+  let curSlide = 0;
 
   let renderToken = 0;
   function applyScale() {
@@ -157,11 +195,17 @@ export async function render(container, ctx) {
     scaleEl.style.transform = `scale(${scale})`;
     scaleEl.style.transformOrigin = 'top right';
     requestAnimationFrame(() => {
-      const h = scaleEl.scrollHeight * scale;
+      // Viewport = one scaled slide tall, so the pager moves one slide per step and
+      // the stack scrolls within. Fall back to the full scaled height when no slides
+      // are mounted (placeholder states).
+      const one = (slideEls[0] && slideEls[0].getBoundingClientRect().height) || 0;
+      const h = one > 0 ? one : scaleEl.scrollHeight * scale;
       // Guard: setting height retriggers the ResizeObserver — only write real changes
       // to break the resize feedback loop.
       if (h > 0 && Math.abs(h - (parseFloat(viewport.style.height) || 0)) > 1) {
         viewport.style.height = h + 'px';
+        // Keep the active slide aligned after a width/scale change.
+        if (slideEls.length) requestAnimationFrame(() => { viewport.scrollTop = slideTargetTop(curSlide); });
       }
     });
   }
@@ -178,6 +222,7 @@ export async function render(container, ctx) {
       scaleEl.innerHTML = '';
       viewport.style.height = 'auto';
       viewport.appendChild(el('div', { class: 'preview-placeholder', text: STR.review.previewMissing }));
+      syncPager();
       return;
     }
     let spec = null;
@@ -190,6 +235,7 @@ export async function render(container, ctx) {
     if (!Array.isArray(spec)) {
       scaleEl.innerHTML = '';
       viewport.appendChild(el('div', { class: 'preview-placeholder', text: STR.review.previewMissing }));
+      syncPager();
       return;
     }
     scaleEl.innerHTML = '';
@@ -204,10 +250,92 @@ export async function render(container, ctx) {
       scaleEl.appendChild(el('div', { class: 'preview-placeholder', text: STR.review.previewMissing }));
     }
     applyScale();
+    // Slides just (re)mounted — re-sync the pager (N may have changed via a toggle).
+    syncPager();
   }
 
   let debTimer = null;
   const schedulePreview = () => { clearTimeout(debTimer); debTimer = setTimeout(renderPreview, 260); };
+
+  /* ---------- Slide pager ---------- */
+  let dotEls = [];
+  let prevBtn = null, nextBtn = null, counterEl = null;
+  let pagerCount = -1;
+  let scrollRaf = 0;
+
+  const refreshSlideEls = () => { slideEls = Array.from(scaleEl.querySelectorAll('.sl-slide')); };
+
+  // scrollTop that pulls slide i to the top of the viewport (measured from the
+  // rendered — i.e. transformed/scaled — geometry, so it is scale-independent).
+  function slideTargetTop(i) {
+    const s = slideEls[i];
+    if (!s) return 0;
+    return viewport.scrollTop + (s.getBoundingClientRect().top - viewport.getBoundingClientRect().top);
+  }
+  function nearestIndex() {
+    if (!slideEls.length) return 0;
+    const vTop = viewport.getBoundingClientRect().top;
+    let best = 0, bestD = Infinity;
+    for (let i = 0; i < slideEls.length; i++) {
+      const d = Math.abs(slideEls[i].getBoundingClientRect().top - vTop);
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    return best;
+  }
+  function goTo(i) {
+    if (!slideEls.length) return;
+    curSlide = Math.max(0, Math.min(slideEls.length - 1, i));
+    // Direct scrollTop assignment — reliable everywhere (smooth-scroll is a silent
+    // no-op under some automated/reduced-motion Chromes). The resulting scroll event
+    // re-computes the same index, so it never fights this navigation.
+    viewport.scrollTop = slideTargetTop(curSlide);
+    paintPager();
+  }
+  function paintPager() {
+    const N = slideEls.length;
+    if (N <= 1) return;
+    if (counterEl) counterEl.textContent = `الشريحة ${curSlide + 1} من ${N}`;
+    if (prevBtn) { prevBtn.disabled = curSlide <= 0; prevBtn.style.opacity = curSlide <= 0 ? '.4' : '1'; }
+    if (nextBtn) { nextBtn.disabled = curSlide >= N - 1; nextBtn.style.opacity = curSlide >= N - 1 ? '.4' : '1'; }
+    dotEls.forEach((d, i) => { d.style.cssText = pagerDotStyle(i === curSlide); });
+  }
+  function buildPager() {
+    const N = slideEls.length;
+    pagerBar.innerHTML = '';
+    dotEls = []; prevBtn = nextBtn = counterEl = null;
+    pagerCount = N;
+    if (N <= 1) { pagerBar.style.display = 'none'; return; }
+    pagerBar.style.display = 'flex';
+    // RTL order: previous (lower index) sits on the right, next (higher) on the left.
+    prevBtn = el('button', { type: 'button', text: '▶', title: 'الشريحة السابقة', 'aria-label': 'الشريحة السابقة', style: PAGER_ARROW_STYLE, onClick: () => goTo(curSlide - 1) });
+    nextBtn = el('button', { type: 'button', text: '◀', title: 'الشريحة التالية', 'aria-label': 'الشريحة التالية', style: PAGER_ARROW_STYLE, onClick: () => goTo(curSlide + 1) });
+    counterEl = el('span', { style: PAGER_COUNT_STYLE });
+    const dots = el('div', { style: 'display:flex;flex-wrap:wrap;gap:6px;justify-content:center;flex:1 1 auto' });
+    for (let i = 0; i < N; i++) {
+      const d = el('button', { type: 'button', text: String(i + 1), title: `الشريحة ${i + 1}`, style: pagerDotStyle(false), onClick: () => goTo(i) });
+      dotEls.push(d); dots.appendChild(d);
+    }
+    pagerBar.append(prevBtn, counterEl, dots, nextBtn);
+    paintPager();
+  }
+  // Re-sync after slides (re)mount. Rebuild the bar only when N changed; otherwise
+  // just re-index against the current scroll position and repaint.
+  function syncPager() {
+    refreshSlideEls();
+    const N = slideEls.length;
+    if (!N) { pagerBar.style.display = 'none'; pagerCount = 0; return; }
+    curSlide = Math.min(nearestIndex(), N - 1);
+    if (N !== pagerCount) buildPager(); else paintPager();
+  }
+  // Track the active slide when the operator scrolls the preview by hand.
+  viewport.addEventListener('scroll', () => {
+    if (scrollRaf) return;
+    scrollRaf = requestAnimationFrame(() => {
+      scrollRaf = 0;
+      const i = nearestIndex();
+      if (i !== curSlide) { curSlide = i; paintPager(); }
+    });
+  }, { passive: true });
 
   /* ---------- Controls ---------- */
   const dateInput = el('input', { type: 'date', value: state.reportDate });
@@ -437,10 +565,36 @@ export async function render(container, ctx) {
   });
   const generateBtn = el('div', { class: 'sticky-actions' }, [genButton]);
 
-  // Daily-edited items first (date → support → tasks → challenges/risks), then the
-  // advanced KPI-override and label-customisation cards, then the generate action.
+  // 'ما الجديد منذ التقرير السابق' banner — the first thing the operator sees.
+  // Reads the engine's deltas vs the previous-report snapshot: a coloured chip per
+  // delta>0, else a calm single line. Deltas are fixed for the run, so build once.
+  function buildDeltaBanner() {
+    const deltas = (kpi && kpi.deltas) || {};
+    const asOf = store.settings && store.settings.snapshot && store.settings.snapshot.asOf;
+    const asOfAr = formatDateAr(asOf) || (asOf ? String(asOf) : '');
+    const active = DELTA_META.filter((m) => Number(deltas[m.key]) > 0);
+    if (!active.length) {
+      const txt = asOfAr ? `لا تغييرات منذ التقرير السابق (${asOfAr})` : 'لا تغييرات منذ التقرير السابق';
+      return el('div', { class: 'card', style: 'padding:14px 16px;display:flex;align-items:center;gap:8px' }, [
+        el('span', { text: '✓', style: 'color:var(--green);font-weight:800;font-size:1.1rem' }),
+        el('span', { text: txt, style: 'color:var(--slate-600);font-weight:600;font-size:.92rem' }),
+      ]);
+    }
+    const chips = active.map((m) => el('span', {
+      style: DELTA_CHIP_BASE + ';' + (DELTA_CHIP_TONE[m.intent] || DELTA_CHIP_TONE.info),
+      text: `+${deltas[m.key]} ${m.label}`,
+    }));
+    return el('div', { class: 'card', style: 'padding:16px 18px;border-inline-start:4px solid var(--navy)' }, [
+      el('div', { style: 'font-weight:800;font-size:1.05rem;color:var(--navy);margin-bottom:3px', text: 'ما الجديد منذ التقرير السابق' }),
+      el('div', { class: 'small muted', style: 'margin-bottom:12px', text: asOfAr ? `مقارنة بتقرير ${asOfAr}` : 'مقارنة بالتقرير السابق' }),
+      el('div', { style: 'display:flex;flex-wrap:wrap;gap:8px' }, chips),
+    ]);
+  }
+
+  // Banner FIRST, then daily-edited items (date → support → tasks → challenges/risks),
+  // then the advanced KPI-override and label-customisation cards, then generate.
   const controls = el('div', { class: 'review-controls' }, [
-    dateField, panelsCard, tasksCurrentCard, tasksInternalCard, challengesCard, risksCard, kpiCard, labelsHost, generateBtn,
+    buildDeltaBanner(), dateField, panelsCard, tasksCurrentCard, tasksInternalCard, challengesCard, risksCard, kpiCard, labelsHost, generateBtn,
   ]);
   const preview = el('div', { class: 'review-preview' }, [slideToggleRow, previewFrame]);
 

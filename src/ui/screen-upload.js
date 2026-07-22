@@ -257,6 +257,7 @@ export async function render(container, ctx) {
   let usedMock = false;
   let fetchInFlight = false; // guards the auto-fetch + manual button against overlap
   let proceedBtn = null; // the sticky proceed button (rebuilt each paint)
+  let heroSeq = 0; // guards overlapping async hero runs — only the latest paints
   const errorsByKind = { csv: [], tracker: [] };
 
   const head = el('div', { class: 'screen__head' }, [
@@ -322,6 +323,7 @@ export async function render(container, ctx) {
   // a double-invoke if the user also clicks الجلب المباشر.
   if (grafanaReady && !state.parsed.orders && !fetchInFlight) fetchLive();
 
+  const heroHost = el('div'); // 'لمحة اليوم' hero strip (filled by paintHero once data lands)
   const summaryHost = el('div');
   const unmatchedHost = el('div');
   const actionsHost = el('div', { class: 'sticky-actions' });
@@ -333,7 +335,7 @@ export async function render(container, ctx) {
   ]) : null;
 
   container.appendChild(el('div', { class: 'screen' }, [
-    head, grafanaBar, dropgrid, devBar, summaryHost, unmatchedHost, actionsHost,
+    head, heroHost, grafanaBar, dropgrid, devBar, summaryHost, unmatchedHost, actionsHost,
   ]));
 
   // Reuse the last-parsed Project Tracker when no fresh file was dropped —
@@ -370,6 +372,7 @@ export async function render(container, ctx) {
           fromMs: mod.yearStartMs(asOf), toMs: Date.now(),
         });
         state.parsed.orders = res.rows;
+        state.heroDataAt = new Date().toISOString(); // freshness for 'لمحة اليوم'
         errorsByKind.csv = res.errors || [];
         state.files.csv = { name: `${STR.upload.grafanaSourceName} ${new Date().toLocaleString('en-GB')}` };
         csvZone.setLoaded(state.files.csv.name);
@@ -380,6 +383,7 @@ export async function render(container, ctx) {
         if (direct instanceof TypeError && dataKey) {
           const snap = await mod.fetchKamcSnapshot(dataKey);
           state.parsed.orders = snap.rows;
+          state.heroDataAt = snap.fetchedAt; // snapshot's real age, not load time
           errorsByKind.csv = snap.errors || [];
           const t = fmtHHMM(snap.fetchedAt);
           state.files.csv = { name: `${STR.upload.grafanaSnapshotName} ${t}`.trim() };
@@ -421,6 +425,7 @@ export async function render(container, ctx) {
           state.parsed.orders = res.orders;
           errorsByKind.csv = res.errors || [];
         }
+        state.heroDataAt = new Date().toISOString(); // orders (re)landed — refresh hero freshness
       } else {
         const res = await ingestTracker(file);
         if (res._missing || !res.tracker) {
@@ -479,6 +484,7 @@ export async function render(container, ctx) {
     usedMock = true;
     state.parsed.orders = buildMockOrders();
     state.parsed.tracker = buildMockTracker();
+    state.heroDataAt = new Date().toISOString();
     state.files.csv = state.files.csv || { name: 'mock-orders.csv' };
     state.files.tracker = state.files.tracker || { name: 'mock-tracker.xlsx' };
     csvZone.setLoaded(state.files.csv.name);
@@ -569,27 +575,132 @@ export async function render(container, ctx) {
     proceedBtn = btn;
     actionsHost.appendChild(btn);
     if (!both) actionsHost.appendChild(el('p', { class: 'small muted', style: 'text-align:center;margin-top:6px', text: STR.upload.proceedNeedBoth }));
+
+    // The moment orders exist, transform the top of the screen into a mini-dashboard.
+    paintHero();
+  }
+
+  /* ---------------------------------------------------------------- *
+   * 'لمحة اليوم' hero strip — a quick engine pass rendered as big stat
+   * tiles at the very top the instant order data lands (auto-fetch or
+   * CSV). Purely additive: if anything fails it renders nothing.
+   * ---------------------------------------------------------------- */
+
+  /** compute() opts shared by the hero run and متابعة — keep them identical so
+   *  runEngineAndGo can safely reuse the hero's cached engineOutput. */
+  function engineOpts() {
+    const s = store.settings || {};
+    return {
+      asOf: state.reportDate || todayISO(),
+      cancelledByMonth: (s.historicalConstants || {}).cancelledByMonth || {},
+      snapshot: s.snapshot,
+      excludeNoTat: !!(s.reportOptions && s.reportOptions.excludeNoTat),
+    };
+  }
+
+  /** Local 'آخر تحديث HH:MM' (prefix DD/MM when the snapshot is from another day). */
+  function fmtFresh(iso) {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    const now = new Date();
+    const sameDay = d.toDateString() === now.toDateString();
+    const datePart = sameDay ? '' : `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')} `;
+    return `آخر تحديث ${datePart}${fmtHHMM(iso)}`;
+  }
+
+  function heroTile({ label, value, accent, num, delta }) {
+    const valueRow = el('div', {
+      style: `font-size:28px;line-height:1.1;font-weight:800;color:${num};display:flex;align-items:baseline;gap:6px;flex-wrap:wrap`,
+    }, [
+      el('span', { text: String(value) }),
+      (typeof delta === 'number' && delta > 0) ? el('span', {
+        style: 'font-size:13px;font-weight:700;color:var(--delta-green);background:#E7F6EC;border-radius:999px;padding:1px 8px;white-space:nowrap;direction:ltr;unicode-bidi:isolate',
+        text: `+${delta}`,
+      }) : null,
+    ]);
+    return el('div', {
+      style: `background:var(--white);border:1px solid var(--border);border-right:4px solid ${accent};border-radius:10px;padding:12px 14px;box-shadow:var(--shadow);min-width:0`,
+    }, [
+      valueRow,
+      el('div', { style: 'font-size:.8rem;color:var(--slate-500);margin-top:5px;line-height:1.3', text: label }),
+    ]);
+  }
+
+  function renderHero(out) {
+    const b = out.buckets || {};
+    const totals = out.totals || {};
+    const deltas = out.deltas || {};
+    const total = totals.total || 0;
+    const completed = b.completed || 0;
+    const pct = total > 0 ? Math.round((completed / total) * 1000) / 10 : 0;
+
+    const tiles = [
+      { label: 'إجمالي الطلبات', value: total, accent: 'var(--navy)', num: 'var(--navy)' },
+      { label: 'نتائج مكتملة', value: completed, accent: 'var(--green)', num: '#15803D', delta: deltas.completed },
+      { label: 'بانتظار النتائج', value: b.awaitingResults || 0, accent: 'var(--amber)', num: '#B45309' },
+      { label: 'المتأخرة', value: b.lateNoResult || 0, accent: 'var(--red)', num: 'var(--red)' },
+      { label: 'المرفوضة', value: b.rejected || 0, accent: '#F87171', num: '#B91C1C' },
+      { label: 'نسبة الاكتمال', value: `${pct}%`, accent: 'var(--blue)', num: 'var(--blue)' },
+    ];
+
+    const header = el('div', {
+      style: 'display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;flex-wrap:wrap',
+    }, [
+      el('div', { style: 'font-size:1.05rem;font-weight:800;color:var(--navy);display:flex;align-items:center;gap:8px' }, [
+        el('span', { text: '📊' }),
+        el('span', { text: 'لمحة اليوم' }),
+      ]),
+      state.heroDataAt ? el('span', { style: 'font-size:.8rem;color:var(--slate-500);font-weight:600', text: fmtFresh(state.heroDataAt) }) : null,
+    ]);
+
+    const grid = el('div', {
+      style: 'display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(130px,1fr))',
+    }, tiles.map(heroTile));
+
+    heroHost.innerHTML = '';
+    heroHost.appendChild(el('div', { class: 'card', style: 'border-top:3px solid var(--navy)' }, [header, grid]));
+  }
+
+  async function paintHero() {
+    if (!heroHost) return;
+    const seq = ++heroSeq;
+    const orders = state.parsed.orders;
+    if (!orders || !orders.length) { heroHost.innerHTML = ''; return; }
+    let out;
+    try {
+      const mod = await import('../engine/engine.js');
+      if (seq !== heroSeq) return; // a newer run superseded this one
+      const compute = pickFn(mod, ['compute', 'runEngine', 'run']);
+      if (typeof compute !== 'function') { heroHost.innerHTML = ''; return; }
+      out = compute(orders, (store.settings || {}).tatLookup, engineOpts());
+      if (out && typeof out.then === 'function') out = await out;
+      if (seq !== heroSeq) return;
+    } catch (e) {
+      // Graceful by design: the hero is a bonus, never a failure surface.
+      if (seq === heroSeq) heroHost.innerHTML = '';
+      return;
+    }
+    if (!out || !out.totals || !out.buckets) { heroHost.innerHTML = ''; return; }
+    state.engineOutput = out; // cache so متابعة/المراجعة reuse the very same numbers
+    renderHero(out);
   }
 
   async function runEngineAndGo() {
     if (proceedBtn) proceedBtn.disabled = true; // guard: a second click must not launch a second run
     try {
       if (!state.reportDate) state.reportDate = todayISO();
-      let out = null;
-      try {
-        const mod = await tryImport('../engine/engine.js');
-        const compute = pickFn(mod, ['compute', 'runEngine', 'run']);
-        if (compute) {
-          const s = store.settings || {};
-          out = compute(state.parsed.orders, s.tatLookup, {
-            asOf: state.reportDate,
-            cancelledByMonth: (s.historicalConstants || {}).cancelledByMonth || {},
-            snapshot: s.snapshot,
-            excludeNoTat: !!(s.reportOptions && s.reportOptions.excludeNoTat),
-          });
-          if (out && typeof out.then === 'function') out = await out;
-        }
-      } catch (e) { console.warn('[upload] engine failed', e); }
+      // Reuse the hero's fresh computation (identical opts) instead of a second pass.
+      let out = (state.engineOutput && state.engineOutput.totals) ? state.engineOutput : null;
+      if (!out) {
+        try {
+          const mod = await tryImport('../engine/engine.js');
+          const compute = pickFn(mod, ['compute', 'runEngine', 'run']);
+          if (compute) {
+            out = compute(state.parsed.orders, (store.settings || {}).tatLookup, engineOpts());
+            if (out && typeof out.then === 'function') out = await out;
+          }
+        } catch (e) { console.warn('[upload] engine failed', e); }
+      }
 
       if (!out || !out.totals) {
         out = buildMockEngineOutput(store.settings);

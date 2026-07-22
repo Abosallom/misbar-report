@@ -1,6 +1,7 @@
 // main.js — boot, settings store, top app bar, and screen router (Track E).
 import { state } from './state.js';
 import { STR } from './i18n/ar.js';
+import { APP_VERSION } from './version.js';
 import { el, toast } from './ui/components.js';
 import { SETTINGS_KEY } from './contracts.js';
 import { TAT_LOOKUP } from './seeds/tat-lookup.js';
@@ -184,7 +185,58 @@ const SCREEN_MODULES = {
 let appEl = null;
 let navHome = null;
 let navSettings = null;
+let journeyEl = null;
 let ctx = null;
+
+/* The three-step user journey shown under the app bar on flow screens.
+ * Order matters — index derives current/completed/upcoming from state.screen. */
+const JOURNEY_STEPS = [
+  { id: 'upload', num: '١', full: 'رفع البيانات', short: 'رفع' },
+  { id: 'review', num: '٢', full: 'المراجعة والتحرير', short: 'مراجعة' },
+  { id: 'generate', num: '٣', full: 'توليد التقارير', short: 'توليد' },
+];
+
+/* Render/refresh the journey step-bar for the current screen. Settings (and any
+ * non-flow screen) hides the bar. Completed steps are clickable (navigate back). */
+function renderJourney() {
+  if (!journeyEl) return;
+  const idx = JOURNEY_STEPS.findIndex((s) => s.id === state.screen);
+  if (idx < 0) { journeyEl.hidden = true; journeyEl.innerHTML = ''; return; }
+  journeyEl.hidden = false;
+  journeyEl.innerHTML = '';
+
+  const row = el('div', { class: 'journey' });
+  JOURNEY_STEPS.forEach((step, i) => {
+    if (i > 0) {
+      // Connector segment is "done" once we have advanced into or past this step.
+      row.appendChild(el('div', { class: 'journey-line' + (i <= idx ? ' is-done' : ''), 'aria-hidden': 'true' }));
+    }
+    const done = i < idx;
+    const current = i === idx;
+    const stateCls = done ? ' is-done' : current ? ' is-current' : ' is-upcoming';
+    const kids = [
+      el('span', { class: 'journey-marker', 'aria-hidden': 'true', text: done ? '✓' : step.num }),
+      el('span', { class: 'journey-label journey-label--full', text: step.full }),
+      el('span', { class: 'journey-label journey-label--short', text: step.short }),
+    ];
+    if (done) {
+      row.appendChild(el('button', {
+        type: 'button',
+        class: 'journey-step' + stateCls,
+        title: STR.common.back + ': ' + step.full,
+        'aria-label': step.full,
+        onClick: () => navigate(step.id),
+      }, kids));
+    } else {
+      row.appendChild(el('div', {
+        class: 'journey-step' + stateCls,
+        'aria-current': current ? 'step' : null,
+        'aria-label': step.full,
+      }, kids));
+    }
+  });
+  journeyEl.appendChild(row);
+}
 
 function goHome() {
   navigate(state.engineOutput ? 'review' : 'upload');
@@ -216,6 +268,7 @@ function placeholderScreen(container, msg) {
 
 async function renderScreen() {
   setActiveNav();
+  renderJourney();
   const id = state.screen;
   const path = SCREEN_MODULES[id] || SCREEN_MODULES.upload;
   appEl.innerHTML = '';
@@ -248,27 +301,56 @@ function buildShell(store) {
   const logo = el('img', { class: 'appbar__logo', src: 'assets/icon.svg', alt: '' });
   navHome = el('button', { class: 'navbtn', text: STR.nav.home, onClick: goHome });
   navSettings = el('button', { class: 'navbtn', text: STR.nav.settings, onClick: () => navigate('settings') });
+  const navLock = (lockMod && typeof lockMod.lock === 'function')
+    ? el('button', {
+      class: 'navbtn', text: 'قفل 🔒', title: 'قفل البوابة على هذا الجهاز',
+      onClick: () => { try { lockMod.lock(store); } finally { location.reload(); } },
+    })
+    : null;
+
+  const versionChip = el('span', { class: 'appbar__version', title: 'إصدار التطبيق', dir: 'ltr', text: APP_VERSION });
 
   const bar = el('header', { class: 'appbar' }, [
     el('div', { class: 'appbar__brand' }, [logo, el('div', { class: 'appbar__title', text: STR.appTitle })]),
     el('div', { class: 'appbar__spacer' }),
-    el('nav', { class: 'appbar__nav' }, [navHome, navSettings]),
+    el('nav', { class: 'appbar__nav' }, [navHome, navSettings, navLock]),
+    versionChip,
   ]);
 
   const storageWarn = el('div', { class: 'storage-warn', text: STR.storage.warn });
   storageWarn.hidden = store.persistent;
 
+  // Journey step-bar host — filled per-screen by renderJourney().
+  journeyEl = el('nav', { class: 'journey-wrap', 'aria-label': 'خطوات إنشاء التقرير' });
+  journeyEl.hidden = true;
+
   appEl = el('main', { id: 'app' });
 
   root.innerHTML = '';
-  root.append(bar, storageWarn, appEl);
+  root.append(bar, storageWarn, journeyEl, appEl);
 }
 
 /* ------------------------------------------------------------------ *
  * Boot
  * ------------------------------------------------------------------ */
+let lockMod = null;
+
 async function boot() {
   const store = await resolveStore();
+
+  // Access gate — when the lock module + deployed seal exist, EVERYTHING waits
+  // behind the passphrase screen. Devices remember a successful unlock; the
+  // قفل nav button re-locks (clears the marker + sealed secrets).
+  try {
+    lockMod = await import('./ui/lock.js');
+  } catch { lockMod = null; /* lock module absent — open boot (dev) */ }
+  if (lockMod && typeof lockMod.isUnlocked === 'function' && !lockMod.isUnlocked(store)) {
+    const root = document.getElementById('app-shell') || document.body;
+    root.innerHTML = '';
+    lockMod.renderLock(root, { store, onUnlocked: () => location.reload() });
+    return;
+  }
+
   state.settings = store.settings;
 
   // TAT-lookup Excel merge hook consumed by the settings screen (Track C).
