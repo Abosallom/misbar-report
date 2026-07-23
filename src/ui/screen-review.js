@@ -1,8 +1,8 @@
 // ui/screen-review.js — review/edit report content with a live slide preview (Track E).
-import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-07-22.11';
-import { el, editableTable, textareaField, toast } from './components.js?v=v2026-07-22.11';
-import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-07-22.11';
-import { autoDraft } from '../model/drafts.js?v=v2026-07-22.11';
+import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-07-22.12';
+import { el, editableTable, textareaField, toast } from './components.js?v=v2026-07-22.12';
+import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-07-22.12';
+import { autoDraft } from '../model/drafts.js?v=v2026-07-22.12';
 
 /* small local module helpers (kept local to avoid cross-screen coupling) */
 async function tryImport(path) { try { return await import(path); } catch { return null; } }
@@ -19,6 +19,45 @@ const CAT_INTERNAL = 'لين';
 const displayStatus = (s) => (s === 'مفتوح' ? 'قيد التنفيذ' : s);
 const isClosed = (t) => /مغلق|closed|منجز|مكتمل/i.test((t && (t.status || '')) || '');
 const linesToArr = (s) => String(s || '').split('\n').map((x) => x.trim()).filter(Boolean);
+
+// Engine's 10 published numbers (the delta keys) pulled out of an EngineOutput/kpi.
+function currentNumbersOf(kpi) {
+  const t = (kpi && kpi.totals) || {};
+  const f = (kpi && kpi.funnel) || {};
+  const b = (kpi && kpi.buckets) || {};
+  return {
+    total: t.total, collected: f.collected, dispatched: f.dispatched, received: f.received,
+    completed: b.completed, rejected: b.rejected, awaitingDispatch: b.awaitingDispatch,
+    shippedNotReceived: b.shippedNotReceived, awaitingResults: b.awaitingResults, lateNoResult: b.lateNoResult,
+  };
+}
+// deltaMode baseline (user decision B): recompute model.kpi.deltas against the picked
+// baseline and stamp model.deltaBaseline {baselineDate, mode} so the exec legend renders
+// mode-aware. Signed (no max(0) clamp) so a drop surfaces as a '−N' green chip. Degrades
+// to the engine's legacy deltas when the delta-baseline module is missing or no baseline
+// resolves. Mutates kpi.deltas in place so the banner + live preview stay in sync.
+function applyDeltaBaseline(model, store, pickDeltaBaseline) {
+  if (typeof pickDeltaBaseline !== 'function' || !model || !model.kpi) return;
+  const settings = (store && store.settings) || {};
+  let picked = null;
+  try {
+    picked = pickDeltaBaseline({
+      history: settings.snapshotHistory,
+      legacySnapshot: settings.snapshot,
+      reportDate: model.reportDate,
+      mode: (settings.reportOptions && settings.reportOptions.deltaMode) || 'daily',
+    });
+  } catch (e) { console.warn('[review] pickDeltaBaseline failed; keeping legacy deltas', e); return; }
+  if (!picked || !picked.numbers) return; // no baseline resolvable → keep engine deltas
+  const cur = currentNumbersOf(model.kpi);
+  const deltas = {};
+  for (const key of Object.keys(cur)) {
+    const prev = picked.numbers[key];
+    deltas[key] = (typeof prev === 'number' && typeof cur[key] === 'number') ? (cur[key] - prev) : 0;
+  }
+  model.kpi.deltas = deltas;
+  model.deltaBaseline = { baselineDate: picked.baselineDate, mode: picked.mode };
+}
 
 const STATUS_OPTIONS = [
   STR.review.status.open, STR.review.status.ongoing,
@@ -184,6 +223,12 @@ export async function render(container, ctx) {
   if (!model.reportOptions) model.reportOptions = reportOptionsFromSettings(store.settings);
   if (!model.reportOptions.labels) model.reportOptions.labels = {};
   if (!model.overrides) model.overrides = {};
+  // deltaMode baseline (user decision B): recompute deltas + stamp deltaBaseline for the
+  // exec legend. Guarded import → degrades to legacy engine deltas if the module isn't
+  // present at runtime. Re-run per preview (below) so a report-date change re-picks.
+  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-07-22.12');
+  const pickBaseline = dbMod && dbMod.pickDeltaBaseline;
+  applyDeltaBaseline(model, store, pickBaseline);
   const kpi = model.kpi;
 
   // Persist reportOptions (slides + labels) to settings as the new defaults.
@@ -238,9 +283,10 @@ export async function render(container, ctx) {
   async function renderPreview() {
     const token = ++renderToken;
     model.reportDate = state.reportDate;
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-07-22.11');
+    applyDeltaBaseline(model, store, pickBaseline); // re-pick baseline for the current report date
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-07-22.12');
     const buildSpec = pickFn(specMod, ['buildSpec', 'build', 'makeSpec', 'toSpec']);
-    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-07-22.11');
+    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-07-22.12');
     const renderFn = pickFn(rendMod, ['renderSpec', 'renderSlides', 'renderHtml', 'render']);
 
     if (!buildSpec || !renderFn) {
@@ -592,7 +638,7 @@ export async function render(container, ctx) {
     el('summary', { class: 'card__title', style: 'cursor:pointer', text: STR.review.labelsCardTitle }),
   ]);
   (async () => {
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-07-22.11');
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-07-22.12');
     const LABEL_NAMES = specMod && specMod.LABEL_NAMES;
     const DEFAULT_LABELS = (specMod && specMod.DEFAULT_LABELS) || {};
     if (!LABEL_NAMES || typeof LABEL_NAMES !== 'object') {
@@ -642,7 +688,9 @@ export async function render(container, ctx) {
   // delta>0, else a calm single line. Deltas are fixed for the run, so build once.
   function buildDeltaBanner() {
     const deltas = (kpi && kpi.deltas) || {};
-    const asOf = store.settings && store.settings.snapshot && store.settings.snapshot.asOf;
+    // Prefer the deltaMode-picked baseline date; fall back to the legacy snapshot's asOf.
+    const asOf = (model.deltaBaseline && model.deltaBaseline.baselineDate)
+      || (store.settings && store.settings.snapshot && store.settings.snapshot.asOf);
     const asOfAr = formatDateAr(asOf) || (asOf ? String(asOf) : '');
     const active = DELTA_META.filter((m) => Number(deltas[m.key]) > 0);
     if (!active.length) {

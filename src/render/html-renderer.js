@@ -3,8 +3,8 @@
 // (1280x720 px = inches * 96). Skips internalOnly slides when variant === 'nupco'.
 // html2canvas-safe: absolute positioning, solid fills, borders, border-radius only.
 // No box-shadow, no CSS gap, no transforms. Charts are delegated to charts-svg.js (inline SVG).
-import { GEOM } from '../theme.js?v=v2026-07-22.11';
-import { renderChartSVG } from './charts-svg.js?v=v2026-07-22.11';
+import { GEOM } from '../theme.js?v=v2026-07-22.12';
+import { renderChartSVG } from './charts-svg.js?v=v2026-07-22.12';
 
 const PX = GEOM.pxPerIn;          // 96
 const PT2PX = 96 / 72;            // points -> px

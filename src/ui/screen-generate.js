@@ -1,12 +1,12 @@
 // ui/screen-generate.js — build both variants, produce 4 files, trigger downloads (Track E).
-import { STR, todayISO, buildFileName, formatDateAr } from '../i18n/ar.js?v=v2026-07-22.11';
-import { el, progressBar, toast } from './components.js?v=v2026-07-22.11';
-import { VARIANTS } from '../contracts.js?v=v2026-07-22.11';
-import { getGenLibs } from '../vendor-loader.js?v=v2026-07-22.11';
-import { resetRunData } from '../state.js?v=v2026-07-22.11';
-import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-07-22.11';
-import { autoDraft } from '../model/drafts.js?v=v2026-07-22.11';
-import { buildLateLabsSection, triggerDownload } from './late-labs-section.js?v=v2026-07-22.11';
+import { STR, todayISO, buildFileName, formatDateAr } from '../i18n/ar.js?v=v2026-07-22.12';
+import { el, progressBar, toast } from './components.js?v=v2026-07-22.12';
+import { VARIANTS } from '../contracts.js?v=v2026-07-22.12';
+import { getGenLibs } from '../vendor-loader.js?v=v2026-07-22.12';
+import { resetRunData } from '../state.js?v=v2026-07-22.12';
+import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-07-22.12';
+import { autoDraft } from '../model/drafts.js?v=v2026-07-22.12';
+import { buildLateLabsSection, triggerDownload } from './late-labs-section.js?v=v2026-07-22.12';
 
 async function tryImport(path) { try { return await import(path); } catch { return null; } }
 function pickFn(mod, names) {
@@ -16,6 +16,45 @@ function pickFn(mod, names) {
   return null;
 }
 const isMobile = () => /iP(hone|ad|od)|Android/i.test(navigator.userAgent);
+
+// Engine's 10 published numbers (the delta keys) pulled out of an EngineOutput/kpi.
+function currentNumbersOf(kpi) {
+  const t = (kpi && kpi.totals) || {};
+  const f = (kpi && kpi.funnel) || {};
+  const b = (kpi && kpi.buckets) || {};
+  return {
+    total: t.total, collected: f.collected, dispatched: f.dispatched, received: f.received,
+    completed: b.completed, rejected: b.rejected, awaitingDispatch: b.awaitingDispatch,
+    shippedNotReceived: b.shippedNotReceived, awaitingResults: b.awaitingResults, lateNoResult: b.lateNoResult,
+  };
+}
+// deltaMode baseline (user decision B): recompute model.kpi.deltas against the picked
+// baseline and stamp model.deltaBaseline {baselineDate, mode} so the exec legend renders
+// mode-aware. Signed (no max(0) clamp) so a drop surfaces as a '−N' green chip. Degrades
+// to the engine's legacy deltas when the delta-baseline module is missing or no baseline
+// resolves. Mutates kpi.deltas in place so the generated files match the review preview.
+function applyDeltaBaseline(model, store, pickDeltaBaseline) {
+  if (typeof pickDeltaBaseline !== 'function' || !model || !model.kpi) return;
+  const settings = (store && store.settings) || {};
+  let picked = null;
+  try {
+    picked = pickDeltaBaseline({
+      history: settings.snapshotHistory,
+      legacySnapshot: settings.snapshot,
+      reportDate: model.reportDate,
+      mode: (settings.reportOptions && settings.reportOptions.deltaMode) || 'daily',
+    });
+  } catch (e) { console.warn('[generate] pickDeltaBaseline failed; keeping legacy deltas', e); return; }
+  if (!picked || !picked.numbers) return; // no baseline resolvable → keep engine deltas
+  const cur = currentNumbersOf(model.kpi);
+  const deltas = {};
+  for (const key of Object.keys(cur)) {
+    const prev = picked.numbers[key];
+    deltas[key] = (typeof prev === 'number' && typeof cur[key] === 'number') ? (cur[key] - prev) : 0;
+  }
+  model.kpi.deltas = deltas;
+  model.deltaBaseline = { baselineDate: picked.baselineDate, mode: picked.mode };
+}
 
 function withTimeout(promise, ms, label) {
   let timer;
@@ -85,7 +124,7 @@ function fallbackModel(state, store) {
 // Build the SlideSpec per VARIANT — the variant changes slide-5 content
 // (task rows), so one shared spec would leak internal tasks into NUPCO files.
 async function buildVariantSpec(model, variant) {
-  const mod = await tryImport('../slidespec/build-spec.js?v=v2026-07-22.11');
+  const mod = await tryImport('../slidespec/build-spec.js?v=v2026-07-22.12');
   const fn = pickFn(mod, ['buildSpec', 'build', 'makeSpec', 'toSpec']);
   if (!fn) return null;
   let spec = fn(model, { variant });
@@ -111,7 +150,7 @@ async function toBlob(result, kind) {
 // renderPptx(spec, {variant, PptxGenJS}) -> Promise<Blob>
 async function makePptx(spec, variant, libs) {
   if (!spec) return null;
-  const mod = await tryImport('../render/pptx-renderer.js?v=v2026-07-22.11');
+  const mod = await tryImport('../render/pptx-renderer.js?v=v2026-07-22.12');
   const fn = pickFn(mod, ['renderPptx', 'buildPptx', 'toPptx', 'makePptx', 'render']);
   if (!fn) return null;
   const r = await fn(spec, { variant, PptxGenJS: libs.PptxGenJS });
@@ -165,9 +204,9 @@ function makeThumbStrip() {
 // renderSlides(spec, {variant}) -> fragment of .sl-slide; exportPdf(slideEls, {jsPDF, html2canvas, onProgress})
 async function makePdf(spec, variant, libs, host, onProgress, thumbs) {
   if (!spec) return null;
-  const rMod = await tryImport('../render/html-renderer.js?v=v2026-07-22.11');
+  const rMod = await tryImport('../render/html-renderer.js?v=v2026-07-22.12');
   const renderSlides = pickFn(rMod, ['renderSlides', 'renderSpec', 'renderHtml', 'render']);
-  const pMod = await tryImport('../render/pdf-export.js?v=v2026-07-22.11');
+  const pMod = await tryImport('../render/pdf-export.js?v=v2026-07-22.12');
   const exportPdf = pickFn(pMod, ['exportPdf', 'renderPdf', 'toPdf', 'buildPdf', 'render']);
   if (!renderSlides || !exportPdf) return null;
   host.innerHTML = '';
@@ -244,6 +283,15 @@ export async function render(container, ctx) {
   const { state, store, navigate } = ctx;
   const model = state.reportModel || fallbackModel(state, store);
   const date = model.reportDate || todayISO();
+  model.reportDate = model.reportDate || date;
+  // deltaMode baseline (user decision B): recompute deltas + stamp deltaBaseline so the
+  // generated files' exec legend/chips match the review preview. recordSnapshot (below)
+  // appends this run to snapshotHistory on success. Guarded → legacy engine deltas if the
+  // module isn't present at runtime.
+  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-07-22.12');
+  const pickBaseline = dbMod && dbMod.pickDeltaBaseline;
+  const recordSnapshot = dbMod && dbMod.recordSnapshot;
+  applyDeltaBaseline(model, store, pickBaseline);
 
   const fileDefs = [
     { id: 'internal-pptx', variant: 'internal', kind: 'pptx', label: STR.generate.fileInternalPptx, icon: '📊', name: buildFileName(VARIANTS.internal.filePrefix, date, 'pptx') },
@@ -370,6 +418,17 @@ export async function render(container, ctx) {
       };
       if (numbers.completed != null && typeof store.updateSnapshot === 'function') {
         store.updateSnapshot({ asOf: date, numbers });
+        // ALSO append this run to snapshotHistory (deltaMode baselines read from it).
+        // Persist through loadSettings/saveSettings — the same path review uses for
+        // reportOptions. Guarded so a missing module or a store that rejects the key
+        // degrades gracefully without failing the (already-successful) generation.
+        if (typeof recordSnapshot === 'function') {
+          try {
+            const doc = store.loadSettings();
+            doc.snapshotHistory = recordSnapshot(doc.snapshotHistory, date, numbers);
+            store.saveSettings(doc);
+          } catch (e) { console.warn('[generate] snapshotHistory write failed', e); }
+        }
         state.settings = store.settings;
       }
     } catch (e) { console.warn('[generate] snapshot update failed', e); }

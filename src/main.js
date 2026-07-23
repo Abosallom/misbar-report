@@ -1,12 +1,12 @@
 // main.js — boot, settings store, top app bar, and screen router (Track E).
-import { state } from './state.js?v=v2026-07-22.11';
-import { STR } from './i18n/ar.js?v=v2026-07-22.11';
-import { APP_VERSION } from './version.js?v=v2026-07-22.11';
-import { el, toast } from './ui/components.js?v=v2026-07-22.11';
-import { SETTINGS_KEY } from './contracts.js?v=v2026-07-22.11';
-import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-07-22.11';
-import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-07-22.11';
-import { HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED, GRAFANA_SEED } from './seeds/defaults.js?v=v2026-07-22.11';
+import { state } from './state.js?v=v2026-07-22.12';
+import { STR } from './i18n/ar.js?v=v2026-07-22.12';
+import { APP_VERSION } from './version.js?v=v2026-07-22.12';
+import { el, toast } from './ui/components.js?v=v2026-07-22.12';
+import { SETTINGS_KEY } from './contracts.js?v=v2026-07-22.12';
+import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-07-22.12';
+import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-07-22.12';
+import { HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED, GRAFANA_SEED } from './seeds/defaults.js?v=v2026-07-22.12';
 
 /* ------------------------------------------------------------------ *
  * Settings store — prefers Track C's src/store.js, falls back to a
@@ -162,7 +162,7 @@ async function resolveStore() {
   const local = createLocalStore(persistent);
   let backend = null;
   try {
-    const mod = await import('./store.js?v=v2026-07-22.11');
+    const mod = await import('./store.js?v=v2026-07-22.12');
     if (mod && typeof mod.loadSettings === 'function' && typeof mod.saveSettings === 'function') {
       const s = mod.loadSettings();
       if (s && s.tatLookup) backend = mod;
@@ -176,10 +176,10 @@ async function resolveStore() {
  * ------------------------------------------------------------------ */
 
 const SCREEN_MODULES = {
-  upload: './ui/screen-upload.js?v=v2026-07-22.11',
-  review: './ui/screen-review.js?v=v2026-07-22.11',
-  generate: './ui/screen-generate.js?v=v2026-07-22.11',
-  settings: './ui/screen-settings.js?v=v2026-07-22.11', // Track C
+  upload: './ui/screen-upload.js?v=v2026-07-22.12',
+  review: './ui/screen-review.js?v=v2026-07-22.12',
+  generate: './ui/screen-generate.js?v=v2026-07-22.12',
+  settings: './ui/screen-settings.js?v=v2026-07-22.12', // Track C
 };
 
 let appEl = null;
@@ -376,7 +376,7 @@ async function boot() {
   // behind the passphrase screen. Devices remember a successful unlock; the
   // قفل nav button re-locks (clears the marker + sealed secrets).
   try {
-    lockMod = await import('./ui/lock.js?v=v2026-07-22.11');
+    lockMod = await import('./ui/lock.js?v=v2026-07-22.12');
   } catch { lockMod = null; /* lock module absent — open boot (dev) */ }
   if (lockMod && typeof lockMod.isUnlocked === 'function' && !lockMod.isUnlocked(store)) {
     const root = document.getElementById('app-shell') || document.body;
@@ -390,8 +390,8 @@ async function boot() {
   // TAT-lookup Excel merge hook consumed by the settings screen (Track C).
   state.onTatFileMerge = async (file) => {
     const [{ getXLSX }, { parseTatLookupXlsx }] = await Promise.all([
-      import('./vendor-loader.js?v=v2026-07-22.11'),
-      import('./ingest/xlsx.js?v=v2026-07-22.11'),
+      import('./vendor-loader.js?v=v2026-07-22.12'),
+      import('./ingest/xlsx.js?v=v2026-07-22.12'),
     ]);
     const XLSX = await getXLSX();
     const { tests } = parseTatLookupXlsx(await file.arrayBuffer(), XLSX);
@@ -411,7 +411,7 @@ async function boot() {
   // Connection test consumed by the settings screen's اختبار الاتصال button.
   state.onGrafanaTest = async () => {
     try {
-      const mod = await import('./ingest/grafana.js?v=v2026-07-22.11');
+      const mod = await import('./ingest/grafana.js?v=v2026-07-22.12');
       const g = store.loadSettings().grafana || {};
       const now = Date.now();
       const res = await mod.fetchKamcOrders(g, { fromMs: now - 7 * 86400000, toMs: now });

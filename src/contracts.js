@@ -118,19 +118,28 @@
  * @property {{asOf:string, numbers:Object<string,number>}} snapshot
  *   - the previous report's published numbers (keys = deltas keys above);
  *     written after each successful generation. Legacy {prevCompleted} docs are
- *     migrated on load (numbers.completed = prevCompleted).
+ *     migrated on load (numbers.completed = prevCompleted). Acts as the fallback
+ *     baseline when snapshotHistory has no entry before the report date.
+ * @property {Object<string,Object<string,number>>} snapshotHistory
+ *   - rolling per-date history of published report numbers, key 'YYYY-MM-DD' →
+ *     the same number set snapshot.numbers holds. Trimmed to the most recent 45
+ *     dates (model/delta-baseline.js recordSnapshot). Feeds pickDeltaBaseline,
+ *     which selects the comparison baseline per reportOptions.deltaMode.
  * @property {{baseUrl:string, accessToken:string, panelId:number, enabled:boolean}} grafana
  *   - live data source (Grafana PUBLIC-dashboard query API). baseUrl like
  *     'https://elab.seha.sa/hpapm'. Empty/disabled → CSV drop only. The access
  *     token is the public-dashboard token (view-only, server-side-masked data);
  *     it is NEVER seeded in the repo — the user enters it once in Settings.
- * @property {{excludeNoTat:boolean, slides:Object<string,boolean>, kpiCards:Object<string,boolean>, labels:Object<string,string>}} reportOptions
+ * @property {{excludeNoTat:boolean, slides:Object<string,boolean>, kpiCards:Object<string,boolean>, labels:Object<string,string>, deltaMode:('daily'|'weekly')}} reportOptions
  *   - presentation defaults: excludeNoTat drops rows with no TAT from ANY source
  *     (lookup + CSV fallback = null → 'No Match') before aggregation; slides keys
  *     'execFunnel'|'monthly'|'compliance'|'action' toggle the middle slides (cover/
  *     thanks always render; page numbers renumber); kpiCards keys mirror the deltas
  *     keys and hide exec-slide cards (row geometry repacks); labels overrides the
- *     DEFAULT_LABELS registry in slidespec/build-spec.js (empty = built-in text).
+ *     DEFAULT_LABELS registry in slidespec/build-spec.js (empty = built-in text);
+ *     deltaMode picks the exec delta-chip comparison window — 'daily' vs the last
+ *     report before the report date, 'weekly' vs the report closest to a week back
+ *     (see model/delta-baseline.js pickDeltaBaseline).
  * @property {{model:TrackerModel, updatedAt:string}|null} cachedTracker
  *   - last successfully parsed Project Tracker, reused when no fresh file is
  *     dropped. NOTE on the no-PHI invariant: this is PROJECT-management content

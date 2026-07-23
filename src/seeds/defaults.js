@@ -18,8 +18,10 @@ export const HISTORICAL_CONSTANTS_SEED = {
 };
 
 // Report presentation options (Settings.reportOptions): whether to drop no-TAT
-// rows, which middle slides render, which exec-slide KPI cards show, and any
-// per-report label overrides (edited from the review screen). See contracts.js.
+// rows, which middle slides render, which exec-slide KPI cards show, any per-report
+// label overrides (edited from the review screen), and the delta-chip comparison
+// window (deltaMode: 'daily' vs the last report, 'weekly' vs a report a week back).
+// See contracts.js.
 export const REPORT_OPTIONS_SEED = {
   excludeNoTat: false,
   slides: { execFunnel: true, monthly: true, compliance: true, action: true, definitions: true },
@@ -33,7 +35,14 @@ export const REPORT_OPTIONS_SEED = {
     shippedNotReceived: true,
   },
   labels: {},
+  deltaMode: 'daily',
 };
+
+// Rolling per-date history of published report numbers (Settings.snapshotHistory):
+// key 'YYYY-MM-DD' → the same number set snapshot.numbers holds. Empty on a fresh
+// install; the delta picker falls back to the legacy snapshot until it fills in.
+// recordSnapshot (model/delta-baseline.js) trims it to the most recent 45 dates.
+export const SNAPSHOT_HISTORY_SEED = {};
 
 // Snapshot of the 09-07-2026 published deck (E6 prompt): the previous report's
 // full number set, so the first real run's "+N" chips are correct. Keys mirror

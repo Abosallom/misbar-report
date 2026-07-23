@@ -11,14 +11,18 @@
 // throws on write; on failure we fall back to an in-memory doc and expose
 // isEphemeral() so the UI can warn the user their edits will not persist.
 
-import { SETTINGS_KEY } from './contracts.js?v=v2026-07-22.11';
-import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-07-22.11';
-import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-07-22.11';
+import { SETTINGS_KEY } from './contracts.js?v=v2026-07-22.12';
+import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-07-22.12';
+import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-07-22.12';
 import {
   HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED, GRAFANA_SEED, REPORT_OPTIONS_SEED,
-} from './seeds/defaults.js?v=v2026-07-22.11';
+  SNAPSHOT_HISTORY_SEED,
+} from './seeds/defaults.js?v=v2026-07-22.12';
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
+
+// Well-formed 'YYYY-MM-DD' — the key shape for snapshotHistory entries.
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 // ---- module state -----------------------------------------------------------
 // _ephemeral: true once any localStorage op has thrown; drives isEphemeral().
@@ -73,6 +77,8 @@ function backfillReportOptions(doc) {
     if (typeof ro.kpiCards[k] !== 'boolean') ro.kpiCards[k] = seed.kpiCards[k];
   }
   if (!isPlainObject(ro.labels)) ro.labels = {};
+  // deltaMode gained in v3; only 'daily'|'weekly' are valid — anything else resets.
+  if (ro.deltaMode !== 'daily' && ro.deltaMode !== 'weekly') ro.deltaMode = seed.deltaMode;
 }
 
 /** Build the first-run document straight from the frozen seeds. */
@@ -87,6 +93,7 @@ function buildSeedDoc() {
       cancelledByMonth: { ...HISTORICAL_CONSTANTS_SEED.cancelledByMonth },
     },
     snapshot: clone(SNAPSHOT_SEED), // deep clone: SNAPSHOT_SEED.numbers is nested
+    snapshotHistory: clone(SNAPSHOT_HISTORY_SEED), // rolling per-date numbers (v3); empty on first run
     grafana: { ...GRAFANA_SEED },
     reportOptions: clone(REPORT_OPTIONS_SEED), // deep clone: nested slides/kpiCards/labels
     cachedTracker: null,
@@ -158,7 +165,8 @@ function migrateSnapshotShape(doc) {
     if (typeof doc.grafana.dataKey !== 'string') doc.grafana.dataKey = '';
   }
   if (!('cachedTracker' in doc)) doc.cachedTracker = null;
-  backfillReportOptions(doc); // add reportOptions + any new slide/card subkeys
+  backfillReportOptions(doc); // add reportOptions + any new slide/card subkeys + deltaMode
+  if (!isPlainObject(doc.snapshotHistory)) doc.snapshotHistory = {}; // v3 rolling history
   return doc;
 }
 
@@ -181,6 +189,37 @@ function migrateV1toV2(doc) {
   return doc;
 }
 
+/**
+ * v2 → v3 forward migration. v3 adds a rolling per-date `snapshotHistory` (feeding
+ * the daily/weekly delta-baseline picker) and `reportOptions.deltaMode`. The
+ * shape-softening (migrateSnapshotShape) backfills both containers; then, so the
+ * new daily/weekly chips have something to compare against on day one, we SEED the
+ * existing legacy snapshot into snapshotHistory under its asOf date (only when asOf
+ * is a valid ISO date, numbers are present, and that date is not already recorded).
+ */
+function migrateV2toV3(doc) {
+  migrateSnapshotShape(doc); // ensures snapshotHistory:{} + reportOptions.deltaMode
+  const s = doc.snapshot;
+  if (isPlainObject(s) && ISO_DATE_RE.test(String(s.asOf)) && isPlainObject(s.numbers)) {
+    if (!isPlainObject(doc.snapshotHistory)) doc.snapshotHistory = {};
+    if (!(s.asOf in doc.snapshotHistory)) {
+      const nums = {};
+      for (const [k, v] of Object.entries(s.numbers)) {
+        if (typeof v === 'number' && Number.isFinite(v)) nums[k] = v;
+      }
+      doc.snapshotHistory[s.asOf] = nums;
+    }
+  }
+  doc.schemaVersion = 3;
+  return doc;
+}
+
+/** v1 → v3: run the v1→v2 transform, then v2→v3, so old docs land on the current schema. */
+function migrateV1toV3(doc) {
+  migrateV1toV2(doc);
+  return migrateV2toV3(doc);
+}
+
 /** Version-check + migrate/reset. Unknown versions reset to seeds. */
 function migrate(doc) {
   if (!isPlainObject(doc)) {
@@ -188,7 +227,8 @@ function migrate(doc) {
     return persist(buildSeedDoc());
   }
   if (doc.schemaVersion === SCHEMA_VERSION) return migrateSnapshotShape(doc);
-  if (doc.schemaVersion === 1) return persist(migrateV1toV2(doc));
+  if (doc.schemaVersion === 2) return persist(migrateV2toV3(doc));
+  if (doc.schemaVersion === 1) return persist(migrateV1toV3(doc));
   // Future schema bumps add forward-migration cases above this line.
   console.warn(
     `[misbar/store] unsupported schemaVersion ${doc.schemaVersion} ` +
@@ -313,8 +353,8 @@ function validateImport(doc) {
   if (!isPlainObject(doc)) {
     throw new Error('ملف الإعدادات غير صالح: الجذر ليس كائناً.');
   }
-  // Accept v1 (transformed on import) or the current v2. Anything else is rejected.
-  if (doc.schemaVersion !== 1 && doc.schemaVersion !== SCHEMA_VERSION) {
+  // Accept v1/v2 (transformed on import) or the current v3. Anything else is rejected.
+  if (doc.schemaVersion !== 1 && doc.schemaVersion !== 2 && doc.schemaVersion !== SCHEMA_VERSION) {
     throw new Error(
       `إصدار المخطط غير مدعوم: ${doc.schemaVersion == null ? 'مفقود' : doc.schemaVersion}` +
         ` (المتوقع ${SCHEMA_VERSION}).`,
@@ -344,6 +384,27 @@ function validateImport(doc) {
     }
     if ('numbers' in doc.snapshot && !isPlainObject(doc.snapshot.numbers)) {
       throw new Error('حقل snapshot.numbers غير صالح: يجب أن يكون كائناً.');
+    }
+  }
+  if ('snapshotHistory' in doc) {
+    // Plain object keyed by ISO date; each value a plain object of finite numbers —
+    // mirrors how snapshot.numbers is validated, per stored date.
+    const sh = doc.snapshotHistory;
+    if (!isPlainObject(sh)) {
+      throw new Error('حقل snapshotHistory غير صالح: يجب أن يكون كائناً.');
+    }
+    for (const [date, nums] of Object.entries(sh)) {
+      if (!ISO_DATE_RE.test(date)) {
+        throw new Error(`مفتاح تاريخ غير صالح في snapshotHistory: "${date}".`);
+      }
+      if (!isPlainObject(nums)) {
+        throw new Error(`حقل snapshotHistory["${date}"] غير صالح: يجب أن يكون كائناً.`);
+      }
+      for (const [k, v] of Object.entries(nums)) {
+        if (typeof v !== 'number' || !Number.isFinite(v)) {
+          throw new Error(`قيمة غير رقمية في snapshotHistory["${date}"]: "${k}".`);
+        }
+      }
     }
   }
   if ('grafana' in doc) {
@@ -387,6 +448,9 @@ function validateImport(doc) {
     }
     // excludeNoTat and the slide/card flags are coerce-tolerant (normalized to
     // booleans in pickImportKeys); only the container shapes are enforced here.
+    if ('deltaMode' in ro && ro.deltaMode !== 'daily' && ro.deltaMode !== 'weekly') {
+      throw new Error("حقل reportOptions.deltaMode غير صالح: يجب أن يكون 'daily' أو 'weekly'.");
+    }
     if ('slides' in ro && !isPlainObject(ro.slides)) {
       throw new Error('حقل reportOptions.slides غير صالح: يجب أن يكون كائناً.');
     }
@@ -437,7 +501,7 @@ function validateImport(doc) {
 
 // Only these top-level keys may ever be persisted — the "no PHI in storage"
 // invariant depends on unknown keys being discarded before the merge.
-const IMPORT_KEYS = ['schemaVersion', 'tatLookup', 'displayNames', 'scorecard', 'historicalConstants', 'snapshot', 'grafana', 'reportOptions', 'cachedTracker'];
+const IMPORT_KEYS = ['schemaVersion', 'tatLookup', 'displayNames', 'scorecard', 'historicalConstants', 'snapshot', 'snapshotHistory', 'grafana', 'reportOptions', 'cachedTracker'];
 
 // The exact reportOptions subkeys that may be imported. Unknown slide/card keys
 // are dropped; label values must be strings. Keys mirror REPORT_OPTIONS_SEED.
@@ -471,6 +535,20 @@ function pickImportKeys(doc) {
     }
     out.snapshot = picked;
   }
+  if (isPlainObject(out.snapshotHistory)) {
+    // Keep only ISO-date keys whose value is a plain object; within each, keep only
+    // finite numeric leaves (mirrors snapshot.numbers sanitization).
+    const picked = {};
+    for (const [date, nums] of Object.entries(out.snapshotHistory)) {
+      if (!ISO_DATE_RE.test(date) || !isPlainObject(nums)) continue;
+      const clean = {};
+      for (const [k, v] of Object.entries(nums)) {
+        if (typeof v === 'number' && Number.isFinite(v)) clean[k] = v;
+      }
+      picked[date] = clean;
+    }
+    out.snapshotHistory = picked;
+  }
   if (isPlainObject(out.grafana)) {
     // Only the five known fields ever persist — unknown subkeys are discarded.
     const g = out.grafana;
@@ -489,6 +567,7 @@ function pickImportKeys(doc) {
     const ro = out.reportOptions;
     const picked = {};
     if ('excludeNoTat' in ro) picked.excludeNoTat = !!ro.excludeNoTat;
+    if (ro.deltaMode === 'daily' || ro.deltaMode === 'weekly') picked.deltaMode = ro.deltaMode;
     if (isPlainObject(ro.slides)) {
       const s = {};
       for (const k of REPORT_OPTION_SLIDE_KEYS) if (k in ro.slides) s[k] = !!ro.slides[k];

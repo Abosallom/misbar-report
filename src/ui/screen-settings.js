@@ -7,7 +7,7 @@
 // + included slides/KPI cards), live source (Grafana + cached-tracker), and
 // backup (export/import).
 
-import { SNAPSHOT_SEED, REPORT_OPTIONS_SEED } from '../seeds/defaults.js?v=v2026-07-22.11';
+import { SNAPSHOT_SEED, REPORT_OPTIONS_SEED } from '../seeds/defaults.js?v=v2026-07-22.12';
 
 const TABS = [
   { id: 'tat', label: 'مدة الفحوصات' },
@@ -787,12 +787,14 @@ export function render(container, ctx) {
           slides: { ...REPORT_OPTIONS_SEED.slides },
           kpiCards: { ...REPORT_OPTIONS_SEED.kpiCards },
           labels: {},
+          deltaMode: REPORT_OPTIONS_SEED.deltaMode,
         };
       }
       const r = S.doc.reportOptions;
       if (!r.slides || typeof r.slides !== 'object') r.slides = { ...REPORT_OPTIONS_SEED.slides };
       if (!r.kpiCards || typeof r.kpiCards !== 'object') r.kpiCards = { ...REPORT_OPTIONS_SEED.kpiCards };
       if (!r.labels || typeof r.labels !== 'object') r.labels = {};
+      if (r.deltaMode !== 'daily' && r.deltaMode !== 'weekly') r.deltaMode = REPORT_OPTIONS_SEED.deltaMode;
       return r;
     }
 
@@ -807,6 +809,29 @@ export function render(container, ctx) {
       return h('label', { class: 'st-field st-field--check' }, [
         cb,
         h('span', { class: 'st-label', text: labelText }),
+      ]);
+    }
+
+    // Radio group bound to a getter/setter (single value out of `options`);
+    // autosaves like the checkbox fields. Mirrors the checkField row styling.
+    function radioField(headText, groupName, options, get, set) {
+      const rows = options.map((opt) => {
+        const rb = h('input', { type: 'radio', class: 'st-radio', name: groupName });
+        rb.value = opt.value;
+        rb.checked = get() === opt.value;
+        rb.addEventListener('change', () => {
+          if (!rb.checked) return;
+          set(opt.value);
+          autosave();
+        });
+        return h('label', { class: 'st-field st-field--check' }, [
+          rb,
+          h('span', { class: 'st-label', text: opt.label }),
+        ]);
+      });
+      return h('div', { class: 'st-field' }, [
+        h('div', { class: 'st-label', text: headText }),
+        ...rows,
       ]);
     }
 
@@ -837,6 +862,17 @@ export function render(container, ctx) {
         groupHead('بطاقات المؤشرات'),
         ...REPORT_CARD_FIELDS.map((f) =>
           checkField(f.label, () => ro().kpiCards[f.key], (v) => { ro().kpiCards[f.key] = v; })),
+        // (d) delta-chip comparison window
+        radioField(
+          'مقارنة الفروقات (الأسهم)',
+          'st-deltaMode',
+          [
+            { value: 'daily', label: 'يومي — مقارنة بآخر تقرير سابق' },
+            { value: 'weekly', label: 'أسبوعي — مقارنة بتقرير قبل أسبوع' },
+          ],
+          () => ro().deltaMode,
+          (v) => { ro().deltaMode = v; },
+        ),
         h('p', {
           class: 'st-help',
           text: 'تُحرَّر تسميات الشرائح والبطاقات من شاشة مراجعة التقرير قبل التوليد.',

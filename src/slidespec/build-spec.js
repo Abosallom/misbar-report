@@ -12,7 +12,7 @@
 //   m.reportOptions.slides[key]   toggles the 5 middle slides (cover/thanks always render)
 //   m.reportOptions.kpiCards[key] toggles the 7 exec KPI cards (row geometry repacks)
 //   m.overrides[key]              per-run manual NUMBER overrides (suppresses that delta chip)
-import { COLORS as C, GEOM } from '../theme.js?v=v2026-07-22.11';
+import { COLORS as C, GEOM } from '../theme.js?v=v2026-07-22.12';
 
 // ============================================================================
 // LABELS REGISTRY — user-facing STATIC strings. DEFAULT_LABELS holds the built-in
@@ -42,8 +42,13 @@ export const DEFAULT_LABELS = {
   kpiShipped: 'شُحنت ولم تُستلم',
   // Exec slide — overall completion-rate line (label part; value appended as ': N%')
   execCompletionRate: 'نسبة الاكتمال الإجمالية',
-  // Exec slide — delta-chip legend (rendered only when a green "+N" chip is visible)
-  execDeltaLegend: '▲ التغيّر منذ التقرير السابق — أخضر: إيجابي، أحمر: يستدعي الانتباه',
+  // Exec slide — delta-chip legend. ALL chips are green now (user decision 2026-07-23):
+  // the old red/green colour key was removed. The legend is MODE-AWARE — the daily/weekly
+  // variants substitute the baseline date into '{date}'; the plain key is the legacy
+  // (no-baseline) previous-report wording. Rendered only when a chip is visible this run.
+  execDeltaLegend: '▲ التغيّر منذ التقرير السابق',
+  execDeltaLegendDaily: '▲ التغيّر منذ آخر تقرير ({date})',
+  execDeltaLegendWeekly: '▲ التغيّر الأسبوعي — منذ تقرير ({date})',
   // Monthly table row labels (also reused as the monthly bar-chart series names).
   // monthlyRowIncomplete now surfaces the engine's `pending` partition value
   // (orders = results + rejected + pending), renamed accordingly.
@@ -137,7 +142,9 @@ export const LABEL_NAMES = {
   kpiLate: 'بطاقة: الطلبات المتأخرة',
   kpiShipped: 'بطاقة: شُحنت ولم تُستلم',
   execCompletionRate: 'سطر نسبة الاكتمال الإجمالية (الملخص التنفيذي)',
-  execDeltaLegend: 'مفتاح رمز التغيّر الأخضر (الملخص التنفيذي)',
+  execDeltaLegend: 'مفتاح التغيّر — الصيغة الافتراضية (منذ التقرير السابق)',
+  execDeltaLegendDaily: 'مفتاح التغيّر اليومي — منذ آخر تقرير ({date})',
+  execDeltaLegendWeekly: 'مفتاح التغيّر الأسبوعي — منذ تقرير قبل أسبوع ({date})',
   monthlyRowOrders: 'صف الجدول الشهري: الطلبات',
   monthlyRowResults: 'صف الجدول الشهري: النتائج المستلمة',
   monthlyRowRejected: 'صف الجدول الشهري: النتائج المرفوضة',
@@ -223,6 +230,18 @@ const fmtDate = (iso) => { const [y, m, d] = iso.split('-'); return `${d} / ${m}
 const pctLab = (n) => (n === 0 ? '0%' : n.toFixed(1) + '%');           // late-%
 const pctMonthly = (n) => (n == null ? '-' : n === 100 ? '100%' : n.toFixed(1) + '%');
 const bullets = (items) => items.map((s) => '•  ' + s).join('\n');
+// Exec delta-chip text: '+N' for a rise, '−N' for a drop (− is U+2212, not a hyphen);
+// 0 / non-finite → undefined so the chip is hidden (keep current behaviour). ALL chips
+// are green now (user decision 2026-07-23) — the old BAD_DELTA red-chip logic is gone.
+const fmtDelta = (n) => (Number.isFinite(n) && n !== 0 ? (n > 0 ? '+' + n : '−' + Math.abs(n)) : undefined);
+// Mode-aware delta legend: daily/weekly substitute the baseline date into '{date}';
+// legacy (no baseline, or mode 'legacy') uses the plain previous-report wording. The
+// three strings stay overridable through the labels registry.
+const deltaLegendText = (L, db) => {
+  if (db && db.baselineDate && db.mode === 'daily') return L('execDeltaLegendDaily').replace('{date}', fmtDate(db.baselineDate));
+  if (db && db.baselineDate && db.mode === 'weekly') return L('execDeltaLegendWeekly').replace('{date}', fmtDate(db.baselineDate));
+  return L('execDeltaLegend');
+};
 
 // ---- repeated chrome (top bar, section title, corner tags, footer border) ---
 // Page numbers are NOT emitted here — buildSpec assigns them AFTER slide filtering
@@ -269,7 +288,7 @@ function buildCover(m) {
 // 40pt wide), the green "+N" delta chip is pinned to the TOP-LEFT corner (13pt, left-
 // aligned) so it can never touch the right-aligned number, the label gets a tight
 // 3-line band below the number, and the sublabel sits in a bottom band clear of both.
-function kpiCard({ x, w, nf = 28, v, vc, lab, sub, ac, delta, deltaColor }) {
+function kpiCard({ x, w, nf = 28, v, vc, lab, sub, ac, delta }) {
   const y = 0.93, h = 1.6;
   // The Cairo Range ink-line is ~1.88x the font px (much taller than the CSS box), so
   // the number's tall glyph line must be reckoned with directly: inkHalf is half that
@@ -289,8 +308,9 @@ function kpiCard({ x, w, nf = 28, v, vc, lab, sub, ac, delta, deltaColor }) {
     // label — up to 2 tight lines below the number ink-line
     text(x + 0.08, y + labY, w - 0.16, subY - labY - 0.02, lab, 10, { bold: true, color: C.slate900, align: 'right', valign: 'top', rtl: true, lineSpacing: 0.95 }),
   ];
-  // delta chip — TOP-LEFT corner, left-aligned; horizontally clear of the number
-  if (delta) els.push(text(x + 0.06, y + 0.06, 0.55, 0.24, delta, 13, { bold: true, color: deltaColor || C.deltaGreen, align: 'left', valign: 'middle' }));
+  // delta chip — TOP-LEFT corner, left-aligned; horizontally clear of the number.
+  // ALWAYS green now (user decision 2026-07-23) — no per-metric colour branching.
+  if (delta) els.push(text(x + 0.06, y + 0.06, 0.55, 0.24, delta, 13, { bold: true, color: C.deltaGreen, align: 'left', valign: 'middle' }));
   // sublabel — bottom band
   if (sub) els.push(text(x + 0.08, y + subY, w - 0.16, h - subY - 0.03, sub, 8, { color: C.slate500, align: 'right', valign: 'top', rtl: true }));
   return els;
@@ -360,13 +380,13 @@ function buildExecFunnel(m) {
   ];
   const visible = cardDefs.filter((c) => m.reportOptions?.kpiCards?.[c.dk] !== false);
   const { cardW, xOf, numFont } = kpiRowGeom(visible.length);
-  // Rising is BAD for these metrics — their chips render red so '+38 متأخرة'
-  // never reads as good news (analyst sign-off finding).
-  const BAD_DELTA = new Set(['rejected', 'lateNoResult', 'shippedNotReceived']);
+  // ALL delta chips are green now (user decision 2026-07-23) — the old BAD_DELTA
+  // red-chip branch was removed. fmtDelta yields '+N' on a rise, '−N' on a drop, and
+  // nothing (chip hidden) for a 0/missing delta. An overridden card value suppresses
+  // its chip (a manual number has no meaningful delta vs the baseline).
   const kpiEls = visible.flatMap((c, i) => kpiCard({
     x: xOf(i), w: cardW, nf: numFont, v: String(c.v), vc: c.vc, lab: c.lab, sub: c.sub, ac: c.ac,
-    delta: (d[c.dk] > 0 && !isOv(c.dk)) ? '+' + d[c.dk] : undefined,
-    deltaColor: BAD_DELTA.has(c.dk) ? C.redPure : C.deltaGreen,
+    delta: isOv(c.dk) ? undefined : fmtDelta(d[c.dk]),
   }));
 
   // -- ZONE B: order-journey funnel (from old buildJourney; X unchanged, Y +0.40).
@@ -388,8 +408,8 @@ function buildExecFunnel(m) {
 
   // A green "+N" chip is shown this run when a visible KPI card OR an intermediate
   // funnel stage has a positive, non-overridden delta. Drives the legend (Fix 3).
-  const anyChip = visible.some((c) => d[c.dk] > 0 && !isOv(c.dk))
-    || rows.some((r) => d[r.key] > 0 && !KPI_DELTA_KEYS.has(r.key) && !isOv(r.ov));
+  const anyChip = visible.some((c) => !isOv(c.dk) && fmtDelta(d[c.dk]) !== undefined)
+    || rows.some((r) => !KPI_DELTA_KEYS.has(r.key) && !isOv(r.ov) && fmtDelta(d[r.key]) !== undefined);
 
   // Cancelled note — displayed count is override-aware; the historical (pre-April)
   // breakdown is hist = raw cancelledNote − cancelledInData (rows counted from the
@@ -432,13 +452,14 @@ function buildExecFunnel(m) {
     // Stage delta chip — de-duplicated: endpoint metrics (total/completed) are shown
     // on their KPI cards, so the funnel only surfaces intermediate flow deltas; and an
     // overridden stage value suppresses its chip.
-    if (d[r.key] > 0 && !KPI_DELTA_KEYS.has(r.key) && !isOv(r.ov)) {
-      els.push(text(7.75, rowY[i], 0.75, 0.55, '+' + d[r.key], 10, { bold: true, color: C.deltaGreen, align: 'center', valign: 'middle' }));
+    const stageDelta = (KPI_DELTA_KEYS.has(r.key) || isOv(r.ov)) ? undefined : fmtDelta(d[r.key]);
+    if (stageDelta) {
+      els.push(text(7.75, rowY[i], 0.75, 0.55, stageDelta, 10, { bold: true, color: C.deltaGreen, align: 'center', valign: 'middle' }));
     }
   });
   // Delta-chip legend — only when at least one green "+N" chip is visible this run.
   if (anyChip) {
-    els.push(text(0.5, 0.72, 6.0, 0.18, L('execDeltaLegend'), 8.5, { color: C.deltaGreen, align: 'left', valign: 'middle', rtl: true }));
+    els.push(text(0.5, 0.72, 6.0, 0.18, deltaLegendText(L, m.deltaBaseline), 8.5, { color: C.deltaGreen, align: 'left', valign: 'middle', rtl: true }));
   }
   return { id: 'execFunnel', bg: C.white, elements: els };
 }
@@ -491,13 +512,18 @@ function buildMonthly(m) {
   };
 
   // Bar-chart series names reuse the monthly row labels (same metrics, same slide).
+  // Both monthly charts read RIGHT→LEFT to match the RTL monthly table on this slide:
+  // the categories AND every series `values` array are reversed at SPEC level (oldest
+  // month at the RIGHT, time flowing leftward). The renderers are index-aligned
+  // (category i drawn at xOf(i)), so reversing the arrays flips the visual order — data
+  // labels, category labels and legend all follow — and SVG/PDF/PPTX stay in lockstep.
   const monthlyChart = {
     t: 'chart', kind: 'colClustered', x: 0.5, y: 1.07, w: 6.0, h: 3.4,
-    categories: monthLabels,
+    categories: rev(monthLabels),
     series: [
-      { name: L('monthlyRowOrders'), values: mo.map((x) => x.orders), color: CHART_BLUE },
-      { name: L('monthlyRowResults'), values: mo.map((x) => x.results), color: C.greenBright },
-      { name: L('monthlyRowIncomplete'), values: mo.map((x) => pendingOf(x)), color: CHART_GRAY },
+      { name: L('monthlyRowOrders'), values: rev(mo.map((x) => x.orders)), color: CHART_BLUE },
+      { name: L('monthlyRowResults'), values: rev(mo.map((x) => x.results)), color: C.greenBright },
+      { name: L('monthlyRowIncomplete'), values: rev(mo.map((x) => pendingOf(x))), color: CHART_GRAY },
     ],
     opts: { dataLabels: true, legend: 'bottom' },
   };
@@ -506,12 +532,14 @@ function buildMonthly(m) {
   // Key both series by month over the SAME derived month list as the categories,
   // so a month absent from perMonth becomes a null gap in place (rather than
   // shifting the later months' points left and misaligning the line).
+  // Reversed to RIGHT→LEFT too (see monthlyChart note): categories and both series
+  // `values` arrays reversed in lockstep so the null-gap alignment is preserved.
   const turnaroundChart = {
     t: 'chart', kind: 'line', x: 4.139, y: 4.583, w: 9.139, h: 2.389,
-    categories: monthLabels,
+    categories: rev(monthLabels),
     series: [
-      { name: L('chartActual'), values: monthKeys.map((k) => t.perMonth.find((p) => p.month === k)?.actual ?? null), color: C.navyChart, marker: 'circle' },
-      { name: L('chartExpected'), values: monthKeys.map((k) => t.perMonth.find((p) => p.month === k)?.expected ?? null), color: C.orangeSeries, dash: true, marker: 'diamond' },
+      { name: L('chartActual'), values: rev(monthKeys.map((k) => t.perMonth.find((p) => p.month === k)?.actual ?? null)), color: C.navyChart, marker: 'circle' },
+      { name: L('chartExpected'), values: rev(monthKeys.map((k) => t.perMonth.find((p) => p.month === k)?.expected ?? null)), color: C.orangeSeries, dash: true, marker: 'diamond' },
     ],
     opts: { legend: 'bottom', title: L('chartDaysAxis'), valMin: 0 },
   };
@@ -551,11 +579,10 @@ function buildMonthly(m) {
 // ============================================================================
 // Slide 4 — Compliance measure / late orders
 // ============================================================================
-// Category cap for the late/on-time chart: keep at most this many test bars. Beyond
-// it, we surface the TOP N by combined (late+onTime) volume, re-sorted back into the
-// engine's byTest order, and spend one line on a '+ N فحوصات أخرى' note.
-const CAT_CAP = 13;
-
+// TABLE-ONLY slide (user decision 2026-07-23): the late/on-time detail chart, its band
+// divider + heading, and the catalog/overflow notes were removed; the by-lab table now
+// grows into the freed space. (The chartLateSeries/chartOnTimeSeries/catalogNote labels
+// stay in the registries for parity — harmless orphans.)
 function buildCompliance(m) {
   const L = labelOf(m);
   const lab = m.kpi.byLab;
@@ -615,24 +642,21 @@ function buildCompliance(m) {
   ]);
 
   // colW: '#' dropped. 8 count columns at 1.0in each; the lab-name column takes the
-  // remainder (3.667in — un-truncated for the 6 known labs at the body font). Total
-  // table width UNCHANGED = 11.667 (3.667 + 8×1.0).
+  // remainder (3.667in). Total table width UNCHANGED = 11.667 (3.667 + 8×1.0).
   const LAB_W = 3.667, NUM_W = 1.0;
-  // Footnote Y is DYNAMIC: live data renders MORE lab rows than the mock, so a static
-  // footnote y crashed into the totals row. rowH stays 0.275 for the known labs; when
-  // labRows > 7 the rows shrink so the table + footnote still clear the chart band
-  // (divider at y 4.12). The footnote sits one gap below the totals row, clamped so it
-  // never drops past the chart top − 0.05.
-  const TABLE_Y = 1.194, BASE_ROW_H = 0.275, FOOT_H = 0.24, BAND_TOP = 4.12;
+  // Table-only slide now, so rowH GROWS to fill the freed vertical space, capped at
+  // ROW_H_CAP (0.40in). Past ~12 labs the rows shrink dynamically so the table + the
+  // equation footnote still clear the slide content bottom (6.95). The footnote sits one
+  // FOOT_GAP below the totals row; because rowH ≤ the space-filling height, the footnote
+  // bottom is guaranteed ≤ CONTENT_BOTTOM (no separate clamp needed). Fonts bumped a
+  // touch (10/10.5) now that the table owns the whole slide — verified clean at 9 labs.
+  const TABLE_Y = 1.194, ROW_H_CAP = 0.40, FOOT_H = 0.24, CONTENT_BOTTOM = 6.95, FOOT_GAP = 0.08;
   const nTableRows = labRows.length + 2;            // header + labRows + totals
-  let rowH = BASE_ROW_H;
-  if (labRows.length > 7) {
-    const maxRowH = (BAND_TOP - 0.05 - FOOT_H - 0.08 - TABLE_Y) / nTableRows;
-    rowH = Math.min(BASE_ROW_H, Math.floor(maxRowH * 1000) / 1000);
-  }
-  const footnoteY = Math.min(TABLE_Y + nTableRows * rowH + 0.08, BAND_TOP - 0.05 - FOOT_H);
+  const fillRowH = (CONTENT_BOTTOM - FOOT_GAP - FOOT_H - TABLE_Y) / nTableRows;
+  const rowH = Math.min(ROW_H_CAP, Math.floor(fillRowH * 1000) / 1000);
+  const footnoteY = TABLE_Y + nTableRows * rowH + FOOT_GAP;
   const labTable = {
-    t: 'table', x: 0.833, y: TABLE_Y, w: 11.667, rtl: true, rowH, headerSize: 9, bodySize: 9.5,
+    t: 'table', x: 0.833, y: TABLE_Y, w: 11.667, rtl: true, rowH, headerSize: 10, bodySize: 10.5,
     header: { fill: C.navy, color: C.white, bold: true },
     colW: rev([LAB_W, NUM_W, NUM_W, NUM_W, NUM_W, NUM_W, NUM_W, NUM_W, NUM_W]),
     rows: [header, ...labRows, totalRow],
@@ -643,46 +667,14 @@ function buildCompliance(m) {
     `${L('compTotal')} = ${L('compPipeline')} + ${L('compAwaiting')} + ${L('compOnTime')} + ${L('compResultedLate')} + ${L('compRejected')}`,
     9, { color: C.slate600, align: 'right', valign: 'middle', rtl: true });
 
-  // Grouped late + on-time bars in one chart. Cap the category count to CAT_CAP:
-  // pick the top by (late+onTime), then restore byTest order so bars read naturally.
-  const byTest = m.kpi.byTest;
-  let cats = byTest, extraCats = 0;
-  if (byTest.length > CAT_CAP) {
-    const keep = new Set(byTest.slice()
-      .sort((a, b) => (b.late + b.onTime) - (a.late + a.onTime))
-      .slice(0, CAT_CAP));
-    cats = byTest.filter((x) => keep.has(x));
-    extraCats = byTest.length - CAT_CAP;
-  }
-  // Bar geometry: y bottom is pinned at 7.05 so grouped pairs never cross the footer
-  // border (7.10). Category labels shrink to 7pt past 10 categories to stay readable.
-  const CHART_Y = 4.5, CHART_BOTTOM = 7.05;
-  const lateChart = {
-    t: 'chart', kind: 'barH', x: 0.806, y: CHART_Y, w: 11.694, h: CHART_BOTTOM - CHART_Y,
-    categories: cats.map((x) => m.displayNames[x.testName] || x.testName),
-    series: [
-      { name: L('chartLateSeries'), values: cats.map((x) => x.late), color: C.navyBar },
-      { name: L('chartOnTimeSeries'), values: cats.map((x) => x.onTime), color: C.greenBright },
-    ],
-    opts: { dataLabels: true, legend: 'bottom', catFont: cats.length > 10 ? 7 : 8 },
-  };
-
+  // Slide is TABLE-ONLY (user decision 2026-07-23): chrome + the by-lab table + the
+  // equation footnote. The late/on-time detail chart, its band divider/heading, and the
+  // catalog/overflow notes were all removed; the table grew into the freed space above.
   const els = [
     ...chrome(L('titleCompliance')),
     labTable,
     eqFootnote,
-    rect(0.6, 4.12, 12.3, 0.012, C.border),
-    text(0.6, 4.16, 12.3, 0.4, 'تفاصيل الطلبات المتأخرة والملتزمة', 14, { bold: true, color: C.navy, align: 'center', valign: 'middle', rtl: true }),
-    lateChart,
-    // Catalog footnote for the by-test chart (top-right of the band, opposite the
-    // overflow note) — the bars reflect only the approved test catalog.
-    text(8.9, 4.18, 3.6, 0.30, L('catalogNote'), 9, { italic: true, color: C.slate600, align: 'right', valign: 'middle', rtl: true }),
   ];
-  // Overflow note (top-left of the chart band, clear of the centered subtitle).
-  if (extraCats > 0) {
-    els.push(text(0.806, 4.18, 3.6, 0.30, `+ ${extraCats} فحوصات أخرى`, 9,
-      { italic: true, color: C.slate600, align: 'left', valign: 'middle', rtl: true }));
-  }
   return { id: 'compliance', bg: C.white, elements: els };
 }
 

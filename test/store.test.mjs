@@ -194,7 +194,7 @@ test('v1 stored doc migrates to v2: cancelledByMonth reset to the manual seed, o
   );
 
   const s = store.loadSettings();
-  assert.equal(s.schemaVersion, 2); // bumped
+  assert.equal(s.schemaVersion, store.SCHEMA_VERSION); // migrated forward to current
   // cancelledByMonth reset to manual-only seed (data-derived months dropped).
   assert.deepEqual(s.historicalConstants.cancelledByMonth, MANUAL_SEED);
   const sum = Object.values(s.historicalConstants.cancelledByMonth).reduce((a, b) => a + b, 0);
@@ -210,21 +210,21 @@ test('v1 stored doc migrates to v2: cancelledByMonth reset to the manual seed, o
   assert.equal(s.cachedTracker.model.tasks.length, 1);
   // Persisted with the bump so the migration runs only once.
   const stored = JSON.parse(mock.getItem(SETTINGS_KEY));
-  assert.equal(stored.schemaVersion, 2);
+  assert.equal(stored.schemaVersion, store.SCHEMA_VERSION);
   assert.deepEqual(stored.historicalConstants.cancelledByMonth, MANUAL_SEED);
 });
 
-test('v2 stored doc round-trips without migration', () => {
+test('current-schema stored doc round-trips without migration', () => {
   fresh();
   const s = store.loadSettings();
-  assert.equal(s.schemaVersion, 2);
+  assert.equal(s.schemaVersion, store.SCHEMA_VERSION);
   s.tatLookup['RT TEST'] = 5;
   s.historicalConstants.cancelledByMonth['2026-01'] = 21; // user edit survives
   store.saveSettings(s);
 
   store.__resetForTests();
   const reloaded = store.loadSettings();
-  assert.equal(reloaded.schemaVersion, 2);
+  assert.equal(reloaded.schemaVersion, store.SCHEMA_VERSION);
   assert.equal(reloaded.tatLookup['RT TEST'], 5);
   // No reset on a v2 reload — the user edit stays.
   assert.equal(reloaded.historicalConstants.cancelledByMonth['2026-01'], 21);
@@ -388,7 +388,7 @@ test('importSettings accepts a v1 backup and resets cancelledByMonth to the manu
   assert.ok(summary); // imported without throwing
 
   const after = store.loadSettings();
-  assert.equal(after.schemaVersion, 2);
+  assert.equal(after.schemaVersion, store.SCHEMA_VERSION);
   // v1 cancelledByMonth dropped in favor of the manual seed.
   assert.deepEqual(after.historicalConstants.cancelledByMonth, MANUAL_SEED);
   // Other imported fields still land.
@@ -478,7 +478,7 @@ test('load backfills missing grafana/cachedTracker on an old (v1) stored doc dur
   );
 
   const s = store.loadSettings();
-  assert.equal(s.schemaVersion, 2); // v1 → v2 migration stamps the bump
+  assert.equal(s.schemaVersion, store.SCHEMA_VERSION); // v1 → current migration stamps the bump
   assert.deepEqual(s.grafana, { baseUrl: 'https://elab.seha.sa/hpapm', accessToken: '', panelId: 49, enabled: false, dataKey: '' });
   assert.equal(s.cachedTracker, null);
   // Existing fields untouched.
