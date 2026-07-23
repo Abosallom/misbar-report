@@ -1,8 +1,9 @@
 // ui/screen-review.js — review/edit report content with a live slide preview (Track E).
-import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-07-22.13';
-import { el, editableTable, textareaField, toast } from './components.js?v=v2026-07-22.13';
-import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-07-22.13';
-import { autoDraft } from '../model/drafts.js?v=v2026-07-22.13';
+import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-07-23.1';
+import { el, editableTable, textareaField, toast } from './components.js?v=v2026-07-23.1';
+import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-07-23.1';
+import { autoDraft } from '../model/drafts.js?v=v2026-07-23.1';
+import { buildHistoryPanel } from './history-table.js?v=v2026-07-23.1';
 
 /* small local module helpers (kept local to avoid cross-screen coupling) */
 async function tryImport(path) { try { return await import(path); } catch { return null; } }
@@ -235,7 +236,7 @@ export async function render(container, ctx) {
   // deltaMode baseline (user decision B): recompute deltas + stamp deltaBaseline for the
   // exec legend. Guarded import → degrades to legacy engine deltas if the module isn't
   // present at runtime. Re-run per preview (below) so a report-date change re-picks.
-  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-07-22.13');
+  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-07-23.1');
   const pickBaseline = dbMod && dbMod.pickDeltaBaseline;
   applyDeltaBaseline(model, store, pickBaseline);
   const kpi = model.kpi;
@@ -293,9 +294,9 @@ export async function render(container, ctx) {
     const token = ++renderToken;
     model.reportDate = state.reportDate;
     applyDeltaBaseline(model, store, pickBaseline); // re-pick baseline for the current report date
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-07-22.13');
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-07-23.1');
     const buildSpec = pickFn(specMod, ['buildSpec', 'build', 'makeSpec', 'toSpec']);
-    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-07-22.13');
+    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-07-23.1');
     const renderFn = pickFn(rendMod, ['renderSpec', 'renderSlides', 'renderHtml', 'render']);
 
     if (!buildSpec || !renderFn) {
@@ -423,6 +424,7 @@ export async function render(container, ctx) {
     state.reportDate = dateInput.value || todayISO();
     model.reportDate = state.reportDate; // sync immediately — generate must never see a stale date
     dateHint.textContent = formatDateAr(state.reportDate);
+    renderHistory(); // window anchor moved → rebuild the last-week panel
     schedulePreview();
   });
   const dateHint = el('div', { class: 'hint', text: formatDateAr(state.reportDate) });
@@ -647,7 +649,7 @@ export async function render(container, ctx) {
     el('summary', { class: 'card__title', style: 'cursor:pointer', text: STR.review.labelsCardTitle }),
   ]);
   (async () => {
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-07-22.13');
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-07-23.1');
     const LABEL_NAMES = specMod && specMod.LABEL_NAMES;
     const DEFAULT_LABELS = (specMod && specMod.DEFAULT_LABELS) || {};
     if (!LABEL_NAMES || typeof LABEL_NAMES !== 'object') {
@@ -761,10 +763,33 @@ export async function render(container, ctx) {
   refreshBanner();
   const deltaArea = el('div', { class: 'delta-area' }, [deltaModeControl, bannerHost]);
 
-  // Banner FIRST, then daily-edited items (date → support → tasks → challenges/risks),
-  // then the advanced KPI-override and label-customisation cards, then generate.
+  // 'أرقام التقارير والتقدم' — a collapsed-by-default RTL progress card (range pills
+  // أسبوع/شهر/منذ البداية driving a per-sample table + trend chart) mounted right below
+  // the delta switcher. Rebuilt when the report date changes (the window/anchor); the
+  // open/closed state is preserved across rebuilds. Numbers come from engine/asof.js
+  // (guarded inside the panel → published-history-only, chart hidden, if absent).
+  const historyHost = el('div', { class: 'history-host' });
+  let historyOpen = false;
+  function renderHistory() {
+    const s = store.settings || {};
+    const panel = buildHistoryPanel({
+      rows: (state.parsed && state.parsed.orders) || null,
+      tatTests: s.tatLookup || {},
+      history: s.snapshotHistory || {},
+      endIso: state.reportDate,
+    });
+    panel.open = historyOpen;
+    panel.addEventListener('toggle', () => { historyOpen = panel.open; });
+    historyHost.innerHTML = '';
+    historyHost.appendChild(panel);
+  }
+  renderHistory();
+
+  // Banner FIRST, then the week-history panel, then daily-edited items (date →
+  // support → tasks → challenges/risks), then the advanced KPI-override and
+  // label-customisation cards, then generate.
   const controls = el('div', { class: 'review-controls' }, [
-    deltaArea, dateField, panelsCard, tasksCurrentCard, tasksInternalCard, challengesCard, risksCard, kpiCard, labelsHost, generateBtn,
+    deltaArea, historyHost, dateField, panelsCard, tasksCurrentCard, tasksInternalCard, challengesCard, risksCard, kpiCard, labelsHost, generateBtn,
   ]);
   const preview = el('div', { class: 'review-preview' }, [slideToggleRow, previewFrame]);
 
