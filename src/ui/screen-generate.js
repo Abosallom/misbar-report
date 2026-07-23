@@ -1,12 +1,12 @@
 // ui/screen-generate.js — build both variants, produce 4 files, trigger downloads (Track E).
-import { STR, todayISO, buildFileName, formatDateAr } from '../i18n/ar.js?v=v2026-07-22.12';
-import { el, progressBar, toast } from './components.js?v=v2026-07-22.12';
-import { VARIANTS } from '../contracts.js?v=v2026-07-22.12';
-import { getGenLibs } from '../vendor-loader.js?v=v2026-07-22.12';
-import { resetRunData } from '../state.js?v=v2026-07-22.12';
-import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-07-22.12';
-import { autoDraft } from '../model/drafts.js?v=v2026-07-22.12';
-import { buildLateLabsSection, triggerDownload } from './late-labs-section.js?v=v2026-07-22.12';
+import { STR, todayISO, buildFileName, formatDateAr } from '../i18n/ar.js?v=v2026-07-22.13';
+import { el, progressBar, toast } from './components.js?v=v2026-07-22.13';
+import { VARIANTS } from '../contracts.js?v=v2026-07-22.13';
+import { getGenLibs } from '../vendor-loader.js?v=v2026-07-22.13';
+import { resetRunData } from '../state.js?v=v2026-07-22.13';
+import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-07-22.13';
+import { autoDraft } from '../model/drafts.js?v=v2026-07-22.13';
+import { buildLateLabsSection, triggerDownload } from './late-labs-section.js?v=v2026-07-22.13';
 
 async function tryImport(path) { try { return await import(path); } catch { return null; } }
 function pickFn(mod, names) {
@@ -124,7 +124,7 @@ function fallbackModel(state, store) {
 // Build the SlideSpec per VARIANT — the variant changes slide-5 content
 // (task rows), so one shared spec would leak internal tasks into NUPCO files.
 async function buildVariantSpec(model, variant) {
-  const mod = await tryImport('../slidespec/build-spec.js?v=v2026-07-22.12');
+  const mod = await tryImport('../slidespec/build-spec.js?v=v2026-07-22.13');
   const fn = pickFn(mod, ['buildSpec', 'build', 'makeSpec', 'toSpec']);
   if (!fn) return null;
   let spec = fn(model, { variant });
@@ -150,7 +150,7 @@ async function toBlob(result, kind) {
 // renderPptx(spec, {variant, PptxGenJS}) -> Promise<Blob>
 async function makePptx(spec, variant, libs) {
   if (!spec) return null;
-  const mod = await tryImport('../render/pptx-renderer.js?v=v2026-07-22.12');
+  const mod = await tryImport('../render/pptx-renderer.js?v=v2026-07-22.13');
   const fn = pickFn(mod, ['renderPptx', 'buildPptx', 'toPptx', 'makePptx', 'render']);
   if (!fn) return null;
   const r = await fn(spec, { variant, PptxGenJS: libs.PptxGenJS });
@@ -204,9 +204,9 @@ function makeThumbStrip() {
 // renderSlides(spec, {variant}) -> fragment of .sl-slide; exportPdf(slideEls, {jsPDF, html2canvas, onProgress})
 async function makePdf(spec, variant, libs, host, onProgress, thumbs) {
   if (!spec) return null;
-  const rMod = await tryImport('../render/html-renderer.js?v=v2026-07-22.12');
+  const rMod = await tryImport('../render/html-renderer.js?v=v2026-07-22.13');
   const renderSlides = pickFn(rMod, ['renderSlides', 'renderSpec', 'renderHtml', 'render']);
-  const pMod = await tryImport('../render/pdf-export.js?v=v2026-07-22.12');
+  const pMod = await tryImport('../render/pdf-export.js?v=v2026-07-22.13');
   const exportPdf = pickFn(pMod, ['exportPdf', 'renderPdf', 'toPdf', 'buildPdf', 'render']);
   if (!renderSlides || !exportPdf) return null;
   host.innerHTML = '';
@@ -288,7 +288,7 @@ export async function render(container, ctx) {
   // generated files' exec legend/chips match the review preview. recordSnapshot (below)
   // appends this run to snapshotHistory on success. Guarded → legacy engine deltas if the
   // module isn't present at runtime.
-  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-07-22.12');
+  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-07-22.13');
   const pickBaseline = dbMod && dbMod.pickDeltaBaseline;
   const recordSnapshot = dbMod && dbMod.recordSnapshot;
   applyDeltaBaseline(model, store, pickBaseline);

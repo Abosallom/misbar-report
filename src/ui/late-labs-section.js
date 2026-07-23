@@ -5,10 +5,10 @@
 // basis, empty-state, and the sanitized triggerDownload helper. Built from the
 // SAME dataset a generate run uses (order rows + TAT lookup + an as-of instant),
 // so it works in live-snapshot mode and on the upload screen too.
-import { el, toast } from './components.js?v=v2026-07-22.12';
-import { todayISO } from '../i18n/ar.js?v=v2026-07-22.12';
-import { buildLateLabWorkbooks } from '../export/late-labs.js?v=v2026-07-22.12';
-import { parseDateTime } from '../engine/workday.js?v=v2026-07-22.12';
+import { el, toast } from './components.js?v=v2026-07-22.13';
+import { todayISO } from '../i18n/ar.js?v=v2026-07-22.13';
+import { buildLateLabWorkbooks } from '../export/late-labs.js?v=v2026-07-22.13';
+import { parseDateTime } from '../engine/workday.js?v=v2026-07-22.13';
 
 // English email template the team pastes when notifying a lab — verbatim wording.
 function labEmailText(lab) {

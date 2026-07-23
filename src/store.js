@@ -11,13 +11,13 @@
 // throws on write; on failure we fall back to an in-memory doc and expose
 // isEphemeral() so the UI can warn the user their edits will not persist.
 
-import { SETTINGS_KEY } from './contracts.js?v=v2026-07-22.12';
-import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-07-22.12';
-import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-07-22.12';
+import { SETTINGS_KEY } from './contracts.js?v=v2026-07-22.13';
+import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-07-22.13';
+import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-07-22.13';
 import {
   HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED, GRAFANA_SEED, REPORT_OPTIONS_SEED,
   SNAPSHOT_HISTORY_SEED,
-} from './seeds/defaults.js?v=v2026-07-22.12';
+} from './seeds/defaults.js?v=v2026-07-22.13';
 
 export const SCHEMA_VERSION = 3;
 

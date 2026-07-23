@@ -1,8 +1,8 @@
 // ui/screen-review.js — review/edit report content with a live slide preview (Track E).
-import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-07-22.12';
-import { el, editableTable, textareaField, toast } from './components.js?v=v2026-07-22.12';
-import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-07-22.12';
-import { autoDraft } from '../model/drafts.js?v=v2026-07-22.12';
+import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-07-22.13';
+import { el, editableTable, textareaField, toast } from './components.js?v=v2026-07-22.13';
+import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-07-22.13';
+import { autoDraft } from '../model/drafts.js?v=v2026-07-22.13';
 
 /* small local module helpers (kept local to avoid cross-screen coupling) */
 async function tryImport(path) { try { return await import(path); } catch { return null; } }
@@ -77,6 +77,7 @@ function defaultReportOptions() {
       collected: true, dispatched: true, received: true,
     },
     labels: {},
+    deltaMode: 'daily',
   };
 }
 
@@ -90,6 +91,7 @@ function reportOptionsFromSettings(settings) {
     slides: { ...base.slides, ...(ro.slides || {}) },
     kpiCards: { ...base.kpiCards, ...(ro.kpiCards || {}) },
     labels: { ...(ro.labels || {}) },
+    deltaMode: (ro.deltaMode === 'daily' || ro.deltaMode === 'weekly') ? ro.deltaMode : base.deltaMode,
   };
 }
 
@@ -223,10 +225,17 @@ export async function render(container, ctx) {
   if (!model.reportOptions) model.reportOptions = reportOptionsFromSettings(store.settings);
   if (!model.reportOptions.labels) model.reportOptions.labels = {};
   if (!model.overrides) model.overrides = {};
+  // deltaMode lives in the shared reportOptions doc; re-source it from settings each
+  // render so the review segmented control mirrors the settings-screen radio (both
+  // write the same reportOptions.deltaMode). applyDeltaBaseline reads settings too.
+  {
+    const sdm = (store.settings.reportOptions && store.settings.reportOptions.deltaMode);
+    model.reportOptions.deltaMode = (sdm === 'weekly') ? 'weekly' : 'daily';
+  }
   // deltaMode baseline (user decision B): recompute deltas + stamp deltaBaseline for the
   // exec legend. Guarded import → degrades to legacy engine deltas if the module isn't
   // present at runtime. Re-run per preview (below) so a report-date change re-picks.
-  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-07-22.12');
+  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-07-22.13');
   const pickBaseline = dbMod && dbMod.pickDeltaBaseline;
   applyDeltaBaseline(model, store, pickBaseline);
   const kpi = model.kpi;
@@ -284,9 +293,9 @@ export async function render(container, ctx) {
     const token = ++renderToken;
     model.reportDate = state.reportDate;
     applyDeltaBaseline(model, store, pickBaseline); // re-pick baseline for the current report date
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-07-22.12');
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-07-22.13');
     const buildSpec = pickFn(specMod, ['buildSpec', 'build', 'makeSpec', 'toSpec']);
-    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-07-22.12');
+    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-07-22.13');
     const renderFn = pickFn(rendMod, ['renderSpec', 'renderSlides', 'renderHtml', 'render']);
 
     if (!buildSpec || !renderFn) {
@@ -638,7 +647,7 @@ export async function render(container, ctx) {
     el('summary', { class: 'card__title', style: 'cursor:pointer', text: STR.review.labelsCardTitle }),
   ]);
   (async () => {
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-07-22.12');
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-07-22.13');
     const LABEL_NAMES = specMod && specMod.LABEL_NAMES;
     const DEFAULT_LABELS = (specMod && specMod.DEFAULT_LABELS) || {};
     if (!LABEL_NAMES || typeof LABEL_NAMES !== 'object') {
@@ -711,10 +720,51 @@ export async function render(container, ctx) {
     ]);
   }
 
+  // Delta-mode segmented control (يومي/أسبوعي) — the deltaMode option surfaced in the
+  // MAIN flow, right above the 'ما الجديد' banner where the baseline date is shown.
+  // Clicking persists reportOptions.deltaMode through the SAME settings save path the
+  // slide chips use (persistReportOptions), re-picks the baseline, and live-refreshes
+  // the banner + preview. Initial state comes from settings (default 'daily').
+  const dmPillStyle = (on) => 'border-radius:999px;padding:6px 18px;font-weight:700;font-size:.82rem;cursor:pointer;min-height:34px;line-height:1;transition:background .12s;'
+    + (on
+      ? 'background:var(--navy);color:#fff;border:1px solid var(--navy);'
+      : 'background:var(--white);color:var(--slate-600);border:1px solid var(--border-dark);');
+  let dmDaily = null, dmWeekly = null;
+  function paintDeltaMode() {
+    const mode = model.reportOptions.deltaMode === 'weekly' ? 'weekly' : 'daily';
+    if (dmDaily) { dmDaily.style.cssText = dmPillStyle(mode === 'daily'); dmDaily.setAttribute('aria-pressed', mode === 'daily' ? 'true' : 'false'); }
+    if (dmWeekly) { dmWeekly.style.cssText = dmPillStyle(mode === 'weekly'); dmWeekly.setAttribute('aria-pressed', mode === 'weekly' ? 'true' : 'false'); }
+  }
+  // Refreshable banner host so the baseline date + chips update live on a mode switch.
+  const bannerHost = el('div');
+  const refreshBanner = () => { bannerHost.innerHTML = ''; bannerHost.appendChild(buildDeltaBanner()); };
+  function setDeltaMode(mode) {
+    if (model.reportOptions.deltaMode === mode) return;
+    model.reportOptions.deltaMode = mode;
+    persistReportOptions();                         // (1) canonical settings save path
+    applyDeltaBaseline(model, store, pickBaseline); // (2a) re-pick baseline for new mode
+    refreshBanner();                                // (2b) banner date + chips update live
+    renderPreview();                                // (2c) preview re-renders (re-applies too)
+    paintDeltaMode();                               // (3) flip the active pill
+  }
+  dmDaily = el('button', { type: 'button', text: 'يومي', title: 'مقارنة بآخر تقرير سابق', onClick: () => setDeltaMode('daily') });
+  dmWeekly = el('button', { type: 'button', text: 'أسبوعي', title: 'مقارنة بتقرير قبل أسبوع', onClick: () => setDeltaMode('weekly') });
+  paintDeltaMode();
+  // RTL: يومي (first child) sits on the right, أسبوعي on the left.
+  const deltaModeControl = el('div', {
+    class: 'delta-mode-seg',
+    style: 'display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px',
+  }, [
+    el('span', { text: 'مقارنة الفروقات:', style: 'font-weight:700;font-size:.85rem;color:var(--slate-600);white-space:nowrap' }),
+    el('div', { class: 'delta-mode-seg__pills', style: 'display:inline-flex;gap:6px' }, [dmDaily, dmWeekly]),
+  ]);
+  refreshBanner();
+  const deltaArea = el('div', { class: 'delta-area' }, [deltaModeControl, bannerHost]);
+
   // Banner FIRST, then daily-edited items (date → support → tasks → challenges/risks),
   // then the advanced KPI-override and label-customisation cards, then generate.
   const controls = el('div', { class: 'review-controls' }, [
-    buildDeltaBanner(), dateField, panelsCard, tasksCurrentCard, tasksInternalCard, challengesCard, risksCard, kpiCard, labelsHost, generateBtn,
+    deltaArea, dateField, panelsCard, tasksCurrentCard, tasksInternalCard, challengesCard, risksCard, kpiCard, labelsHost, generateBtn,
   ]);
   const preview = el('div', { class: 'review-preview' }, [slideToggleRow, previewFrame]);
 

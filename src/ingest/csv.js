@@ -1,7 +1,7 @@
 // ingest/csv.js — parse the KAMC daily CSV export (30 cols) into normalized OrderRow[].
 // Library is injected (browser loads PapaParse separately); never imported here.
 // PII (patient/staff fields) is read but NEVER copied into OrderRow or persisted.
-import { normFacility } from '../contracts.js?v=v2026-07-22.12';
+import { normFacility } from '../contracts.js?v=v2026-07-22.13';
 
 // Columns we actually map. Missing ones are reported in errors[] (fail soft).
 export const MAPPED_COLUMNS = [
