@@ -11,21 +11,37 @@
 // throws on write; on failure we fall back to an in-memory doc and expose
 // isEphemeral() so the UI can warn the user their edits will not persist.
 
-import { SETTINGS_KEY } from './contracts.js?v=v2026-07-23.2';
-import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-07-23.2';
-import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-07-23.2';
+import { SETTINGS_KEY } from './contracts.js?v=v2026-07-23.3';
+import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-07-23.3';
+import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-07-23.3';
 import {
   HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED, GRAFANA_SEED, REPORT_OPTIONS_SEED,
   SNAPSHOT_HISTORY_SEED, AUTOMATION_SEED,
-} from './seeds/defaults.js?v=v2026-07-23.2';
+} from './seeds/defaults.js?v=v2026-07-23.3';
+import { DELTA_MODES } from './model/delta-baseline.js?v=v2026-07-23.3';
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 // Well-formed 'YYYY-MM-DD' — the key shape for snapshotHistory entries.
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 // Local 24-hour 'HH:MM' — the shape of automation.dailyTime.
 const DAILY_TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/**
+ * Canonical reportOptions.deltaMode, or null when the value is not a mode at all.
+ * DELTA_MODES (model/delta-baseline.js) is the single source of the valid list:
+ * 'daily' | 'weekly-sun' | 'weekly-thu'. The bare 'weekly' stored before the
+ * Sunday/Thursday split MIGRATES to 'weekly-sun' rather than being discarded, so an
+ * existing install keeps a weekly comparison. Anything else → null: the backfill
+ * resets it to the seed, an import rejects it.
+ * @param {*} v
+ * @returns {string|null}
+ */
+function canonicalDeltaMode(v) {
+  if (v === 'weekly') return 'weekly-sun'; // legacy alias
+  return DELTA_MODES.includes(v) ? v : null;
+}
 
 // The automation boolean switches (v4). Every one defaults to false; dailyTime and
 // labRecipients are the only non-boolean members of the block.
@@ -87,8 +103,9 @@ function backfillReportOptions(doc) {
     if (typeof ro.kpiCards[k] !== 'boolean') ro.kpiCards[k] = seed.kpiCards[k];
   }
   if (!isPlainObject(ro.labels)) ro.labels = {};
-  // deltaMode gained in v3; only 'daily'|'weekly' are valid — anything else resets.
-  if (ro.deltaMode !== 'daily' && ro.deltaMode !== 'weekly') ro.deltaMode = seed.deltaMode;
+  // deltaMode gained in v3, weekday-anchored since the Sun/Thu split: a stored
+  // 'weekly' migrates to 'weekly-sun', anything unrecognized resets to the seed.
+  ro.deltaMode = canonicalDeltaMode(ro.deltaMode) || seed.deltaMode;
 }
 
 /**
@@ -229,7 +246,7 @@ function migrateV1toV2(doc) {
 
 /**
  * v2 → v3 forward migration. v3 adds a rolling per-date `snapshotHistory` (feeding
- * the daily/weekly delta-baseline picker) and `reportOptions.deltaMode`. The
+ * the daily / weekly-sun / weekly-thu delta-baseline picker) and `reportOptions.deltaMode`. The
  * shape-softening (migrateSnapshotShape) backfills both containers; then, so the
  * new daily/weekly chips have something to compare against on day one, we SEED the
  * existing legacy snapshot into snapshotHistory under its asOf date (only when asOf
@@ -264,16 +281,42 @@ function migrateV3toV4(doc) {
   return doc;
 }
 
-/** v2 → v4: run the v2→v3 transform, then v3→v4. */
-function migrateV2toV4(doc) {
-  migrateV2toV3(doc);
-  return migrateV3toV4(doc);
+/**
+ * v4 → v5: retire the definitions slide from the default deck.
+ *
+ * 'منهجية الأرقام' shipped ON by default, so every install created before this
+ * persisted `slides.definitions: true` — a DEFAULT nobody chose. The user asked
+ * for the simple 6-slide deck back (2026-07-26), and the normal backfill only
+ * fills absent keys: it never flips a stored boolean, by design. Without this
+ * one-time reset the simplification would be a no-op on exactly the installs
+ * that matter. It runs once; switching the slide back on in Settings afterwards
+ * sticks, because no later load touches a stored value again.
+ */
+function migrateV4toV5(doc) {
+  migrateSnapshotShape(doc); // same softening/backfill pass every other step runs
+  const ro = isPlainObject(doc.reportOptions) ? doc.reportOptions : (doc.reportOptions = {});
+  const slides = isPlainObject(ro.slides) ? ro.slides : (ro.slides = {});
+  slides.definitions = false;
+  doc.schemaVersion = 5;
+  return doc;
 }
 
-/** v1 → v4: run the v1→v2 transform, then v2→v3, then v3→v4, so old docs land on the current schema. */
-function migrateV1toV4(doc) {
+/** v3 → v5: run the v3→v4 transform, then v4→v5. */
+function migrateV3toV5(doc) {
+  migrateV3toV4(doc);
+  return migrateV4toV5(doc);
+}
+
+/** v2 → v5: run the v2→v3 transform, then v3→v4, then v4→v5. */
+function migrateV2toV5(doc) {
+  migrateV2toV3(doc);
+  return migrateV3toV5(doc);
+}
+
+/** v1 → v5: chain every transform so old docs land on the current schema. */
+function migrateV1toV5(doc) {
   migrateV1toV2(doc);
-  return migrateV2toV4(doc);
+  return migrateV2toV5(doc);
 }
 
 /** Version-check + migrate/reset. Unknown versions reset to seeds. */
@@ -283,9 +326,10 @@ function migrate(doc) {
     return persist(buildSeedDoc());
   }
   if (doc.schemaVersion === SCHEMA_VERSION) return migrateSnapshotShape(doc);
-  if (doc.schemaVersion === 3) return persist(migrateV3toV4(doc));
-  if (doc.schemaVersion === 2) return persist(migrateV2toV4(doc));
-  if (doc.schemaVersion === 1) return persist(migrateV1toV4(doc));
+  if (doc.schemaVersion === 4) return persist(migrateV4toV5(doc));
+  if (doc.schemaVersion === 3) return persist(migrateV3toV5(doc));
+  if (doc.schemaVersion === 2) return persist(migrateV2toV5(doc));
+  if (doc.schemaVersion === 1) return persist(migrateV1toV5(doc));
   // Future schema bumps add forward-migration cases above this line.
   console.warn(
     `[misbar/store] unsupported schemaVersion ${doc.schemaVersion} ` +
@@ -506,8 +550,10 @@ function validateImport(doc) {
     }
     // excludeNoTat and the slide/card flags are coerce-tolerant (normalized to
     // booleans in pickImportKeys); only the container shapes are enforced here.
-    if ('deltaMode' in ro && ro.deltaMode !== 'daily' && ro.deltaMode !== 'weekly') {
-      throw new Error("حقل reportOptions.deltaMode غير صالح: يجب أن يكون 'daily' أو 'weekly'.");
+    if ('deltaMode' in ro && canonicalDeltaMode(ro.deltaMode) == null) {
+      throw new Error(
+        "حقل reportOptions.deltaMode غير صالح: يجب أن يكون 'daily' أو 'weekly-sun' أو 'weekly-thu'.",
+      );
     }
     if ('slides' in ro && !isPlainObject(ro.slides)) {
       throw new Error('حقل reportOptions.slides غير صالح: يجب أن يكون كائناً.');
@@ -652,7 +698,10 @@ function pickImportKeys(doc) {
     const ro = out.reportOptions;
     const picked = {};
     if ('excludeNoTat' in ro) picked.excludeNoTat = !!ro.excludeNoTat;
-    if (ro.deltaMode === 'daily' || ro.deltaMode === 'weekly') picked.deltaMode = ro.deltaMode;
+    // A legacy 'weekly' lands as 'weekly-sun'; an unrecognized value is dropped so
+    // the stored default survives the merge (validateImport already rejected it).
+    const dm = canonicalDeltaMode(ro.deltaMode);
+    if (dm != null) picked.deltaMode = dm;
     if (isPlainObject(ro.slides)) {
       const s = {};
       for (const k of REPORT_OPTION_SLIDE_KEYS) if (k in ro.slides) s[k] = !!ro.slides[k];

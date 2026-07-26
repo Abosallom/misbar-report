@@ -525,7 +525,10 @@ test('first run seeds reportOptions from the seed (deep-copied)', () => {
   assert.notEqual(s.reportOptions.kpiCards, REPORT_OPTIONS_SEED.kpiCards);
   assert.equal(s.reportOptions.excludeNoTat, false);
   assert.equal(s.reportOptions.slides.execFunnel, true);
-  assert.equal(Object.keys(s.reportOptions.kpiCards).length, 7);
+  // 7 exec KPI cards + the opt-in 'turnaround' key (monthly slide line chart +
+  // overall-average card, default false — build-spec OPT_IN_CARDS).
+  assert.equal(Object.keys(s.reportOptions.kpiCards).length, 8);
+  assert.equal(s.reportOptions.kpiCards.turnaround, false);
   assert.deepEqual(s.reportOptions.labels, {});
 });
 
@@ -707,6 +710,94 @@ test('importSettings whitelists reportOptions keys, coerces flags, drops unknown
   assert.equal(ro.kpiCards.completed, true); // untouched seed key survives
   assert.equal(ro.labels.total, 'الإجمالي');
   assert.equal(ro.unknownSub, undefined); // unknown top-level reportOptions key dropped
+});
+
+// ---- reportOptions.deltaMode: the two weekday-anchored weekly options --------
+test('first run seeds deltaMode daily and the definitions slide OFF (simple 6-slide deck)', () => {
+  fresh();
+  const ro = store.loadSettings().reportOptions;
+  assert.equal(ro.deltaMode, 'daily');
+  assert.equal(ro.deltaMode, REPORT_OPTIONS_SEED.deltaMode);
+  // The delivered deck is cover · exec · monthly · compliance · action · thanks.
+  assert.equal(ro.slides.definitions, false);
+  assert.equal(ro.slides.execFunnel, true);
+  assert.equal(ro.slides.monthly, true);
+  assert.equal(ro.slides.compliance, true);
+  assert.equal(ro.slides.action, true);
+});
+
+test("a stored legacy 'weekly' deltaMode migrates to 'weekly-sun' on load", () => {
+  const mock = fresh();
+  mock.setItem(
+    SETTINGS_KEY,
+    JSON.stringify({
+      schemaVersion: store.SCHEMA_VERSION,
+      reportOptions: { ...REPORT_OPTIONS_SEED, deltaMode: 'weekly' },
+    }),
+  );
+  assert.equal(store.loadSettings().reportOptions.deltaMode, 'weekly-sun');
+});
+
+test('the three deltaMode values survive a load; anything else resets to the seed', () => {
+  for (const mode of ['daily', 'weekly-sun', 'weekly-thu']) {
+    const mock = fresh();
+    mock.setItem(
+      SETTINGS_KEY,
+      JSON.stringify({ schemaVersion: store.SCHEMA_VERSION, reportOptions: { ...REPORT_OPTIONS_SEED, deltaMode: mode } }),
+    );
+    assert.equal(store.loadSettings().reportOptions.deltaMode, mode, `${mode} preserved`);
+  }
+  for (const bad of ['weekly-mon', 'WEEKLY', '', 7, null]) {
+    const mock = fresh();
+    mock.setItem(
+      SETTINGS_KEY,
+      JSON.stringify({ schemaVersion: store.SCHEMA_VERSION, reportOptions: { ...REPORT_OPTIONS_SEED, deltaMode: bad } }),
+    );
+    assert.equal(store.loadSettings().reportOptions.deltaMode, 'daily', `${String(bad)} → seed`);
+  }
+});
+
+test('the new definitions default only fills an ABSENT key — a stored value is never flipped', () => {
+  // Stored TRUE (an install that opted into منهجية الأرقام) must stay true…
+  let mock = fresh();
+  mock.setItem(
+    SETTINGS_KEY,
+    JSON.stringify({
+      schemaVersion: store.SCHEMA_VERSION,
+      reportOptions: { excludeNoTat: false, slides: { execFunnel: true, definitions: true }, kpiCards: {}, labels: {}, deltaMode: 'daily' },
+    }),
+  );
+  assert.equal(store.loadSettings().reportOptions.slides.definitions, true);
+  // …while a doc predating the slide gets the new default (false).
+  mock = fresh();
+  mock.setItem(
+    SETTINGS_KEY,
+    JSON.stringify({
+      schemaVersion: store.SCHEMA_VERSION,
+      reportOptions: { excludeNoTat: false, slides: { execFunnel: true, monthly: true, compliance: true, action: true }, kpiCards: {}, labels: {}, deltaMode: 'daily' },
+    }),
+  );
+  const s = store.loadSettings();
+  assert.equal(s.reportOptions.slides.definitions, false);
+  assert.equal(s.reportOptions.slides.execFunnel, true); // other user values untouched
+});
+
+test('importSettings validates deltaMode, aliases legacy weekly, round-trips both weekly options', () => {
+  fresh();
+  store.loadSettings();
+  assert.throws(
+    () => store.importSettings(JSON.stringify({ schemaVersion: 3, reportOptions: { deltaMode: 'weekly-mon' } })),
+    /deltaMode/,
+  );
+  // Legacy backup → canonical 'weekly-sun'.
+  store.importSettings(JSON.stringify({ schemaVersion: 3, reportOptions: { deltaMode: 'weekly' } }));
+  assert.equal(store.loadSettings().reportOptions.deltaMode, 'weekly-sun');
+  // Thursday option round-trips verbatim.
+  store.importSettings(JSON.stringify({ schemaVersion: 3, reportOptions: { deltaMode: 'weekly-thu' } }));
+  assert.equal(store.loadSettings().reportOptions.deltaMode, 'weekly-thu');
+  // And an export of that doc re-imports unchanged.
+  const { blob } = store.exportSettings();
+  assert.ok(blob);
 });
 
 // ---- automation block (v4) --------------------------------------------------
@@ -899,4 +990,33 @@ test('importSettings drops unknown automation subkeys before persisting', () => 
   assert.equal(a.autoNuke, undefined);
   assert.equal(a.evil, undefined);
   assert.equal(a.labRecipients['Lab A'], 'a@x.com');
+});
+
+test('v4 stored doc migrates to v5: the definitions default is reset once, then user opt-in sticks', () => {
+  const mock = fresh();
+  // The real existing-install case: 'منهجية الأرقام' shipped ON by default, so every
+  // pre-simplification install persisted definitions:true — a default nobody chose.
+  mock.setItem(
+    SETTINGS_KEY,
+    JSON.stringify({
+      schemaVersion: 4,
+      reportOptions: {
+        excludeNoTat: false,
+        slides: { execFunnel: true, monthly: true, compliance: true, action: true, definitions: true },
+        kpiCards: {}, labels: {}, deltaMode: 'weekly',
+      },
+    }),
+  );
+  const s = store.loadSettings();
+  assert.equal(s.schemaVersion, store.SCHEMA_VERSION, 'migrated to the current schema');
+  assert.equal(s.reportOptions.slides.definitions, false, 'definitions default reset exactly once');
+  assert.equal(s.reportOptions.slides.execFunnel, true, 'other slide choices untouched');
+  // The v4→v5 step must also run the standard backfill pass: the legacy bare
+  // 'weekly' has to land on the canonical weekday-anchored mode.
+  assert.equal(s.reportOptions.deltaMode, 'weekly-sun', 'legacy weekly canonicalized');
+
+  // Switching it back on afterwards is a real choice and must survive reloads.
+  s.reportOptions.slides.definitions = true;
+  store.saveSettings(s);
+  assert.equal(store.loadSettings().reportOptions.slides.definitions, true, 'opt-in persists');
 });

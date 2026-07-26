@@ -8,7 +8,8 @@
 // mirror of the automation panel), live source (Grafana + cached-tracker), and
 // backup (export/import).
 
-import { SNAPSHOT_SEED, REPORT_OPTIONS_SEED, AUTOMATION_SEED } from '../seeds/defaults.js?v=v2026-07-23.2';
+import { SNAPSHOT_SEED, REPORT_OPTIONS_SEED, AUTOMATION_SEED } from '../seeds/defaults.js?v=v2026-07-23.3';
+import { normalizeDeltaMode } from '../model/delta-baseline.js?v=v2026-07-23.3';
 
 const TABS = [
   { id: 'tat', label: 'مدة الفحوصات' },
@@ -38,6 +39,13 @@ const REPORT_CARD_FIELDS = [
   { key: 'rejected', label: 'النتائج المرفوضة' },
   { key: 'lateNoResult', label: 'الطلبات المتأخرة' },
   { key: 'shippedNotReceived', label: 'شُحنت ولم تُستلم' },
+  // OPT-IN key (build-spec OPT_IN_CARDS) — not an exec KPI card: it gates the monthly
+  // slide's turnaround line chart + overall-average card. Off by default, hence the hint.
+  {
+    key: 'turnaround',
+    label: 'بطاقة ومخطط معدل الدوران',
+    hint: 'مطفأة افتراضياً — عند تشغيلها يُضاف مخطط معدل الدوران وبطاقة المتوسط العام إلى شريحة الطلبات الشهرية.',
+  },
 ];
 
 // Automation switches (Settings.automation). This tab MIRRORS the automation
@@ -830,7 +838,9 @@ export function render(container, ctx) {
       if (!r.slides || typeof r.slides !== 'object') r.slides = { ...REPORT_OPTIONS_SEED.slides };
       if (!r.kpiCards || typeof r.kpiCards !== 'object') r.kpiCards = { ...REPORT_OPTIONS_SEED.kpiCards };
       if (!r.labels || typeof r.labels !== 'object') r.labels = {};
-      if (r.deltaMode !== 'daily' && r.deltaMode !== 'weekly') r.deltaMode = REPORT_OPTIONS_SEED.deltaMode;
+      // deltaMode is weekday-anchored ('daily' | 'weekly-sun' | 'weekly-thu'); a
+      // legacy stored 'weekly' reads as 'weekly-sun', anything else as the seed.
+      r.deltaMode = normalizeDeltaMode(r.deltaMode);
       return r;
     }
 
@@ -885,19 +895,29 @@ export function render(container, ctx) {
           checkField(f.label, () => ro().slides[f.key], (v) => { ro().slides[f.key] = v; })),
         // (c) KPI cards
         groupHead('بطاقات المؤشرات'),
-        ...REPORT_CARD_FIELDS.map((f) =>
-          checkField(f.label, () => ro().kpiCards[f.key], (v) => { ro().kpiCards[f.key] = v; })),
-        // (d) delta-chip comparison window
+        // A field may carry an optional `hint` (one st-help line under its checkbox) —
+        // used for the opt-in 'turnaround' key, which is OFF by default.
+        ...REPORT_CARD_FIELDS.flatMap((f) => {
+          const row = checkField(f.label, () => ro().kpiCards[f.key], (v) => { ro().kpiCards[f.key] = v; });
+          return f.hint ? [row, h('p', { class: 'st-help', text: f.hint })] : [row];
+        }),
+        // (d) delta-chip comparison window — daily, or one of the TWO weekday-anchored
+        // weekly options (the weekly report is issued on Sunday and on Thursday).
         radioField(
           'مقارنة الفروقات (الأسهم)',
           'st-deltaMode',
           [
-            { value: 'daily', label: 'يومي — مقارنة بآخر تقرير سابق' },
-            { value: 'weekly', label: 'أسبوعي — مقارنة بتقرير قبل أسبوع' },
+            { value: 'daily', label: 'يومي — مقارنة بآخر تقرير' },
+            { value: 'weekly-sun', label: 'أسبوعي — الأحد' },
+            { value: 'weekly-thu', label: 'أسبوعي — الخميس' },
           ],
           () => ro().deltaMode,
           (v) => { ro().deltaMode = v; },
         ),
+        h('p', {
+          class: 'st-help',
+          text: 'الخيارات الأسبوعية تقارن بآخر تقرير صادر في ذلك اليوم من الأسبوع (الأحد أو الخميس)؛ وإن لم يوجد بعد فبآخر تقرير سابق.',
+        }),
         h('p', {
           class: 'st-help',
           text: 'تُحرَّر تسميات الشرائح والبطاقات من شاشة مراجعة التقرير قبل التوليد.',

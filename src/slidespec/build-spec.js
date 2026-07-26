@@ -2,7 +2,11 @@
 // buildSpec(reportModel, { variant }) -> SlideSpec (see src/contracts.js).
 // One builder per slide. ALL geometry is in inches, derived by converting EMU->inches
 // (÷914400) from the original deck OOXML (تقرير مسبار 09072026.pptx).
-// SEVEN-slide deck (both variants): cover · execFunnel · monthly · compliance · action · definitions · thanks.
+// SIX-slide deck (both variants): cover · execFunnel · monthly · compliance · action · thanks.
+// The definitions slide (منهجية الأرقام) is built on demand only — it is OPT-IN via
+// reportOptions.slides.definitions === true (user decision 2026-07-26: the default deck is
+// back to the simple 20-07 reference shape). The internal variant may still exceed six
+// slides through task-pagination continuation slides ('المهام — تتمة').
 // The variant no longer changes slide PRESENCE — it changes slide-5 (action) task ROWS:
 // nupco shows tasksCurrent (non-لين actions); internal shows tasksInternal ONLY (لين-category
 // actions — user decision 2026-07-19). No slide is internalOnly.
@@ -11,8 +15,21 @@
 //   m.reportOptions.labels[key]   overrides DEFAULT_LABELS static text (byte-stable when absent)
 //   m.reportOptions.slides[key]   toggles the 5 middle slides (cover/thanks always render)
 //   m.reportOptions.kpiCards[key] toggles the 7 exec KPI cards (row geometry repacks)
+//                                 + the OPT-IN 'turnaround' block on the monthly slide
 //   m.overrides[key]              per-run manual NUMBER overrides (suppresses that delta chip)
-import { COLORS as C, GEOM } from '../theme.js?v=v2026-07-23.2';
+import { COLORS as C, GEOM } from '../theme.js?v=v2026-07-23.3';
+
+// OPT-IN kpiCards KEYS. reportOptions.kpiCards normally reads "on unless === false"
+// (see buildExec's cardDefs filter). The keys in this set INVERT that: they render only
+// when the flag is explicitly true, so a missing/undefined flag reads as OFF — exactly
+// the mechanism OPT_IN_SLIDES gives the definitions slide (see buildSpec below).
+// 'turnaround' gates the monthly slide's turnaround LINE CHART *and* its navy
+// overall-average card (user decision 2026-07-26: the default monthly slide matches the
+// 20-07 reference deck — chrome + the monthly table + ONE bar chart, nothing else).
+const OPT_IN_CARDS = new Set(['turnaround']);
+const cardOn = (m) => (key) => (OPT_IN_CARDS.has(key)
+  ? m.reportOptions?.kpiCards?.[key] === true
+  : m.reportOptions?.kpiCards?.[key] !== false);
 
 // ============================================================================
 // LABELS REGISTRY — user-facing STATIC strings. DEFAULT_LABELS holds the built-in
@@ -46,34 +63,47 @@ export const DEFAULT_LABELS = {
   // the old red/green colour key was removed. The legend is MODE-AWARE — the daily/weekly
   // variants substitute the baseline date into '{date}'; the plain key is the legacy
   // (no-baseline) previous-report wording. Rendered only when a chip is visible this run.
+  // WEEKLY is weekday-anchored (user decision 2026-07-26): the Saudi work week is Sun–Thu
+  // and the weekly report is issued on Sunday AND on Thursday, so there are exactly two
+  // weekly baselines — 'weekly-sun' and 'weekly-thu' — each with its own legend wording.
+  // execDeltaLegendWeekly stays for the legacy pre-split 'weekly' mode value.
   execDeltaLegend: '▲ التغيّر منذ التقرير السابق',
   execDeltaLegendDaily: '▲ التغيّر منذ آخر تقرير ({date})',
   execDeltaLegendWeekly: '▲ التغيّر الأسبوعي — منذ تقرير ({date})',
+  execDeltaLegendWeeklySun: '▲ التغيّر الأسبوعي — منذ تقرير الأحد ({date})',
+  execDeltaLegendWeeklyThu: '▲ التغيّر الأسبوعي — منذ تقرير الخميس ({date})',
   // Monthly table row labels (also reused as the monthly bar-chart series names).
-  // monthlyRowIncomplete now surfaces the engine's `pending` partition value
-  // (orders = results + rejected + pending), renamed accordingly.
+  // monthlyRowIncomplete surfaces the engine's `pending` partition value
+  // (orders = results + rejected + pending). Its WORDING is the 20-07 reference deck's
+  // 'النتائج غير المكتملة' (user decision 2026-07-26) — the longer 'قيد المعالجة (بدون نتيجة)'
+  // measured 137.1px = 1.428in in Cairo 10pt against a 1.312in label column (1.112in of
+  // text width once pptxgenjs' default 0.1in cell margins are taken off), so it wrapped to
+  // two lines in BOTH outputs and grew the 0.456in row in PowerPoint. The reference wording
+  // measures 102.4px = 1.067in and fits on one line; it is also the series name the
+  // reference deck's monthly bar chart used.
   monthlyRowOrders: 'الطلبات',
   monthlyRowResults: 'النتائج المستلمة',
   monthlyRowRejected: 'النتائج المرفوضة',
-  monthlyRowIncomplete: 'قيد المعالجة (بدون نتيجة)',
+  monthlyRowIncomplete: 'النتائج غير المكتملة',
   monthlyRowCompletion: 'نسبة الاكتمال',
   // Monthly partition footnote (under the table) — the orders add-up identity.
   monthlyPartition: 'الطلبات = النتائج المستلمة + المرفوضة + قيد المعالجة',
-  // Compliance (byLab) table headers. The count columns ADD UP to الإجمالي:
-  //   total = pipeline + awaitingResult + onTime + resultedLate + rejected.
-  // compLate (منها متأخرة) is a SUBSET of بانتظار النتيجة (overdue, still awaiting a
-  // result) — shown for context, NOT part of the add-up. compHash is retained in the
-  // registry (labels-editor key) but the '#' column was dropped from the table.
+  // Compliance (byLab) table headers — back to the SEVEN reference columns (user
+  // decision 2026-07-26: the 20-07 NUPCO deck shape). Logical RTL order (right→left):
+  //   # | المختبر | مجموع الطلبات | طلبات مستلمة بانتظار نتيجة | مرفوضة | الطلبات المتأخرة | نسبة الطلبات المتأخرة
+  // The wording matches that deck verbatim. compPipeline / compOnTime / compResultedLate
+  // are NO LONGER RENDERED (their columns were removed with the add-up equation footnote);
+  // the keys stay in both registries for parity — harmless orphans, like catalogNote.
   compHash: '#',
   compLab: 'المختبر',
-  compTotal: 'الإجمالي',
+  compTotal: 'مجموع الطلبات',
   compPipeline: 'قبل الاستلام',
-  compAwaiting: 'بانتظار النتيجة',
-  compLate: 'منها متأخرة',
+  compAwaiting: 'طلبات مستلمة بانتظار نتيجة',
+  compLate: 'الطلبات المتأخرة',
   compOnTime: 'ملتزمة',
   compResultedLate: 'صدرت متأخرة',
   compRejected: 'مرفوضة',
-  compLatePct: 'نسبة التأخر',
+  compLatePct: 'نسبة الطلبات المتأخرة',
   // Tasks table headers
   taskStatus: 'الحالة',
   taskDue: 'تاريخ الإكتمال',
@@ -145,6 +175,8 @@ export const LABEL_NAMES = {
   execDeltaLegend: 'مفتاح التغيّر — الصيغة الافتراضية (منذ التقرير السابق)',
   execDeltaLegendDaily: 'مفتاح التغيّر اليومي — منذ آخر تقرير ({date})',
   execDeltaLegendWeekly: 'مفتاح التغيّر الأسبوعي — منذ تقرير قبل أسبوع ({date})',
+  execDeltaLegendWeeklySun: 'مفتاح التغيّر الأسبوعي — منذ تقرير الأحد ({date})',
+  execDeltaLegendWeeklyThu: 'مفتاح التغيّر الأسبوعي — منذ تقرير الخميس ({date})',
   monthlyRowOrders: 'صف الجدول الشهري: الطلبات',
   monthlyRowResults: 'صف الجدول الشهري: النتائج المستلمة',
   monthlyRowRejected: 'صف الجدول الشهري: النتائج المرفوضة',
@@ -152,14 +184,14 @@ export const LABEL_NAMES = {
   monthlyRowCompletion: 'صف الجدول الشهري: نسبة الاكتمال',
   compHash: 'عمود الالتزام: الرقم',
   compLab: 'عمود الالتزام: المختبر',
-  compTotal: 'عمود الالتزام: الإجمالي',
-  compPipeline: 'عمود الالتزام: قبل الاستلام',
-  compAwaiting: 'عمود الالتزام: بانتظار النتيجة',
-  compLate: 'عمود الالتزام: منها متأخرة (جزء من بانتظار النتيجة)',
-  compOnTime: 'عمود الالتزام: الطلبات الملتزمة',
-  compResultedLate: 'عمود الالتزام: صدرت متأخرة',
+  compTotal: 'عمود الالتزام: مجموع الطلبات',
+  compPipeline: 'عمود الالتزام: قبل الاستلام (غير مستخدم حالياً)',
+  compAwaiting: 'عمود الالتزام: طلبات مستلمة بانتظار نتيجة',
+  compLate: 'عمود الالتزام: الطلبات المتأخرة',
+  compOnTime: 'عمود الالتزام: الطلبات الملتزمة (غير مستخدم حالياً)',
+  compResultedLate: 'عمود الالتزام: صدرت متأخرة (غير مستخدم حالياً)',
   compRejected: 'عمود الالتزام: مرفوضة',
-  compLatePct: 'عمود الالتزام: نسبة التأخر',
+  compLatePct: 'عمود الالتزام: نسبة الطلبات المتأخرة',
   taskStatus: 'عمود المهام: الحالة',
   taskDue: 'عمود المهام: تاريخ الإكتمال',
   taskOwner: 'عمود المهام: المالك',
@@ -176,8 +208,8 @@ export const LABEL_NAMES = {
   chartLateSeries: 'سلسلة الطلبات المتأخرة',
   chartOnTimeSeries: 'سلسلة الطلبات الملتزمة',
   overallAvgTitle: 'عنوان بطاقة متوسط زمن الإنجاز',
-  execPartition: 'حاشية معادلة الإجمالي (الملخص التنفيذي)',
-  monthlyPartition: 'حاشية معادلة الطلبات الشهرية',
+  execPartition: 'حاشية معادلة الإجمالي (الملخص التنفيذي) (غير مستخدم حالياً)',
+  monthlyPartition: 'حاشية معادلة الطلبات الشهرية (غير مستخدم حالياً)',
   execCancelledLabel: 'نص ملاحظة الطلبات الملغاة',
   execCancelledHistPre: 'ملاحظة الملغاة: بادئة الجزء التاريخي',
   execCancelledHistPost: 'ملاحظة الملغاة: لاحقة الجزء التاريخي',
@@ -234,12 +266,30 @@ const bullets = (items) => items.map((s) => '•  ' + s).join('\n');
 // 0 / non-finite → undefined so the chip is hidden (keep current behaviour). ALL chips
 // are green now (user decision 2026-07-23) — the old BAD_DELTA red-chip logic is gone.
 const fmtDelta = (n) => (Number.isFinite(n) && n !== 0 ? (n > 0 ? '+' + n : '−' + Math.abs(n)) : undefined);
-// Mode-aware delta legend: daily/weekly substitute the baseline date into '{date}';
+// Mode-aware delta legend: every dated mode substitutes the baseline date into '{date}';
 // legacy (no baseline, or mode 'legacy') uses the plain previous-report wording. The
-// three strings stay overridable through the labels registry.
+// weekly comparison is weekday-anchored (user decision 2026-07-26) — pickDeltaBaseline
+// returns 'weekly-sun' / 'weekly-thu' and each gets its own wording; the bare 'weekly'
+// mapping is kept for the legacy pre-split mode value. All strings stay overridable
+// through the labels registry.
+const DELTA_LEGEND_KEY = {
+  daily: 'execDeltaLegendDaily',
+  weekly: 'execDeltaLegendWeekly',           // legacy pre-split mode value
+  'weekly-sun': 'execDeltaLegendWeeklySun',
+  'weekly-thu': 'execDeltaLegendWeeklyThu',
+};
+// db.anchored === false means pickDeltaBaseline found NO report on the requested weekday
+// yet (history still filling up) and degraded to the most recent prior report. Naming that
+// date 'تقرير الأحد' / 'تقرير الخميس' would assert a weekday the baseline does not have —
+// the deck would state a false comparison basis while the review screen discloses the
+// fallback (screen-review.js anchorFallbackNote). So the unanchored case falls back to the
+// daily wording ('منذ آخر تقرير ({date})'), which is exactly what that baseline IS.
+// NOTE: `anchored` only reaches here on the UI path (screen-review.js forwards it);
+// automation/pipeline.js still drops it when stamping model.deltaBaseline — cross-file.
 const deltaLegendText = (L, db) => {
-  if (db && db.baselineDate && db.mode === 'daily') return L('execDeltaLegendDaily').replace('{date}', fmtDate(db.baselineDate));
-  if (db && db.baselineDate && db.mode === 'weekly') return L('execDeltaLegendWeekly').replace('{date}', fmtDate(db.baselineDate));
+  if (!db || !db.baselineDate) return L('execDeltaLegend');
+  const key = db.anchored === false ? 'execDeltaLegendDaily' : DELTA_LEGEND_KEY[db.mode];
+  if (key) return L(key).replace('{date}', fmtDate(db.baselineDate));
   return L('execDeltaLegend');
 };
 
@@ -423,10 +473,9 @@ function buildExecFunnel(m) {
     ...chrome(L('titleExec')),
     ...kpiEls,
     text(9.0, 2.55, 3.813, 0.32, cancelledText, 10, { bold: true, color: C.slate600, align: 'right', valign: 'middle', rtl: true }),
-    // KPI-row partition footnote (mirrors the compliance equation footnote) —
-    // spells out that the seven buckets add up to the total, centered between the
-    // completion-rate (left) and cancelled (right) notes.
-    text(3.0, 2.55, 7.3, 0.32, L('execPartition'), 9, { color: C.slate600, align: 'center', valign: 'middle', rtl: true }),
+    // NOTE: the KPI-row partition footnote (execPartition) is NOT rendered any more —
+    // user decision 2026-07-26 restored the simpler 20-07 deck, which carries no add-up
+    // equation notes. The label key stays in both registries for parity.
     // Overall completion-rate line — mirrors the cancelled note on the left side.
     text(0.5, 2.55, 2.271, 0.32, `${L('execCompletionRate')}: ${completionRate}%`, 11, { bold: true, color: C.navy, align: 'left', valign: 'middle', rtl: true }),
     // Funnel column labels
@@ -504,8 +553,27 @@ function buildMonthly(m) {
     ? MONTH_COLW
     : Array(mo.length).fill(Math.round(((TABLE_W - LABEL_COLW - TOTAL_COLW) / mo.length) * 1000) / 1000);
 
+  // TURNAROUND BLOCK — OPT-IN (see OPT_IN_CARDS): the line chart + the navy
+  // overall-average card render only when reportOptions.kpiCards.turnaround === true.
+  // Default OFF, so the delivered monthly slide is the 20-07 reference shape.
+  const showTurnaround = cardOn(m)('turnaround');
+  // GEOMETRY, two layouts:
+  //  · turnaround ON  — the historic split band: table+bar chart in the upper band
+  //    (y≈1.07), line chart + card in the lower band (y 4.583 → 6.972). Byte-identical
+  //    to what shipped before the toggle existed, so opting in changes nothing else.
+  //  · turnaround OFF — the freed lower band is reclaimed by CENTRING both survivors on
+  //    one shared centreline in the content band (1.07 → 6.95, centre 4.01) instead of
+  //    leaving ~2.0in dead space underneath. Chart keeps the reference's own 6.0×3.4
+  //    (not stretched); the table keeps its columns, labels and 0.456 rowH (6 rows =
+  //    2.736in). Result: chart 2.31→5.71, table 2.642→5.378 — the reference deck's own
+  //    proportions (its chart sits 2.195→5.595 beside the table).
+  const CONTENT_TOP = 1.07, CONTENT_MID = (CONTENT_TOP + 6.95) / 2; // 4.01
+  const CHART_H = 3.4, TABLE_H = 6 * 0.456;
+  const tableY = showTurnaround ? 1.069 : Math.round((CONTENT_MID - TABLE_H / 2) * 1000) / 1000;
+  const chartY = showTurnaround ? 1.07 : Math.round((CONTENT_MID - CHART_H / 2) * 1000) / 1000;
+
   const table = {
-    t: 'table', x: 6.604, y: 1.069, w: TABLE_W, rtl: true, rowH: 0.456,
+    t: 'table', x: 6.604, y: tableY, w: TABLE_W, rtl: true, rowH: 0.456,
     header: { fill: C.navy, color: C.white, bold: true },
     colW: rev([LABEL_COLW, ...monthColW, TOTAL_COLW]),
     rows: [header, rowOrders, rowResults, rowRejected, rowIncomplete, rowCompletion],
@@ -518,7 +586,7 @@ function buildMonthly(m) {
   // (category i drawn at xOf(i)), so reversing the arrays flips the visual order — data
   // labels, category labels and legend all follow — and SVG/PDF/PPTX stay in lockstep.
   const monthlyChart = {
-    t: 'chart', kind: 'colClustered', x: 0.5, y: 1.07, w: 6.0, h: 3.4,
+    t: 'chart', kind: 'colClustered', x: 0.5, y: chartY, w: 6.0, h: CHART_H,
     categories: rev(monthLabels),
     series: [
       { name: L('monthlyRowOrders'), values: rev(mo.map((x) => x.orders)), color: CHART_BLUE },
@@ -551,27 +619,32 @@ function buildMonthly(m) {
   const els = [
     ...chrome(L('titleMonthly')),
     table,
-    // Partition footnote directly under the monthly table (table bottom ≈ 3.81).
-    text(6.604, 3.82, 6.661, 0.24, L('monthlyPartition'), 9, { color: C.slate600, align: 'right', valign: 'middle', rtl: true }),
+    // NOTE: the monthly partition footnote (monthlyPartition) is NOT rendered any more —
+    // user decision 2026-07-26 (simpler 20-07 deck shape, no add-up equation notes). The
+    // label key stays in both registries for parity.
     monthlyChart,
-    turnaroundChart,
-    // Overall-average card — RESTACKED so 3-digit live values never touch: title,
-    // actual, expected, variance and sample size each get their own band inside the
-    // card (4.583 → 6.972). Actual/expected dropped to 20pt to keep the stack clear.
-    rect(0.5, 4.583, 3.417, 2.389, C.navyChart, { radius: 0.1 }),
-    text(0.5, 4.66, 3.417, 0.3, L('overallAvgTitle'), 13, { bold: true, color: CARD_TITLE, align: 'center', valign: 'middle', rtl: true }),
-    text(0.5, 5.0, 3.417, 0.5, `الفعلي: ${ovActual.toFixed(1)} يوم`, 20, { bold: true, color: C.white, align: 'center', valign: 'middle', rtl: true }),
-    text(0.5, 5.55, 3.417, 0.5, `المتوقع: ${ovExpected.toFixed(1)} يوم`, 20, { bold: true, color: C.peach, align: 'center', valign: 'middle', rtl: true }),
   ];
-  // Variance vs target — actual − expected, sign always shown; only when both present.
-  if (Number.isFinite(ovActual) && Number.isFinite(ovExpected)) {
-    const diff = ovActual - ovExpected;
-    const diffStr = (diff >= 0 ? '+' : '-') + Math.abs(diff).toFixed(1);
-    els.push(text(0.5, 6.15, 3.417, 0.3, `الفارق: ${diffStr} يوم عن المستهدف`, 11, { bold: true, color: C.amber, align: 'center', valign: 'middle', rtl: true }));
-  }
-  // Sample size behind the averages — only when the engine reports measuredCount.
-  if (Number.isFinite(t.measuredCount)) {
-    els.push(text(0.5, 6.5, 3.417, 0.26, `(ن = ${t.measuredCount} طلب)`, 9, { color: CARD_TITLE, align: 'center', valign: 'middle', rtl: true }));
+  if (showTurnaround) {
+    els.push(
+      turnaroundChart,
+      // Overall-average card — RESTACKED so 3-digit live values never touch: title,
+      // actual, expected, variance and sample size each get their own band inside the
+      // card (4.583 → 6.972). Actual/expected dropped to 20pt to keep the stack clear.
+      rect(0.5, 4.583, 3.417, 2.389, C.navyChart, { radius: 0.1 }),
+      text(0.5, 4.66, 3.417, 0.3, L('overallAvgTitle'), 13, { bold: true, color: CARD_TITLE, align: 'center', valign: 'middle', rtl: true }),
+      text(0.5, 5.0, 3.417, 0.5, `الفعلي: ${ovActual.toFixed(1)} يوم`, 20, { bold: true, color: C.white, align: 'center', valign: 'middle', rtl: true }),
+      text(0.5, 5.55, 3.417, 0.5, `المتوقع: ${ovExpected.toFixed(1)} يوم`, 20, { bold: true, color: C.peach, align: 'center', valign: 'middle', rtl: true }),
+    );
+    // Variance vs target — actual − expected, sign always shown; only when both present.
+    if (Number.isFinite(ovActual) && Number.isFinite(ovExpected)) {
+      const diff = ovActual - ovExpected;
+      const diffStr = (diff >= 0 ? '+' : '-') + Math.abs(diff).toFixed(1);
+      els.push(text(0.5, 6.15, 3.417, 0.3, `الفارق: ${diffStr} يوم عن المستهدف`, 11, { bold: true, color: C.amber, align: 'center', valign: 'middle', rtl: true }));
+    }
+    // Sample size behind the averages — only when the engine reports measuredCount.
+    if (Number.isFinite(t.measuredCount)) {
+      els.push(text(0.5, 6.5, 3.417, 0.26, `(ن = ${t.measuredCount} طلب)`, 9, { color: CARD_TITLE, align: 'center', valign: 'middle', rtl: true }));
+    }
   }
   return { id: 'monthly', bg: C.white, elements: els };
 }
@@ -583,97 +656,98 @@ function buildMonthly(m) {
 // divider + heading, and the catalog/overflow notes were removed; the by-lab table now
 // grows into the freed space. (The chartLateSeries/chartOnTimeSeries/catalogNote labels
 // stay in the registries for parity — harmless orphans.)
+// SIMPLIFIED back to the 20-07 reference deck (user decision 2026-07-26): SEVEN columns,
+// the '#' index column restored, and the قبل الاستلام / ملتزمة / صدرت متأخرة columns plus
+// the add-up equation footnote all removed. Their label keys survive in the registries.
 function buildCompliance(m) {
   const L = labelOf(m);
   const lab = m.kpi.byLab;
-  // Logical (deck RTL, right→left reading) order per row — the '#' column is DROPPED:
-  //   [lab, total, pipeline, awaitingResult, late, onTime, resultedLate, rejected, latePct]
-  // rev() -> visual L→R. The count columns ADD UP: total = pipeline + awaitingResult +
-  // onTime + resultedLate + rejected. 'late' (منها متأخرة) is a SUBSET of بانتظار النتيجة
-  // (overdue, still awaiting) — marked as a subcolumn (↳ prefix + lighter header, light
-  // body fill) and NOT part of the add-up. Every column total is computed from the rows
-  // (no hardcoded literals); latePct = lateTot/awaitTot (round1, guard div-by-zero).
+  // Logical (deck RTL, right→left reading) order per row — matches the reference deck:
+  //   [#, lab, total, awaitingResult, rejected, late, latePct]
+  // rev() -> visual L→R. Every column total is computed from the rows (no hardcoded
+  // literals); latePct total = lateTot/awaitTot (round1, guard div-by-zero).
   const totalTot = lab.reduce((s, r) => s + (r.total || 0), 0);
-  const pipelineTot = lab.reduce((s, r) => s + (r.pipeline || 0), 0);
   const awaitTot = lab.reduce((s, r) => s + (r.awaitingResult || 0), 0);
   const lateTot = lab.reduce((s, r) => s + (r.late || 0), 0);
-  const onTimeTot = lab.reduce((s, r) => s + (r.onTime || 0), 0);
-  const resultedLateTot = lab.reduce((s, r) => s + (r.resultedLate || 0), 0);
   const rejTot = lab.reduce((s, r) => s + (r.rejected || 0), 0);
   const latePctTot = awaitTot > 0 ? Math.round((lateTot / awaitTot) * 1000) / 10 : 0;
 
-  // Per-column body-cell styles.
-  const pipelineCell = (n) => ({ text: String(n || 0), color: C.slate500 });            // قبل الاستلام: muted
-  const lateCell = (n) => (n > 0                                                          // منها متأخرة: subset of await
-    ? { text: String(n), color: C.redPure, bold: true, fill: C.bgLighter }               //   red when >0
-    : { text: String(n || 0), color: C.slate500, fill: C.bgLighter });                    //   muted when 0
-  const onTimeCell = (n) => (n > 0 ? { text: String(n), color: C.green, bold: true } : String(n || 0));       // ملتزمة: green+bold
-  const resultedLateCell = (n) => (n > 0 ? { text: String(n), color: C.amber, bold: true } : String(n || 0)); // صدرت متأخرة: amber when >0
-  const latePctCell = (n) => (n >= 50 ? { text: pctLab(n), bold: true, color: C.redPure } : pctLab(n));       // worst-lab highlight
+  // Per-column body-cell emphasis (kept from the richer table): late red+bold when >0,
+  // muted when 0; worst-lab late-% (≥50%) red+bold.
+  const lateCell = (n) => (n > 0
+    ? { text: String(n), color: C.redPure, bold: true }
+    : { text: String(n || 0), color: C.slate500 });
+  const latePctCell = (n) => (n >= 50 ? { text: pctLab(n), bold: true, color: C.redPure } : pctLab(n));
 
-  // Header — the 'منها متأخرة' subcolumn gets a '↳' prefix + a lighter-navy fill so its
-  // subset-of-بانتظار-النتيجة relationship reads at a glance.
   const header = rev([
-    L('compLab'), L('compTotal'), L('compPipeline'), L('compAwaiting'),
-    { text: '↳ ' + L('compLate'), fill: C.taskNavy },
-    L('compOnTime'), L('compResultedLate'), L('compRejected'), L('compLatePct'),
+    L('compHash'), L('compLab'), L('compTotal'), L('compAwaiting'),
+    L('compRejected'), L('compLate'), L('compLatePct'),
   ]);
-  const labRows = lab.map((r) => rev([
+  const labRows = lab.map((r, i) => rev([
+    String(i + 1),
     { text: r.lab, align: 'right' },
     String(r.total),
-    pipelineCell(r.pipeline || 0),
     String(r.awaitingResult),
-    lateCell(r.late || 0),
-    onTimeCell(r.onTime || 0),
-    resultedLateCell(r.resultedLate || 0),
     String(r.rejected || 0),
+    lateCell(r.late || 0),
     latePctCell(r.latePct),
   ]));
+  // Totals row — '#' cell left blank (as in the reference deck), 'المجموع' in the lab column.
   const totalRow = rev([
+    { text: '', bold: true, fill: C.bgLighter },
     { text: 'المجموع', bold: true, fill: C.bgLighter, align: 'right' },
     { text: String(totalTot), bold: true, fill: C.bgLighter },
-    { text: String(pipelineTot), bold: true, fill: C.bgLighter, color: C.slate500 },
     { text: String(awaitTot), bold: true, fill: C.bgLighter },
-    { text: String(lateTot), bold: true, fill: C.bgLighter, ...(lateTot > 0 ? { color: C.redPure } : {}) },
-    { text: String(onTimeTot), bold: true, fill: C.bgLighter, ...(onTimeTot > 0 ? { color: C.green } : {}) },
-    { text: String(resultedLateTot), bold: true, fill: C.bgLighter, ...(resultedLateTot > 0 ? { color: C.amber } : {}) },
     { text: String(rejTot), bold: true, fill: C.bgLighter },
+    { text: String(lateTot), bold: true, fill: C.bgLighter, ...(lateTot > 0 ? { color: C.redPure } : {}) },
     { text: pctLab(latePctTot), bold: true, fill: C.bgLighter },
   ]);
 
-  // colW: '#' dropped. 8 count columns at 1.0in each; the lab-name column takes the
-  // remainder (3.667in). Total table width UNCHANGED = 11.667 (3.667 + 8×1.0).
-  const LAB_W = 3.667, NUM_W = 1.0;
-  // Table-only slide now, so rowH GROWS to fill the freed vertical space, capped at
-  // ROW_H_CAP (0.40in). Past ~12 labs the rows shrink dynamically so the table + the
-  // equation footnote still clear the slide content bottom (6.95). The footnote sits one
-  // FOOT_GAP below the totals row; because rowH ≤ the space-filling height, the footnote
-  // bottom is guaranteed ≤ CONTENT_BOTTOM (no separate clamp needed). Fonts bumped a
-  // touch (10/10.5) now that the table owns the whole slide — verified clean at 9 labs.
-  const TABLE_Y = 1.194, ROW_H_CAP = 0.40, FOOT_H = 0.24, CONTENT_BOTTOM = 6.95, FOOT_GAP = 0.08;
+  // colW: the 20-07 REFERENCE DECK's own gridCol widths, EMU→inches (÷914400), in logical
+  // (RTL right→left) order. Equal numeric columns are NOT usable here: pptxgenjs applies its
+  // default cell margin [.05,.1,.05,.1] in INCHES (vendor/pptxgen.bundle.js Z) and
+  // render/pptx-renderer.js addTable passes no `margin`, so a column offers colW−0.2in of
+  // text width. 'طلبات مستلمة بانتظار نتيجة' measures 146.8px = 1.529in in Cairo 9pt bold
+  // (163.1px = 1.699in at 10pt) — an equal 1.633in column leaves only 1.433in, so PowerPoint
+  // wrapped the header to two lines while the HTML/PDF preview (styles/slide.css padding
+  // 2px 4px → 1.55in usable) still showed one, i.e. the operator approved a one-line header
+  // and the client received a two-line one. The reference widths give that column 2.083in
+  // (1.883in usable), so it fits on ONE line at the reference's 10pt in both renderers, and
+  // every other header fits too (measured, Cairo 10pt bold, usable = w−0.2):
+  //   # 0.556 · المختبر 2.714 (0.427; longest live lab name 2.449in at 10.5pt body)
+  //   مجموع الطلبات 1.667 (0.938) · بانتظار نتيجة 2.083 (1.699) · مرفوضة 0.898 (0.519)
+  //   الطلبات المتأخرة 1.596 (1.004) · نسبة الطلبات المتأخرة 2.153 (1.351)
+  // Sum = 11.667 = the table width, unchanged.
+  const COL_W = [0.556, 2.714, 1.667, 2.083, 0.898, 1.596, 2.153];
+  // Table-only slide, so rowH GROWS to fill the vertical space, capped at ROW_H_CAP
+  // (0.40in). With the equation footnote gone the table owns the band down to
+  // CONTENT_BOTTOM (6.95); past ~14 rows (≈13 labs) the rows shrink dynamically so the
+  // totals row still clears it. Fonts 10/10.5 — verified clean at 9 labs.
+  const TABLE_Y = 1.194, ROW_H_CAP = 0.40, CONTENT_BOTTOM = 6.95;
   const nTableRows = labRows.length + 2;            // header + labRows + totals
-  const fillRowH = (CONTENT_BOTTOM - FOOT_GAP - FOOT_H - TABLE_Y) / nTableRows;
+  const fillRowH = (CONTENT_BOTTOM - TABLE_Y) / nTableRows;
   const rowH = Math.min(ROW_H_CAP, Math.floor(fillRowH * 1000) / 1000);
-  const footnoteY = TABLE_Y + nTableRows * rowH + FOOT_GAP;
+  // Header font is the reference deck's uniform 10pt — with the reference column widths
+  // every header fits on ONE line at 10pt (see COL_W above), so the 9pt shrink the equal-
+  // width scheme forced is gone. It still steps DOWN once many labs shrink rowH, and the
+  // steps are tied to what actually fits a row: one Cairo line inks ≈1.875×the font px
+  // (10pt → 0.260in) and pptxgenjs adds 0.05in top + 0.05in bottom cell margin, so a size
+  // needs rowH ≥ pt×1.875/72 + 0.10 (10pt → 0.360, 9pt → 0.334, 8pt → 0.308) to avoid
+  // PowerPoint growing that row past the computed geometry. ≤13 labs keep 10pt.
+  const headerSize = rowH >= 0.36 ? 10 : rowH >= 0.335 ? 9 : 8;
+  const bodySize = rowH >= 0.30 ? 10.5 : 9;
   const labTable = {
-    t: 'table', x: 0.833, y: TABLE_Y, w: 11.667, rtl: true, rowH, headerSize: 10, bodySize: 10.5,
+    t: 'table', x: 0.833, y: TABLE_Y, w: 11.667, rtl: true, rowH, headerSize, bodySize,
     header: { fill: C.navy, color: C.white, bold: true },
-    colW: rev([LAB_W, NUM_W, NUM_W, NUM_W, NUM_W, NUM_W, NUM_W, NUM_W, NUM_W]),
+    colW: rev(COL_W),
     rows: [header, ...labRows, totalRow],
   };
-  // Equation footnote directly under the table (small, slate, rtl) — spells out the
-  // add-up so the columns visibly reconcile. Built from the labels so it tracks overrides.
-  const eqFootnote = text(0.833, footnoteY, 11.667, FOOT_H,
-    `${L('compTotal')} = ${L('compPipeline')} + ${L('compAwaiting')} + ${L('compOnTime')} + ${L('compResultedLate')} + ${L('compRejected')}`,
-    9, { color: C.slate600, align: 'right', valign: 'middle', rtl: true });
 
-  // Slide is TABLE-ONLY (user decision 2026-07-23): chrome + the by-lab table + the
-  // equation footnote. The late/on-time detail chart, its band divider/heading, and the
-  // catalog/overflow notes were all removed; the table grew into the freed space above.
+  // Slide is TABLE-ONLY: chrome + the by-lab table. Nothing else — no chart, no band
+  // divider, no catalog/overflow/equation notes (matches the 20-07 reference deck).
   const els = [
     ...chrome(L('titleCompliance')),
     labTable,
-    eqFootnote,
   ];
   return { id: 'compliance', bg: C.white, elements: els };
 }
@@ -950,8 +1024,12 @@ export function buildSpec(reportModel, { variant = 'internal' } = {}) {
   // SLIDE TOGGLES — the 5 middle slides are filtered by m.reportOptions.slides
   // (absent → all on). Cover + thanks ALWAYS render. Page numbers are assigned AFTER
   // filtering so they renumber sequentially (1..n) over the INCLUDED content slides.
+  // EXCEPTION — 'definitions' (منهجية الأرقام) is OPT-IN (user decision 2026-07-26: the
+  // deck is back to the simple 6-slide reference shape). It renders ONLY when the flag is
+  // explicitly true, so a missing/undefined flag reads as OFF instead of ON.
   const slides = m.reportOptions?.slides;
-  const on = (key) => !slides || slides[key] !== false;
+  const OPT_IN_SLIDES = new Set(['definitions']);
+  const on = (key) => (OPT_IN_SLIDES.has(key) ? slides?.[key] === true : (!slides || slides[key] !== false));
   // Each builder returns an ARRAY of slides. Most yield exactly one; buildAction yields
   // the action slide plus zero-or-more continuation slides (task pagination). flatMap
   // splices those inline so continuation slides sit right after the action slide and
@@ -961,8 +1039,9 @@ export function buildSpec(reportModel, { variant = 'internal' } = {}) {
     { key: 'monthly', build: () => [buildMonthly(m)] },
     { key: 'compliance', build: () => [buildCompliance(m)] },
     { key: 'action', build: () => buildAction(m, variant) },
-    // Definitions ('منهجية الأرقام') — default ON; rendered just before thanks and
-    // participates in the sequential footer numbering like the other middle slides.
+    // Definitions ('منهجية الأرقام') — default OFF (opt-in, see OPT_IN_SLIDES); when the
+    // user switches it on in Settings it renders just before thanks and participates in
+    // the sequential footer numbering like the other middle slides.
     { key: 'definitions', build: () => [buildDefinitions(m)] },
   ];
   const middle = middleDefs.filter((x) => on(x.key)).flatMap((x) => x.build());

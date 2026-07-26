@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Template for the WEEKLY misbar report job. Rendered by
+  scripts/misbar-automation-install.sh, which substitutes:
+    __HOUR__     0-23   run hour (same hour on both days)
+    __MINUTE__   0-59   run minute
+    __SCRIPT__          absolute path to scripts/misbar-daily.sh
+    __LOG__             absolute path to ~/Library/Logs/misbar-daily.log
+  Contains NO secrets — com.misbar.kamc-live keeps GRAFANA_TOKEN / DATA_KEY in
+  its own plist, and launchd does NOT propagate environment between jobs.
+
+  WHY TWO ENTRIES: the Saudi work week is Sunday-Thursday and the weekly report
+  is issued twice — once on Sunday and once on Thursday. launchd expresses that
+  as an ARRAY of StartCalendarInterval dicts (a single dict can only carry one
+  Weekday). Weekday mapping: 0 (or 7) = Sunday, 1 = Monday, 2 = Tuesday,
+  3 = Wednesday, 4 = Thursday, 5 = Friday, 6 = Saturday. So 0 + 4 = Sun + Thu.
+
+  The job is the SAME script as the daily one, invoked with the 'weekly'
+  argument: misbar-daily.sh then tags its log lines [misbar-weekly …] and opens
+  the site with ?auto=1&mode=weekly so the run is identifiable.
+
+  Scheduling: com.misbar.kamc-live drives the SAME working copy at every :00 and
+  :30 from 07:00-22:30, and com.misbar.daily-report also runs every morning.
+  Pick an off-grid minute (the installer defaults to 08:15) so no two jobs run
+  git in that checkout concurrently.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.misbar.weekly-report</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>__SCRIPT__</string>
+    <string>weekly</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict>
+      <key>Weekday</key>
+      <integer>0</integer>
+      <key>Hour</key>
+      <integer>__HOUR__</integer>
+      <key>Minute</key>
+      <integer>__MINUTE__</integer>
+    </dict>
+    <dict>
+      <key>Weekday</key>
+      <integer>4</integer>
+      <key>Hour</key>
+      <integer>__HOUR__</integer>
+      <key>Minute</key>
+      <integer>__MINUTE__</integer>
+    </dict>
+  </array>
+
+  <key>StandardOutPath</key>
+  <string>__LOG__</string>
+  <key>StandardErrorPath</key>
+  <string>__LOG__</string>
+
+  <key>RunAtLoad</key>
+  <false/>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>LimitLoadToSessionType</key>
+  <string>Aqua</string>
+</dict>
+</plist>

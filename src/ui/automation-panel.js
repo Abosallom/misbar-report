@@ -14,10 +14,10 @@
 // (window.__misbarAutoRun / misbar:autorun / misbar:autodone — AUTOMATION.md §4)
 // so an unattended run paints its progress here and its produced files get
 // download rows. It never starts a second run on top of one it can see.
-import { el, toast, progressBar } from './components.js?v=v2026-07-23.2';
-import { triggerDownload } from './late-labs-section.js?v=v2026-07-23.2';
+import { el, toast, progressBar } from './components.js?v=v2026-07-23.3';
+import { triggerDownload } from './late-labs-section.js?v=v2026-07-23.3';
 
-const PIPELINE_URL = '../automation/pipeline.js?v=v2026-07-23.2';
+const PIPELINE_URL = '../automation/pipeline.js?v=v2026-07-23.3';
 const SHEET_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 /* ---- the ?auto= run bus published by main.js (AUTOMATION.md §4) ---------- */
@@ -109,6 +109,41 @@ const STATUS_VIEW = {
   error: { glyph: '✗', color: 'var(--bad-text,#B91C1C)' },
 };
 const STATUS_TEXT = { idle: '', start: 'جارٍ التنفيذ…', done: 'تم', skip: 'تخطّي', error: 'فشل' };
+
+/* ---- weekly-report schedule: READ-ONLY note ------------------------------ */
+// The weekly report is issued on the two days of the Saudi work week the user
+// reports on: Sunday and Thursday. The REAL schedule is the launchd agent
+// com.misbar.weekly-report (scripts/com.misbar.weekly-report.plist.template,
+// AUTOMATION.md §3) — a web page cannot install a LaunchAgent, so this is a
+// label plus the command to copy, never an in-page scheduler. No toggle, no
+// persisted key: nothing here can drift out of sync with the installed agent.
+const WEEKLY_DAYS_TEXT = 'التقرير الأسبوعي: الأحد والخميس';
+const WEEKLY_INSTALL_CMD = 'bash scripts/misbar-automation-install.sh weekly on 08:15';
+
+function weeklyScheduleNote() {
+  return el('div', {
+    // --bg-light is the app's 'raised inner surface' token (light #F8FAFC,
+    // dark #26324A), so the note reads as a panel inside the card in both themes.
+    style: 'margin-top:10px;padding:9px 11px;border-radius:var(--radius-sm,8px);'
+      + 'background:var(--bg-light,#F8FAFC);border:1px solid var(--border,#E2E8F0)',
+  }, [
+    el('div', {
+      style: 'font-weight:700;font-size:.9rem;color:var(--text,#1E293B);line-height:1.4',
+      text: `🗓 ${WEEKLY_DAYS_TEXT}`,
+    }),
+    el('div', {
+      style: 'font-size:.78rem;color:var(--slate-500,#64748B);margin-top:3px;line-height:1.45',
+      text: 'الجدولة الفعلية تتم عبر مهمة الماك، لا من هذه الصفحة. للتفعيل من الطرفية:',
+    }),
+    // dir=ltr: a shell command with digits inside RTL text (house rule).
+    el('code', {
+      dir: 'ltr',
+      style: 'display:block;margin-top:5px;font-size:.72rem;overflow-wrap:anywhere;'
+        + 'color:var(--brand-ink,#1E3A8A);font-weight:600',
+      text: WEEKLY_INSTALL_CMD,
+    }),
+  ]);
+}
 
 /**
  * Build the automation card.
@@ -533,6 +568,7 @@ export function buildAutomationPanel({ store, state, ctx } = {}) {
     }),
     masterRow,
     el('div', { style: 'margin-top:2px' }, subRows),
+    weeklyScheduleNote(),
     el('div', {
       style: 'display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px;padding-top:12px;border-top:1px solid var(--border,#E2E8F0)',
     }, [runBtn, stopBtn]),

@@ -130,16 +130,20 @@
  *     'https://elab.seha.sa/hpapm'. Empty/disabled → CSV drop only. The access
  *     token is the public-dashboard token (view-only, server-side-masked data);
  *     it is NEVER seeded in the repo — the user enters it once in Settings.
- * @property {{excludeNoTat:boolean, slides:Object<string,boolean>, kpiCards:Object<string,boolean>, labels:Object<string,string>, deltaMode:('daily'|'weekly')}} reportOptions
+ * @property {{excludeNoTat:boolean, slides:Object<string,boolean>, kpiCards:Object<string,boolean>, labels:Object<string,string>, deltaMode:('daily'|'weekly-sun'|'weekly-thu')}} reportOptions
  *   - presentation defaults: excludeNoTat drops rows with no TAT from ANY source
  *     (lookup + CSV fallback = null → 'No Match') before aggregation; slides keys
- *     'execFunnel'|'monthly'|'compliance'|'action' toggle the middle slides (cover/
- *     thanks always render; page numbers renumber); kpiCards keys mirror the deltas
+ *     'execFunnel'|'monthly'|'compliance'|'action'|'definitions' toggle the middle
+ *     slides (cover/thanks always render; page numbers renumber) — 'definitions'
+ *     ('منهجية الأرقام') defaults OFF, so the delivered deck is the simple six-slide
+ *     shape; kpiCards keys mirror the deltas
  *     keys and hide exec-slide cards (row geometry repacks); labels overrides the
  *     DEFAULT_LABELS registry in slidespec/build-spec.js (empty = built-in text);
  *     deltaMode picks the exec delta-chip comparison window — 'daily' vs the last
- *     report before the report date, 'weekly' vs the report closest to a week back
- *     (see model/delta-baseline.js pickDeltaBaseline).
+ *     report before the report date, or WEEKDAY-ANCHORED 'weekly-sun' / 'weekly-thu'
+ *     vs the most recent report issued on that weekday (the weekly report goes out
+ *     on Sunday and on Thursday). A stored legacy 'weekly' migrates to 'weekly-sun'
+ *     (see model/delta-baseline.js pickDeltaBaseline / normalizeDeltaMode).
  * @property {{enabled:boolean, autoPull:boolean, autoGenerate:boolean, autoDownload:boolean,
  *             autoLabFiles:boolean, autoEmailDrafts:boolean, autoAcceptTat:boolean,
  *             dailyTime:string, labRecipients:Object<string,string>}} automation

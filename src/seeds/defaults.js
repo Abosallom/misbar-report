@@ -20,11 +20,25 @@ export const HISTORICAL_CONSTANTS_SEED = {
 // Report presentation options (Settings.reportOptions): whether to drop no-TAT
 // rows, which middle slides render, which exec-slide KPI cards show, any per-report
 // label overrides (edited from the review screen), and the delta-chip comparison
-// window (deltaMode: 'daily' vs the last report, 'weekly' vs a report a week back).
-// See contracts.js.
+// window (deltaMode: 'daily' vs the last report, or the weekday-anchored
+// 'weekly-sun' / 'weekly-thu' vs the most recent report issued on that weekday —
+// the weekly report goes out on Sunday and Thursday). See contracts.js.
+//
+// slides.definitions defaults to FALSE: the delivered deck is the simple SIX-slide
+// shape (cover · exec+journey · monthly · compliance · action · thanks) the user
+// asked to return to. The 'منهجية الأرقام' slide stays available as an opt-in
+// toggle in Settings → خيارات التقرير.
+//
+// EXISTING INSTALLS ARE NOT FIXED BY THIS SEED. The key shipped default-TRUE
+// (2026-07-22) and every saveSettings persisted it, so an install that ran the app
+// since then holds slides.definitions:true — store.backfillReportOptions fills only a
+// MISSING key and never flips a stored boolean, and a stored true is indistinguishable
+// from a deliberate opt-in. Returning such an install to six slides therefore needs the
+// one-time schema migration in store.js (v4 → v5 resets slides.definitions to false);
+// flipping this seed value cannot do it.
 export const REPORT_OPTIONS_SEED = {
   excludeNoTat: false,
-  slides: { execFunnel: true, monthly: true, compliance: true, action: true, definitions: true },
+  slides: { execFunnel: true, monthly: true, compliance: true, action: true, definitions: false },
   kpiCards: {
     total: true,
     awaitingDispatch: true,
@@ -33,6 +47,12 @@ export const REPORT_OPTIONS_SEED = {
     rejected: true,
     lateNoResult: true,
     shippedNotReceived: true,
+    // OPT-IN (build-spec OPT_IN_CARDS): the monthly slide's turnaround LINE CHART +
+    // navy overall-average card. FALSE by default so the delivered monthly slide is the
+    // simple 20-07 reference shape (table + one bar chart). Unlike the seven exec-card
+    // keys above, this one renders only when explicitly true, so a missing key is OFF —
+    // existing installs that never held it therefore need no migration.
+    turnaround: false,
   },
   labels: {},
   deltaMode: 'daily',

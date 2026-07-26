@@ -5,12 +5,19 @@
 //   • أسبوع      → table = 7 daily rows, chart = 7 daily points
 //   • شهر        → table = ~5 weekly rows, chart = ~30 daily points
 //   • منذ البداية → table = month-end rows + the report date, chart = weekly points
+// The شهر rows are WEEKDAY-AWARE: with the active deltaMode set to weekly-sun /
+// weekly-thu (the Sun–Thu Saudi work week issues the weekly report on Sunday and on
+// Thursday) they sample the last ~5 Sundays / Thursdays instead of arbitrary weekly
+// points, and the date column header names that weekday. When the dataset is too short to
+// contain even ONE such weekday the rows revert to generic weekly points and the header /
+// footnote drop the weekday, so a named weekday always describes the rows shown. أسبوع and
+// منذ البداية are unaffected.
 // Numbers come from engine/asof.js (published snapshots preferred, else computed
 // as-of the sampled date from raw order timestamps). Both engine imports are GUARDED —
 // with the module absent the panel degrades to published-history rows only, the chart
 // is hidden, and it never crashes. Pure presentation; it mutates nothing it is handed.
-import { el } from './components.js?v=v2026-07-23.2';
-import { formatDateAr } from '../i18n/ar.js?v=v2026-07-23.2';
+import { el } from './components.js?v=v2026-07-23.3';
+import { formatDateAr } from '../i18n/ar.js?v=v2026-07-23.3';
 
 /* Relative imports carry ?v=… — the orchestrator re-stamps this token. */
 const V = '?v=v2026-07-22.13';
@@ -36,7 +43,19 @@ const NUM_COLS = [
   { key: 'lateNoResult', label: 'متأخرة بلا نتيجة' },
   { key: 'rejected', label: 'مرفوضة' },
 ];
-const HEAD = ['التاريخ', 'المصدر', ...NUM_COLS.map((c) => c.label), 'نسبة الاكتمال'];
+const HEAD_TAIL = ['المصدر', ...NUM_COLS.map((c) => c.label), 'نسبة الاكتمال'];
+const headRow = (dateHead) => [dateHead || 'التاريخ', ...HEAD_TAIL];
+
+// deltaMode → the weekday the شهر rows anchor to. 0 = Sunday … 4 = Thursday (matching
+// Date#getUTCDay). Anything else (daily, absent, legacy) → null = the old weekly points.
+const WEEKDAY_ANCHORS = {
+  'weekly-sun': { dow: 0, label: 'الأحد' },
+  'weekly-thu': { dow: 4, label: 'الخميس' },
+};
+const anchorOf = (deltaMode) => WEEKDAY_ANCHORS[deltaMode] || null;
+// Weekday of a whole-UTC-day count. Epoch day 0 (1970-01-01) was a Thursday (4); the
+// +11 keeps the modulo non-negative for pre-epoch days.
+const dowOf = (day) => (((day % 7) + 11) % 7);
 
 // Trend-chart series. Colours are themed tokens with light literal fallbacks (same
 // var(--x,<literal>) pattern the file uses elsewhere): --brand-ink is navy in light
@@ -58,6 +77,10 @@ const RANGE_NOTE = {
   month: 'عيّنات أسبوعية خلال آخر شهر تقريباً؛ الرسم بنقاط يومية.',
   all: 'من بداية المشروع حتى تاريخ التقرير: عيّنات شهرية في الجدول، وأسبوعية في الرسم.',
 };
+// شهر note when the rows are weekday-anchored to the active weekly comparison.
+const monthNote = (anchor) => (anchor
+  ? `عيّنات أسبوعية بحسب يوم ${anchor.label} (آخر ٥ مرات)؛ الرسم بنقاط يومية.`
+  : RANGE_NOTE.month);
 const CHART_CAP = 40; // hard cap on chart samples (computeNumbersAsOf is O(rows) each)
 
 /* ---- styles (inline so the module stays drop-in; all colours are themed tokens
@@ -71,7 +94,7 @@ const DELTA_STYLE = 'font-size:.62rem;font-weight:800;color:var(--green);line-he
 const BADGE_BASE = 'display:inline-block;font-size:.66rem;font-weight:700;padding:1px 8px;border-radius:999px;white-space:nowrap;border:1px solid';
 const BADGE_PUBLISHED = BADGE_BASE + ';background:var(--good-bg,#DCFCE7);color:var(--good-text,#166534);border-color:rgba(22,163,74,.35)';
 const BADGE_COMPUTED = BADGE_BASE + ';background:var(--bg-light);color:var(--slate-600);border-color:var(--border-dark)';
-// Range pills — style-matched to the review screen's يومي/أسبوعي delta-mode pills.
+// Range pills — style-matched to the review screen's delta-mode pills (يومي / أسبوعي — الأحد / أسبوعي — الخميس).
 const pillStyle = (on) => 'border-radius:999px;padding:6px 16px;font-weight:700;font-size:.8rem;cursor:pointer;min-height:32px;line-height:1;transition:background .12s;'
   + (on
     ? 'background:var(--navy);color:#fff;border:1px solid var(--navy);'
@@ -120,6 +143,23 @@ function weeklyRowDates(endDay, firstDay, count = 5) {
   for (let i = count - 1; i >= 0; i--) {
     let d = endDay - i * 7;
     if (firstDay != null && d < firstDay) d = firstDay;
+    days.push(d);
+  }
+  return dedupeDays(days).map(daysToIso);
+}
+// ~`count` samples that all fall on weekday `dow`, newest = the last occurrence on or
+// before endDay, stepping back 7 days. Occurrences before firstDay are DROPPED (not
+// clamped like weeklyRowDates — clamping would break the weekday invariant); when that
+// leaves NOTHING (e.g. the dataset starts on the report date and the last `dow` fell
+// before it) we return [] so the caller drops the anchor and falls back to the generic
+// weekly points — never a row on some other weekday labelled as this one.
+// EVERY returned date satisfies dowOf(isoToDays(d)) === dow.
+function weekdayRowDates(endDay, firstDay, dow, count = 5) {
+  const anchor = endDay - ((dowOf(endDay) - dow + 7) % 7);
+  const days = [];
+  for (let i = count - 1; i >= 0; i--) {
+    const d = anchor - i * 7;
+    if (firstDay != null && d < firstDay) continue;
     days.push(d);
   }
   return dedupeDays(days).map(daysToIso);
@@ -201,17 +241,31 @@ function numbersForDate(date, ctx) {
 }
 const resolveSamples = (dates, ctx) => dates.map((d) => numbersForDate(d, ctx)).filter(Boolean);
 
-// Per-(endIso, range) bundle cache — toggling ranges never recomputes (computeNumbersAsOf
-// is O(rows) per sample). Keyed only by endIso|range: within a review session rows +
-// history are constant per report date, and a date change mints fresh keys.
+// Per-(endIso, range, weekday-anchor) bundle cache — toggling ranges (or flipping the
+// weekly comparison back and forth) never recomputes (computeNumbersAsOf is O(rows) per
+// sample). Keyed by endIso|range|anchor, and the anchor only participates for شهر — the
+// only range that reads it — so flipping the weekly comparison reuses the أسبوع and منذ
+// البداية bundles instead of minting a new key (and a new resolveSamples pass) per mode.
+// Within a review session rows + history are constant per report date, and a date change
+// mints fresh keys.
 const CACHE = new Map();
 function computeBundle(range, ctx) {
-  const key = `${ctx.endIso}|${range}`;
+  const anchor = ctx.anchor || null;
+  const key = `${ctx.endIso}|${range}|${range === 'month' && anchor ? anchor.dow : '-'}`;
   if (CACHE.has(key)) return CACHE.get(key);
   const { endDay, firstDay } = ctx;
   let tableDates, chartDates;
+  let rowAnchor = null; // set only when the rows really do all fall on anchor.dow
   if (range === 'month') {
-    tableDates = weeklyRowDates(endDay, firstDay, 5);
+    // Weekday-anchored rows when a weekly comparison is active; else the old weekly points.
+    if (anchor) {
+      tableDates = weekdayRowDates(endDay, firstDay, anchor.dow, 5);
+      if (tableDates.length) rowAnchor = anchor;
+    }
+    // No weekly comparison, or not one occurrence of that weekday inside the dataset →
+    // generic weekly points with rowAnchor left null, so the header stays 'التاريخ' and
+    // the footnote stays RANGE_NOTE.month.
+    if (!tableDates || !tableDates.length) tableDates = weeklyRowDates(endDay, firstDay, 5);
     chartDates = dailyClamped(endDay, 30, firstDay);
   } else if (range === 'all') {
     tableDates = monthEndDates(firstDay, endDay);
@@ -222,16 +276,18 @@ function computeBundle(range, ctx) {
   }
   const table = resolveSamples(tableDates, ctx);
   const chart = ctx.degraded ? [] : resolveSamples(chartDates, ctx);
-  const bundle = { table, chart, degraded: ctx.degraded };
+  // rowAnchor rides along so the rendered header/footnote always describe THESE rows: it
+  // is non-null only for شهر AND only when every table date really is on that weekday.
+  const bundle = { table, chart, degraded: ctx.degraded, anchor: rowAnchor };
   CACHE.set(key, bundle);
   return bundle;
 }
 
 /* ===================== rendering ===================== */
-function renderTable(samples) {
+function renderTable(samples, dateHead) {
   // samples are oldest→newest. Deltas compare each sample to the previous (older)
   // entry; display is reversed so the newest sample sits at the top.
-  const thead = el('thead', {}, [el('tr', {}, HEAD.map((h) => el('th', { style: TH_STYLE, text: h })))]);
+  const thead = el('thead', {}, [el('tr', {}, headRow(dateHead).map((h) => el('th', { style: TH_STYLE, text: h })))]);
   const tbody = el('tbody');
   for (let i = samples.length - 1; i >= 0; i--) {
     const cur = samples[i];
@@ -330,8 +386,10 @@ function buildLegend() {
 
 // Render the content for one range (chart on top, then the per-sample table + notes).
 function renderRangeContent(bundle, range) {
+  const anchor = bundle && bundle.anchor;
   const frag = el('div', {});
-  frag.appendChild(el('p', { class: 'small muted', style: 'margin:2px 0 12px', text: RANGE_NOTE[range] || '' }));
+  const note = range === 'month' ? monthNote(anchor) : (RANGE_NOTE[range] || '');
+  frag.appendChild(el('p', { class: 'small muted', style: 'margin:2px 0 12px', text: note }));
   const { table, chart, degraded } = bundle;
   if (!Array.isArray(table) || table.length === 0) {
     frag.appendChild(el('p', { class: 'small muted', style: 'margin:0', text: 'لا توجد بيانات ضمن هذا النطاق.' }));
@@ -348,7 +406,7 @@ function renderRangeContent(bundle, range) {
   } else {
     frag.appendChild(el('p', { class: 'small muted', style: 'margin:0 0 12px', text: 'الرسم البياني غير متاح (تعذّر حساب الأيام غير المنشورة).' }));
   }
-  frag.appendChild(renderTable(table));
+  frag.appendChild(renderTable(table, anchor ? `التاريخ (${anchor.label})` : null));
   if (degraded) {
     frag.appendChild(el('p', { class: 'small muted', style: 'margin:10px 0 0', text: 'يتم عرض التقارير المنشورة فقط (تعذّر حساب الأيام غير المنشورة).' }));
   }
@@ -363,22 +421,32 @@ function renderRangeContent(bundle, range) {
  * the beginning, with a range selector (أسبوع | شهر | منذ البداية) driving a per-sample
  * table + a three-line trend chart. Returns synchronously; the body fills once the
  * guarded engine imports resolve. Never throws.
- * @param {{rows:?Object[], tatTests:?Object, history:?Object, endIso:?string}} o
- * @returns {HTMLElement} a <details class="card"> element
+ * deltaMode ('daily' | 'weekly-sun' | 'weekly-thu', anything else = daily) only affects
+ * the شهر rows: the weekly modes sample the last ~5 Sundays / Thursdays and the date
+ * column header names that weekday.
+ * `range` seeds the selected range pill (default أسبوع). The live selection is mirrored
+ * on the returned element as `panel.dataset.range`, so a caller that rebuilds the panel
+ * (e.g. on a delta-mode switch — the switch that drives the شهر rows) can read the old
+ * panel's dataset.range and pass it back here instead of snapping the user to أسبوع.
+ * @param {{rows:?Object[], tatTests:?Object, history:?Object, endIso:?string,
+ *          deltaMode:?('daily'|'weekly-sun'|'weekly-thu'),
+ *          range:?('week'|'month'|'all')}} o
+ * @returns {HTMLElement} a <details class="card"> element with dataset.range
  */
-export function buildHistoryPanel({ rows, tatTests, history, endIso } = {}) {
+export function buildHistoryPanel({ rows, tatTests, history, endIso, deltaMode, range: initialRange } = {}) {
   const details = el('details', { class: 'card history-card', dir: 'rtl' });
   const summary = el('summary', { class: 'card__title', style: 'cursor:pointer', text: 'أرقام التقارير والتقدم' });
   const body = el('div', { class: 'history-body' });
   body.appendChild(el('p', { class: 'small muted', style: 'margin:2px 0 0', text: 'جارٍ التحميل…' }));
   details.append(summary, body);
 
-  let range = 'week';
+  let range = RANGES.some((r) => r.key === initialRange) ? initialRange : 'week';
+  details.dataset.range = range;
 
   (async () => {
     const [asofMod, wdMod] = await Promise.all([
-      tryImport('../engine/asof.js?v=v2026-07-23.2' + V),
-      tryImport('../engine/workday.js?v=v2026-07-23.2' + V),
+      tryImport('../engine/asof.js?v=v2026-07-23.3' + V),
+      tryImport('../engine/workday.js?v=v2026-07-23.3' + V),
     ]);
     const computeAsOf = asofMod && typeof asofMod.computeNumbersAsOf === 'function' ? asofMod.computeNumbersAsOf : null;
     const degraded = !computeAsOf;
@@ -397,9 +465,9 @@ export function buildHistoryPanel({ rows, tatTests, history, endIso } = {}) {
 
     const endDay = isoToDays(endIso);
     const firstDay = computeFirstDay(rows, history, endDay, parseFn, toDayFn);
-    const ctx = { rows, tatTests, history, endIso, endDay, firstDay, computeAsOf, degraded };
+    const ctx = { rows, tatTests, history, endIso, endDay, firstDay, computeAsOf, degraded, anchor: anchorOf(deltaMode) };
 
-    // Range pills (default أسبوع) + a content host the pills swap in place.
+    // Range pills (seeded from o.range, default أسبوع) + a content host the pills swap in place.
     const pillEls = {};
     const pillRow = el('div', { style: 'display:inline-flex;gap:6px;flex-wrap:wrap;margin-bottom:12px' });
     const contentHost = el('div', {});
@@ -408,7 +476,13 @@ export function buildHistoryPanel({ rows, tatTests, history, endIso } = {}) {
     for (const r of RANGES) {
       const btn = el('button', {
         type: 'button', text: r.label, 'aria-pressed': 'false',
-        onClick: () => { if (range === r.key) return; range = r.key; paintPills(); renderRange(); },
+        onClick: () => {
+          if (range === r.key) return;
+          range = r.key;
+          details.dataset.range = range; // readable by a caller that rebuilds the panel
+          paintPills();
+          renderRange();
+        },
       });
       pillEls[r.key] = btn;
       pillRow.appendChild(btn);

@@ -14,9 +14,9 @@
 //
 // PHI rule unchanged: order rows live in `state` only. Nothing here logs a row
 // or writes one to storage — only aggregate numbers reach store.updateSnapshot.
-import { STR, todayISO, buildFileName } from '../i18n/ar.js?v=v2026-07-23.2';
-import { VARIANTS, normTest } from '../contracts.js?v=v2026-07-23.2';
-import { getGenLibs } from '../vendor-loader.js?v=v2026-07-23.2';
+import { STR, todayISO, buildFileName } from '../i18n/ar.js?v=v2026-07-23.3';
+import { VARIANTS, normTest } from '../contracts.js?v=v2026-07-23.3';
+import { getGenLibs } from '../vendor-loader.js?v=v2026-07-23.3';
 
 /* ------------------------------------------------------------------ *
  * Shared micro-helpers (same idioms the screens use)
@@ -55,10 +55,11 @@ export function currentNumbersOf(kpi) {
 }
 
 // deltaMode baseline (user decision B): recompute model.kpi.deltas against the picked
-// baseline and stamp model.deltaBaseline {baselineDate, mode} so the exec legend renders
-// mode-aware. Signed (no max(0) clamp) so a drop surfaces as a '−N' green chip. Degrades
-// to the engine's legacy deltas when the delta-baseline module is missing or no baseline
-// resolves. Mutates kpi.deltas in place so the generated files match the review preview.
+// baseline and stamp model.deltaBaseline {baselineDate, mode, anchored} so the exec legend
+// renders mode-aware and a non-anchored weekly fallback stays disclosable. Signed (no
+// max(0) clamp) so a drop surfaces as a '−N' green chip. Degrades to the engine's legacy
+// deltas when the delta-baseline module is missing or no baseline resolves. Mutates
+// kpi.deltas in place so the generated files match the review preview.
 export function applyDeltaBaseline(model, store, pickDeltaBaseline) {
   if (typeof pickDeltaBaseline !== 'function' || !model || !model.kpi) return;
   const settings = (store && store.settings) || {};
@@ -80,6 +81,13 @@ export function applyDeltaBaseline(model, store, pickDeltaBaseline) {
   }
   model.kpi.deltas = deltas;
   model.deltaBaseline = { baselineDate: picked.baselineDate, mode: picked.mode };
+  // anchored is only meaningful for the weekday-anchored weekly modes: false means the
+  // picked baseline is NOT on the requested weekday (no such report stored yet). It MUST
+  // be preserved here, not just in the review screen's copy: this is the function the
+  // unattended run and screen-generate use, and screen-generate re-runs it on the very
+  // model object review already stamped — dropping the key would delete the disclosure
+  // on the way to file production.
+  if ('anchored' in picked) model.deltaBaseline.anchored = !!picked.anchored;
 }
 
 /**
@@ -160,7 +168,7 @@ function installFastTimers() {
 // Build the SlideSpec per VARIANT — the variant changes slide-5 content
 // (task rows), so one shared spec would leak internal tasks into NUPCO files.
 async function buildVariantSpec(model, variant) {
-  const mod = await tryImport('../slidespec/build-spec.js?v=v2026-07-23.2');
+  const mod = await tryImport('../slidespec/build-spec.js?v=v2026-07-23.3');
   const fn = pickFn(mod, ['buildSpec', 'build', 'makeSpec', 'toSpec']);
   if (!fn) return null;
   let spec = fn(model, { variant });
@@ -186,7 +194,7 @@ async function toBlob(result, kind) {
 // renderPptx(spec, {variant, PptxGenJS}) -> Promise<Blob>
 async function makePptx(spec, variant, libs) {
   if (!spec) return null;
-  const mod = await tryImport('../render/pptx-renderer.js?v=v2026-07-23.2');
+  const mod = await tryImport('../render/pptx-renderer.js?v=v2026-07-23.3');
   const fn = pickFn(mod, ['renderPptx', 'buildPptx', 'toPptx', 'makePptx', 'render']);
   if (!fn) return null;
   const r = await fn(spec, { variant, PptxGenJS: libs.PptxGenJS });
@@ -198,9 +206,9 @@ async function makePptx(spec, variant, libs) {
 // the host and before capture starts — screen-generate clones them into live thumbnails.
 async function makePdf(spec, variant, libs, host, onProgress, onSlides) {
   if (!spec) return null;
-  const rMod = await tryImport('../render/html-renderer.js?v=v2026-07-23.2');
+  const rMod = await tryImport('../render/html-renderer.js?v=v2026-07-23.3');
   const renderSlides = pickFn(rMod, ['renderSlides', 'renderSpec', 'renderHtml', 'render']);
-  const pMod = await tryImport('../render/pdf-export.js?v=v2026-07-23.2');
+  const pMod = await tryImport('../render/pdf-export.js?v=v2026-07-23.3');
   const exportPdf = pickFn(pMod, ['exportPdf', 'renderPdf', 'toPdf', 'buildPdf', 'render']);
   if (!renderSlides || !exportPdf) return null;
   host.innerHTML = '';
@@ -384,16 +392,16 @@ const PULL_REUSE_MS = 15000;
 
 /** Default heavy dependencies — every one overridable through `deps` (tests inject fakes). */
 const DEFAULT_DEPS = Object.freeze({
-  loadGrafana: () => import('../ingest/grafana.js?v=v2026-07-23.2'),
-  loadEngine: () => tryImport('../engine/engine.js?v=v2026-07-23.2'),
-  loadReportModel: () => import('../model/report-model.js?v=v2026-07-23.2'),
-  loadDeltaBaseline: () => tryImport('../model/delta-baseline.js?v=v2026-07-23.2'),
-  loadLateLabs: () => import('../export/late-labs.js?v=v2026-07-23.2'),
-  loadTatSuggest: () => tryImport('../ingest/tat-suggest.js?v=v2026-07-23.2'),
-  loadTatLoinc: () => tryImport('../seeds/tat-lookup.js?v=v2026-07-23.2'),
+  loadGrafana: () => import('../ingest/grafana.js?v=v2026-07-23.3'),
+  loadEngine: () => tryImport('../engine/engine.js?v=v2026-07-23.3'),
+  loadReportModel: () => import('../model/report-model.js?v=v2026-07-23.3'),
+  loadDeltaBaseline: () => tryImport('../model/delta-baseline.js?v=v2026-07-23.3'),
+  loadLateLabs: () => import('../export/late-labs.js?v=v2026-07-23.3'),
+  loadTatSuggest: () => tryImport('../ingest/tat-suggest.js?v=v2026-07-23.3'),
+  loadTatLoinc: () => tryImport('../seeds/tat-lookup.js?v=v2026-07-23.3'),
   // Track 5's module; absent until it ships → the emails step reports 'skip'.
-  loadEmlDraft: () => tryImport('../export/eml-draft.js?v=v2026-07-23.2'),
-  loadDownload: () => tryImport('../ui/late-labs-section.js?v=v2026-07-23.2'),
+  loadEmlDraft: () => tryImport('../export/eml-draft.js?v=v2026-07-23.3'),
+  loadDownload: () => tryImport('../ui/late-labs-section.js?v=v2026-07-23.3'),
   produceReportFiles,
   now: () => Date.now(),
 });

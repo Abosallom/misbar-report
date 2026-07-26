@@ -1,32 +1,60 @@
 #!/bin/bash
-# Daily hands-off report job (launchd → com.misbar.daily-report).
+# Hands-off report job (launchd → com.misbar.daily-report / com.misbar.weekly-report).
+#
+#   misbar-daily.sh            # mode=daily  (default — unchanged behaviour)
+#   misbar-daily.sh weekly     # mode=weekly (the Sunday + Thursday agent)
 #
 #   1) refresh the encrypted KAMC snapshot with the existing local exporter
 #   2) open the live site with the ?auto=1 trigger so the browser does the rest
+#
+# The mode is an IDENTITY, never a switch inside this script: both agents run the
+# very same two steps. It tags every log line ([misbar-daily …] /
+# [misbar-weekly …]) and, for weekly, puts &mode=weekly on the trigger URL as the
+# run's marker. What the page does with that marker — including the choice between
+# the weekday-anchored weekly-sun / weekly-thu comparisons — is decided in the app
+# (src/main.js), not here; this job never writes a setting and never claims the
+# page acted on it.
 #
 # NO SECRETS LIVE HERE. The exporter inherits GRAFANA_TOKEN / DATA_KEY from its
 # own LaunchAgent (com.misbar.kamc-live); this job only asks launchd to run it.
 # Always exits 0 — a bad day is logged and retried on the next tick.
 set -u
 
+# Unknown values fall back to 'daily' rather than failing: a mistyped launchd
+# argument must never cost a run.
+MODE="${1:-daily}"
+case "$MODE" in
+  daily|weekly) : ;;
+  *) MODE="daily" ;;
+esac
+
 SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
 LOG_DIR="$HOME/Library/Logs"
 LOG_FILE="$LOG_DIR/misbar-daily.log"
 EXPORTER="$SCRIPT_DIR/kamc-live-local.sh"
-SITE_URL="${MISBAR_SITE_URL:-https://abosallom.github.io/misbar-report/?auto=1}"
+SITE_BASE="${MISBAR_SITE_URL:-https://abosallom.github.io/misbar-report/?auto=1}"
+# Daily keeps the exact URL it always used; weekly appends &mode=weekly (or
+# ?mode=weekly when MISBAR_SITE_URL was overridden without a query string).
+SITE_URL="$SITE_BASE"
+if [ "$MODE" != "daily" ]; then
+  case "$SITE_BASE" in
+    *\?*) SITE_URL="$SITE_BASE&mode=$MODE" ;;
+    *)    SITE_URL="$SITE_BASE?mode=$MODE" ;;
+  esac
+fi
 # GitHub Pages needs a moment to serve a freshly pushed snapshot.
 PAGES_DELAY="${MISBAR_PAGES_DELAY:-20}"
 
 mkdir -p "$LOG_DIR" 2>/dev/null || true
-log() { printf '[misbar-daily %s] %s\n' "$(date '+%F %T')" "$*" >>"$LOG_FILE" 2>/dev/null || true; }
+log() { printf '[misbar-%s %s] %s\n' "$MODE" "$(date '+%F %T')" "$*" >>"$LOG_FILE" 2>/dev/null || true; }
 
 # Reachability probe — a laptop off the network should skip silently, not churn.
 online() { /usr/bin/curl -sSf -I -m 10 -o /dev/null https://github.com >/dev/null 2>&1; }
 
-log "start (scripts=$SCRIPT_DIR)"
+log "start (mode=$MODE, scripts=$SCRIPT_DIR)"
 
 if ! online; then
-  log "offline — skipping today's run"
+  log "offline — skipping this $MODE run"
   exit 0
 fi
 
@@ -56,7 +84,7 @@ case "$PAGES_DELAY" in
 esac
 [ "$PAGES_DELAY" -gt 0 ] && sleep "$PAGES_DELAY"
 
-log "opening the report trigger in the default browser"
+log "opening the report trigger in the default browser (mode=$MODE)"
 if /usr/bin/open "$SITE_URL" >>"$LOG_FILE" 2>&1; then
   log "browser trigger sent"
 else
