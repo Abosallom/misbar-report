@@ -1,12 +1,12 @@
 // main.js — boot, settings store, top app bar, and screen router (Track E).
-import { state } from './state.js?v=v2026-07-23.1';
-import { STR } from './i18n/ar.js?v=v2026-07-23.1';
-import { APP_VERSION } from './version.js?v=v2026-07-23.1';
-import { el, toast } from './ui/components.js?v=v2026-07-23.1';
-import { SETTINGS_KEY } from './contracts.js?v=v2026-07-23.1';
-import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-07-23.1';
-import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-07-23.1';
-import { HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED, GRAFANA_SEED } from './seeds/defaults.js?v=v2026-07-23.1';
+import { state } from './state.js?v=v2026-07-23.2';
+import { STR } from './i18n/ar.js?v=v2026-07-23.2';
+import { APP_VERSION } from './version.js?v=v2026-07-23.2';
+import { el, toast } from './ui/components.js?v=v2026-07-23.2';
+import { SETTINGS_KEY } from './contracts.js?v=v2026-07-23.2';
+import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-07-23.2';
+import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-07-23.2';
+import { HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED, GRAFANA_SEED } from './seeds/defaults.js?v=v2026-07-23.2';
 
 /* ------------------------------------------------------------------ *
  * Settings store — prefers Track C's src/store.js, falls back to a
@@ -162,7 +162,7 @@ async function resolveStore() {
   const local = createLocalStore(persistent);
   let backend = null;
   try {
-    const mod = await import('./store.js?v=v2026-07-23.1');
+    const mod = await import('./store.js?v=v2026-07-23.2');
     if (mod && typeof mod.loadSettings === 'function' && typeof mod.saveSettings === 'function') {
       const s = mod.loadSettings();
       if (s && s.tatLookup) backend = mod;
@@ -176,10 +176,10 @@ async function resolveStore() {
  * ------------------------------------------------------------------ */
 
 const SCREEN_MODULES = {
-  upload: './ui/screen-upload.js?v=v2026-07-23.1',
-  review: './ui/screen-review.js?v=v2026-07-23.1',
-  generate: './ui/screen-generate.js?v=v2026-07-23.1',
-  settings: './ui/screen-settings.js?v=v2026-07-23.1', // Track C
+  upload: './ui/screen-upload.js?v=v2026-07-23.2',
+  review: './ui/screen-review.js?v=v2026-07-23.2',
+  generate: './ui/screen-generate.js?v=v2026-07-23.2',
+  settings: './ui/screen-settings.js?v=v2026-07-23.2', // Track C
 };
 
 let appEl = null;
@@ -365,6 +365,310 @@ function buildShell(store) {
 }
 
 /* ------------------------------------------------------------------ *
+ * URL automation trigger (Track 4) — ?auto=1 | ?auto=full
+ *
+ * ?auto=1     run the pipeline with the user's stored settings.automation.
+ *             Honours the master switch: `enabled: false` vetoes the run.
+ * ?auto=full  switch every option on for this run — the switched-on values are
+ *             NOT written back to settings.automation, but the steps they
+ *             enable are the ordinary steps and they do write what a normal run
+ *             writes: autoAcceptTat saves the suggested TAT durations, and a
+ *             successful generate records the delta-baseline snapshot. Because
+ *             this mode ignores the master switch and any link can navigate
+ *             here, it asks for an explicit confirmation first (fail-closed:
+ *             no confirm(), no run).
+ *
+ * The trigger is deliberately inert unless everything lines up: boot() returns
+ * early on a locked device (a locked device must NEVER auto-run) and the
+ * pipeline import is guarded. The bus is claimed synchronously so a panel that
+ * mounts while the import is still in flight can see that this run owns the
+ * pipeline instead of starting a rival one. Progress is published on that bus —
+ * reachable via `window.__misbarAutoRun` or the announce event, in either
+ * order — and mirrored to the console + a toast so an unattended run is still
+ * observable. The bus itself carries METADATA ONLY: the produced blobs and lab
+ * bytes (order-level data) travel in the misbar:autodone detail and are never
+ * parked on `window`. Nothing here may throw: a broken trigger must not break
+ * the app.
+ * ------------------------------------------------------------------ */
+const AUTO_BUS_KEY = '__misbarAutoRun';
+const AUTO_ANNOUNCE_EVENT = 'misbar:autorun';  // detail = the bus (fires once)
+const AUTO_STEP_EVENT = 'misbar:autostep';     // detail = the pipeline event
+// detail = { ok, result, summary, alreadyRunning, error }. `result` is the FULL
+// pipeline result (blobs + lab bytes) and is handed to listeners here and only
+// here — it is deliberately not retained anywhere after the dispatch.
+const AUTO_DONE_EVENT = 'misbar:autodone';
+
+/** Read the trigger off the query string. Returns 'auto' | 'full' | null. */
+function readAutoMode(params) {
+  const raw = String(params.get('auto') || '').trim().toLowerCase();
+  if (!raw || raw === '0' || raw === 'false' || raw === 'off' || raw === 'no') return null;
+  return (raw === 'full' || raw === 'all') ? 'full' : 'auto';
+}
+
+function fireWindowEvent(name, detail) {
+  try { window.dispatchEvent(new CustomEvent(name, { detail })); } catch { /* older engines — bus still works */ }
+}
+
+/* XLSX MIME for the per-lab workbooks the pipeline hands back as raw bytes
+ * (same literal ui/late-labs-section.js and ui/automation-panel.js use). */
+const SHEET_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+/* Save a finished run's per-lab workbooks + .eml drafts. runAutomation's own
+ * autoDownload hook covers ONLY the 4 report files (inside its generate step),
+ * so on the unattended ?auto= path — where no panel is listening — the XLSX/EML
+ * blobs would be produced and then dropped with the tab. Spaced ~300ms apart,
+ * the pacing late-labs-section.js uses so browsers don't discard stacked
+ * downloads. Fully guarded: a missing helper is a no-op, never a throw. */
+async function downloadAutoExtras(result) {
+  const items = [];
+  for (const f of ((result && result.labFiles) || [])) {
+    if (f && f.bytes) items.push({ name: f.fileName || ((f.lab || 'lab') + '.xlsx'), blob: new Blob([f.bytes], { type: SHEET_MIME }) });
+  }
+  for (const d of ((result && result.drafts) || [])) {
+    if (d && d.blob) items.push({ name: d.fileName || ((d.lab || 'lab') + '.eml'), blob: d.blob });
+  }
+  if (!items.length) return 0;
+  let mod = null;
+  try {
+    mod = await import('./ui/late-labs-section.js?v=v2026-07-23.2');
+  } catch (e) {
+    console.warn('[auto] download helper unavailable — lab files/drafts not saved', e);
+    return 0;
+  }
+  if (!mod || typeof mod.triggerDownload !== 'function') {
+    console.warn('[auto] download helper exports no triggerDownload() — lab files/drafts not saved');
+    return 0;
+  }
+  let n = 0;
+  for (let i = 0; i < items.length; i++) {
+    try { mod.triggerDownload(items[i].blob, items[i].name); n++; } catch (e) { console.warn('[auto] download failed', items[i].name, e); }
+    if (i < items.length - 1) await new Promise((r) => setTimeout(r, 300));
+  }
+  console.info('[auto] saved ' + n + ' extra file(s) (lab workbooks + drafts)');
+  return n;
+}
+
+/** Replay-capable event bus for one automation run. */
+function createAutoBus(mode) {
+  const events = [];
+  const subs = new Set();
+  return {
+    mode,
+    running: true,
+    startedAt: new Date().toISOString(),
+    finishedAt: null,
+    options: null,
+    // Metadata-only summary of the finished run — {ok, steps, errors, counts}.
+    // Order-level data (files[].blob, labFiles[].bytes, drafts[].blob) must NOT
+    // be parked on `window`; it lives in the misbar:autodone detail instead.
+    result: null,
+    alreadyRunning: false, // true when another caller owned the pipeline
+    error: null,
+    promise: null,
+    events,
+    abort() { /* replaced with the AbortController hook below */ },
+    /** subscribe(fn) → unsubscribe. Buffered events are replayed immediately. */
+    subscribe(fn) {
+      if (typeof fn !== 'function') return () => {};
+      subs.add(fn);
+      for (const ev of events.slice()) {
+        try { fn(ev); } catch (e) { console.warn('[auto] subscriber failed', e); }
+      }
+      return () => subs.delete(fn);
+    },
+    emit(ev) {
+      events.push(ev);
+      for (const fn of Array.from(subs)) {
+        try { fn(ev); } catch (e) { console.warn('[auto] subscriber failed', e); }
+      }
+      fireWindowEvent(AUTO_STEP_EVENT, ev);
+    },
+  };
+}
+
+/* Stored options for ?auto=1; every boolean forced on for ?auto=full. The full
+ * set is derived from the module's own defaults so a new step added by Track 1
+ * is picked up without touching this file. The forced-on VALUES are never
+ * written back to settings.automation — but the steps they switch on write
+ * whatever a normal run writes, which is why 'full' asks first. */
+function autoOptionsFor(mode, defaults, stored) {
+  const base = { ...(defaults && typeof defaults === 'object' ? defaults : {}), ...(stored || {}) };
+  if (mode !== 'full') return base;
+  const shape = (defaults && Object.keys(defaults).length) ? defaults : base;
+  const full = { ...base };
+  for (const [k, v] of Object.entries(shape)) {
+    if (typeof v === 'boolean') full[k] = true;
+  }
+  full.enabled = true;
+  return full;
+}
+
+/* runAutomation()'s documented "someone else owns the pipeline" reply:
+ * {ok:false, steps:[], files:[], labFiles:[], drafts:[], errors:['already-running']}.
+ * That is not a failure of THIS run — the other caller (the upload screen's
+ * panel) is doing the work and paints its own progress — so it must never
+ * produce an error toast here. */
+const ALREADY_RUNNING = 'already-running';
+
+function isAlreadyRunning(res) {
+  return !!(res && Array.isArray(res.steps) && res.steps.length === 0
+    && Array.isArray(res.errors) && res.errors.length === 1 && res.errors[0] === ALREADY_RUNNING);
+}
+
+/* What the bus is allowed to keep: status only, no order-level data. Step
+ * messages and errors are counts/lab names, never patient rows. */
+function summarizeResult(res) {
+  if (!res || typeof res !== 'object') return null;
+  const len = (v) => (Array.isArray(v) ? v.length : 0);
+  return {
+    ok: !!res.ok,
+    steps: (Array.isArray(res.steps) ? res.steps : [])
+      .map((s) => ({ id: s && s.id, status: s && s.status, message: (s && s.message) || '' })),
+    errors: (Array.isArray(res.errors) ? res.errors : []).map(String),
+    counts: { files: len(res.files), labFiles: len(res.labFiles), drafts: len(res.drafts) },
+  };
+}
+
+/* ?auto=full ignores the master switch and any link can navigate here, so the
+ * navigation itself is the only "consent" there would otherwise be — and the run
+ * it starts writes to settings (accepted TAT suggestions, delta-baseline
+ * snapshot). Ask the person at the keyboard first, and fail CLOSED: if confirm()
+ * is unavailable or blocked, the full run does not happen. */
+const FULL_RUN_CONFIRM = 'تشغيل آلي كامل لجميع الخطوات الآن؟\n\n'
+  + 'سيتم سحب البيانات، وتوليد التقارير وملفات المختبرات ومسودات البريد (لا يُرسَل أي بريد).\n'
+  + 'كما ستُحفَظ في الإعدادات مدد الفحص المقترحة ولقطة الأساس المستخدمة لمقارنة الغد.';
+
+function confirmFullRun() {
+  try {
+    if (typeof window.confirm !== 'function') return false;
+    return window.confirm(FULL_RUN_CONFIRM) === true;
+  } catch (e) {
+    console.warn('[auto] confirm() unavailable — full run refused', e);
+    return false;
+  }
+}
+
+async function startAutomationRun(mode, store) {
+  const existing = window[AUTO_BUS_KEY];
+  if (existing && existing.running) return existing; // concurrent-run guard
+
+  // Claim the bus SYNCHRONOUSLY, before the first await. The upload screen and
+  // its automation panel mount while the import below is still in flight, so
+  // `window.__misbarAutoRun` has to say "a run already owns the pipeline" by the
+  // time they look — otherwise both callers race for the pipeline's single-run
+  // slot and the loser reports a failure that never happened. Every early return
+  // releases the claim again; each of those paths is one where a panel could not
+  // have started a run either (no module / master switch off / declined).
+  const bus = createAutoBus(mode);
+  window[AUTO_BUS_KEY] = bus;
+  const release = () => {
+    bus.running = false;
+    bus.finishedAt = new Date().toISOString();
+    if (window[AUTO_BUS_KEY] === bus) window[AUTO_BUS_KEY] = null;
+  };
+
+  let mod = null;
+  try {
+    mod = await import('./automation/pipeline.js?v=v2026-07-23.2');
+  } catch (e) {
+    console.warn('[auto] pipeline module unavailable — trigger ignored', e);
+    release();
+    return null;
+  }
+  if (!mod || typeof mod.runAutomation !== 'function') {
+    console.warn('[auto] pipeline module exports no runAutomation() — trigger ignored');
+    release();
+    return null;
+  }
+
+  let stored = null;
+  try {
+    const s = store.settings;
+    if (s && typeof s.automation === 'object' && s.automation) stored = s.automation;
+  } catch (e) { console.warn('[auto] could not read settings.automation', e); }
+
+  const options = autoOptionsFor(mode, mod.AUTOMATION_DEFAULTS, stored);
+  if (mode !== 'full' && options.enabled === false) {
+    console.info('[auto] automation is disabled in settings — nothing to run');
+    toast('الأتمتة معطّلة في الإعدادات — لم يُنفَّذ أي إجراء', 'warn', 4500);
+    release();
+    return null;
+  }
+  if (mode === 'full' && !confirmFullRun()) {
+    console.info('[auto] full run not confirmed — nothing was run and nothing was written');
+    toast('أُلغي التشغيل الآلي الكامل', 'warn', 4000);
+    release();
+    return null;
+  }
+
+  bus.options = Object.freeze({ ...options });
+  const controller = (typeof AbortController === 'function') ? new AbortController() : null;
+  if (controller) bus.abort = () => { try { controller.abort(); } catch { /* already gone */ } };
+  // Nothing about a run outlives the page.
+  try {
+    window.addEventListener('pagehide', () => {
+      bus.result = null; bus.error = null; bus.events.length = 0;
+    }, { once: true });
+  } catch { /* no pagehide here — the bus dies with the document anyway */ }
+  fireWindowEvent(AUTO_ANNOUNCE_EVENT, bus);
+
+  console.info('[auto] starting automation run (mode=' + mode + ')');
+  toast(mode === 'full' ? 'بدء التشغيل الآلي الكامل…' : 'بدء التشغيل الآلي…', '', 3000);
+
+  bus.promise = (async () => {
+    // `res` is the only reference to the produced blobs/bytes, and it dies with
+    // this closure — the bus keeps the summary, listeners get the payload.
+    let res = null;
+    try {
+      res = await mod.runAutomation({
+        store,
+        state,
+        ctx,
+        options,
+        onEvent: (ev) => {
+          const e = ev && typeof ev === 'object' ? ev : { step: 'unknown', status: 'done' };
+          console.info('[auto]', e.step, e.status, e.pct != null ? e.pct + '%' : '', e.message || '');
+          bus.emit(e);
+        },
+        signal: controller ? controller.signal : undefined,
+      });
+    } catch (e) {
+      bus.error = e;
+      console.error('[auto] run failed', e);
+    } finally {
+      const already = isAlreadyRunning(res);
+      bus.alreadyRunning = already;
+      bus.result = already ? null : summarizeResult(res);
+      bus.running = false;
+      bus.finishedAt = new Date().toISOString();
+      const ok = !bus.error && !already && !!(res && res.ok);
+      const c = (bus.result && bus.result.counts) || {};
+      // Count every artefact the run produced — the deck AND the lab workbooks
+      // and drafts, all of which are saved below when autoDownload is on.
+      const n = (c.files || 0) + (c.labFiles || 0) + (c.drafts || 0);
+      fireWindowEvent(AUTO_DONE_EVENT, {
+        ok, result: already ? null : res, summary: bus.result, alreadyRunning: already, error: bus.error,
+      });
+      if (already) {
+        // Another caller owns the pipeline and reports its own progress; this
+        // trigger has nothing to add and must not invent a failure.
+        console.info('[auto] another automation run is already in flight — deferring to it');
+      } else if (ok) {
+        toast('اكتمل التشغيل الآلي — ' + n + ' ملف جاهز', 'ok', 5000);
+      } else {
+        toast('تعذّر إكمال التشغيل الآلي — راجع اللوحة', 'err', 6000);
+      }
+      // The pipeline downloads the report deck only; save the lab workbooks and
+      // drafts too so an unattended run leaves every produced file on disk.
+      if (!already && options.autoDownload) await downloadAutoExtras(res);
+    }
+    return bus.result; // metadata only — never the blobs/bytes
+  })();
+
+  return bus;
+}
+
+/* ------------------------------------------------------------------ *
  * Boot
  * ------------------------------------------------------------------ */
 let lockMod = null;
@@ -376,7 +680,7 @@ async function boot() {
   // behind the passphrase screen. Devices remember a successful unlock; the
   // قفل nav button re-locks (clears the marker + sealed secrets).
   try {
-    lockMod = await import('./ui/lock.js?v=v2026-07-23.1');
+    lockMod = await import('./ui/lock.js?v=v2026-07-23.2');
   } catch { lockMod = null; /* lock module absent — open boot (dev) */ }
   if (lockMod && typeof lockMod.isUnlocked === 'function' && !lockMod.isUnlocked(store)) {
     const root = document.getElementById('app-shell') || document.body;
@@ -390,8 +694,8 @@ async function boot() {
   // TAT-lookup Excel merge hook consumed by the settings screen (Track C).
   state.onTatFileMerge = async (file) => {
     const [{ getXLSX }, { parseTatLookupXlsx }] = await Promise.all([
-      import('./vendor-loader.js?v=v2026-07-23.1'),
-      import('./ingest/xlsx.js?v=v2026-07-23.1'),
+      import('./vendor-loader.js?v=v2026-07-23.2'),
+      import('./ingest/xlsx.js?v=v2026-07-23.2'),
     ]);
     const XLSX = await getXLSX();
     const { tests } = parseTatLookupXlsx(await file.arrayBuffer(), XLSX);
@@ -411,7 +715,7 @@ async function boot() {
   // Connection test consumed by the settings screen's اختبار الاتصال button.
   state.onGrafanaTest = async () => {
     try {
-      const mod = await import('./ingest/grafana.js?v=v2026-07-23.1');
+      const mod = await import('./ingest/grafana.js?v=v2026-07-23.2');
       const g = store.loadSettings().grafana || {};
       const now = Date.now();
       const res = await mod.fetchKamcOrders(g, { fromMs: now - 7 * 86400000, toMs: now });
@@ -425,10 +729,21 @@ async function boot() {
 
   buildShell(store);
 
-  // Route from ?screen= if provided (dev convenience), else upload.
+  // Route from ?screen= if provided (dev convenience), else upload. An ?auto=
+  // trigger always lands on upload — that is where Track 2's progress panel is.
   const params = new URLSearchParams(location.search);
+  const autoMode = readAutoMode(params);
   const start = params.get('screen');
-  state.screen = (start && SCREEN_MODULES[start]) ? start : 'upload';
+  state.screen = autoMode ? 'upload' : ((start && SCREEN_MODULES[start]) ? start : 'upload');
+
+  // Fire-and-forget: the trigger must never be able to break boot. It runs
+  // BEFORE renderScreen() on purpose — startAutomationRun claims the bus
+  // synchronously, so by the time the upload screen (and its automation panel)
+  // is imported, `window.__misbarAutoRun` already shows this run owns the
+  // pipeline and nothing can start a competing one.
+  if (autoMode) {
+    startAutomationRun(autoMode, store).catch((e) => console.warn('[auto] trigger failed', e));
+  }
 
   renderScreen();
 

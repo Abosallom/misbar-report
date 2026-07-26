@@ -38,6 +38,24 @@ export const REPORT_OPTIONS_SEED = {
   deltaMode: 'daily',
 };
 
+// Automation pipeline options (Settings.automation, v4): the unattended daily run.
+// EVERY switch is OFF on a fresh install — automation never starts, pulls, writes
+// files or drafts mail unless the user turns it on explicitly. dailyTime is local
+// 24-hour 'HH:MM'. labRecipients maps a lab name -> a comma-separated recipient
+// list for the per-lab email drafts; a missing/empty entry means the draft carries
+// no To: line. Shape mirrors AUTOMATION_DEFAULTS in automation/pipeline.js.
+export const AUTOMATION_SEED = {
+  enabled: false,
+  autoPull: false,
+  autoGenerate: false,
+  autoDownload: false,
+  autoLabFiles: false,
+  autoEmailDrafts: false,
+  autoAcceptTat: false,
+  dailyTime: '08:00',
+  labRecipients: {},
+};
+
 // Rolling per-date history of published report numbers (Settings.snapshotHistory):
 // key 'YYYY-MM-DD' → the same number set snapshot.numbers holds. Empty on a fresh
 // install; the delta picker falls back to the legacy snapshot until it fills in.

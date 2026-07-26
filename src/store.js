@@ -11,18 +11,28 @@
 // throws on write; on failure we fall back to an in-memory doc and expose
 // isEphemeral() so the UI can warn the user their edits will not persist.
 
-import { SETTINGS_KEY } from './contracts.js?v=v2026-07-23.1';
-import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-07-23.1';
-import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-07-23.1';
+import { SETTINGS_KEY } from './contracts.js?v=v2026-07-23.2';
+import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-07-23.2';
+import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-07-23.2';
 import {
   HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED, GRAFANA_SEED, REPORT_OPTIONS_SEED,
-  SNAPSHOT_HISTORY_SEED,
-} from './seeds/defaults.js?v=v2026-07-23.1';
+  SNAPSHOT_HISTORY_SEED, AUTOMATION_SEED,
+} from './seeds/defaults.js?v=v2026-07-23.2';
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 // Well-formed 'YYYY-MM-DD' — the key shape for snapshotHistory entries.
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+// Local 24-hour 'HH:MM' — the shape of automation.dailyTime.
+const DAILY_TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+// The automation boolean switches (v4). Every one defaults to false; dailyTime and
+// labRecipients are the only non-boolean members of the block.
+const AUTOMATION_FLAG_KEYS = [
+  'enabled', 'autoPull', 'autoGenerate', 'autoDownload', 'autoLabFiles',
+  'autoEmailDrafts', 'autoAcceptTat',
+];
 
 // ---- module state -----------------------------------------------------------
 // _ephemeral: true once any localStorage op has thrown; drives isEphemeral().
@@ -81,6 +91,32 @@ function backfillReportOptions(doc) {
   if (ro.deltaMode !== 'daily' && ro.deltaMode !== 'weekly') ro.deltaMode = seed.deltaMode;
 }
 
+/**
+ * In-place backfill of doc.automation from AUTOMATION_SEED (v4). A missing block
+ * is deep-copied from the seed; a partial one gets every missing switch filled
+ * with its seed default (false — automation is opt-in, never inferred). A
+ * dailyTime that is not 'HH:MM' resets to the seed; labRecipients is kept as a
+ * plain lab -> recipient-string map, non-string values dropped.
+ */
+function backfillAutomation(doc) {
+  const seed = AUTOMATION_SEED;
+  if (!isPlainObject(doc.automation)) {
+    doc.automation = clone(seed);
+    return;
+  }
+  const a = doc.automation;
+  for (const k of AUTOMATION_FLAG_KEYS) {
+    if (typeof a[k] !== 'boolean') a[k] = seed[k];
+  }
+  if (typeof a.dailyTime !== 'string' || !DAILY_TIME_RE.test(a.dailyTime)) {
+    a.dailyTime = seed.dailyTime;
+  }
+  if (!isPlainObject(a.labRecipients)) a.labRecipients = {};
+  else for (const [k, v] of Object.entries(a.labRecipients)) {
+    if (typeof v !== 'string') delete a.labRecipients[k];
+  }
+}
+
 /** Build the first-run document straight from the frozen seeds. */
 function buildSeedDoc() {
   return {
@@ -96,6 +132,7 @@ function buildSeedDoc() {
     snapshotHistory: clone(SNAPSHOT_HISTORY_SEED), // rolling per-date numbers (v3); empty on first run
     grafana: { ...GRAFANA_SEED },
     reportOptions: clone(REPORT_OPTIONS_SEED), // deep clone: nested slides/kpiCards/labels
+    automation: clone(AUTOMATION_SEED), // deep clone: nested labRecipients (v4); all switches off
     cachedTracker: null,
   };
 }
@@ -167,6 +204,7 @@ function migrateSnapshotShape(doc) {
   if (!('cachedTracker' in doc)) doc.cachedTracker = null;
   backfillReportOptions(doc); // add reportOptions + any new slide/card subkeys + deltaMode
   if (!isPlainObject(doc.snapshotHistory)) doc.snapshotHistory = {}; // v3 rolling history
+  backfillAutomation(doc); // v4 automation block (all switches default false)
   return doc;
 }
 
@@ -214,10 +252,28 @@ function migrateV2toV3(doc) {
   return doc;
 }
 
-/** v1 → v3: run the v1→v2 transform, then v2→v3, so old docs land on the current schema. */
-function migrateV1toV3(doc) {
+/**
+ * v3 → v4 forward migration. v4 adds the `automation` block (the unattended daily
+ * pipeline). The shape-softening (migrateSnapshotShape) backfills it from
+ * AUTOMATION_SEED, which leaves every switch OFF: upgrading an existing install
+ * must never silently start pulling data, writing files or drafting mail.
+ */
+function migrateV3toV4(doc) {
+  migrateSnapshotShape(doc); // ensures the automation block exists, all switches false
+  doc.schemaVersion = 4;
+  return doc;
+}
+
+/** v2 → v4: run the v2→v3 transform, then v3→v4. */
+function migrateV2toV4(doc) {
+  migrateV2toV3(doc);
+  return migrateV3toV4(doc);
+}
+
+/** v1 → v4: run the v1→v2 transform, then v2→v3, then v3→v4, so old docs land on the current schema. */
+function migrateV1toV4(doc) {
   migrateV1toV2(doc);
-  return migrateV2toV3(doc);
+  return migrateV2toV4(doc);
 }
 
 /** Version-check + migrate/reset. Unknown versions reset to seeds. */
@@ -227,8 +283,9 @@ function migrate(doc) {
     return persist(buildSeedDoc());
   }
   if (doc.schemaVersion === SCHEMA_VERSION) return migrateSnapshotShape(doc);
-  if (doc.schemaVersion === 2) return persist(migrateV2toV3(doc));
-  if (doc.schemaVersion === 1) return persist(migrateV1toV3(doc));
+  if (doc.schemaVersion === 3) return persist(migrateV3toV4(doc));
+  if (doc.schemaVersion === 2) return persist(migrateV2toV4(doc));
+  if (doc.schemaVersion === 1) return persist(migrateV1toV4(doc));
   // Future schema bumps add forward-migration cases above this line.
   console.warn(
     `[misbar/store] unsupported schemaVersion ${doc.schemaVersion} ` +
@@ -353,8 +410,9 @@ function validateImport(doc) {
   if (!isPlainObject(doc)) {
     throw new Error('ملف الإعدادات غير صالح: الجذر ليس كائناً.');
   }
-  // Accept v1/v2 (transformed on import) or the current v3. Anything else is rejected.
-  if (doc.schemaVersion !== 1 && doc.schemaVersion !== 2 && doc.schemaVersion !== SCHEMA_VERSION) {
+  // Accept v1/v2/v3 (transformed on import) or the current v4. Anything else is rejected.
+  if (doc.schemaVersion !== 1 && doc.schemaVersion !== 2 && doc.schemaVersion !== 3
+      && doc.schemaVersion !== SCHEMA_VERSION) {
     throw new Error(
       `إصدار المخطط غير مدعوم: ${doc.schemaVersion == null ? 'مفقود' : doc.schemaVersion}` +
         ` (المتوقع ${SCHEMA_VERSION}).`,
@@ -468,6 +526,33 @@ function validateImport(doc) {
       }
     }
   }
+  if ('automation' in doc) {
+    // Unlike reportOptions the automation switches are NOT coerce-tolerant: a
+    // sloppy truthy value must not be able to arm an unattended run, so anything
+    // that is not a real boolean is rejected outright.
+    const a = doc.automation;
+    if (!isPlainObject(a)) {
+      throw new Error('حقل automation غير صالح: يجب أن يكون كائناً.');
+    }
+    for (const k of AUTOMATION_FLAG_KEYS) {
+      if (k in a && typeof a[k] !== 'boolean') {
+        throw new Error(`حقل automation.${k} غير صالح: يجب أن يكون قيمة منطقية.`);
+      }
+    }
+    if ('dailyTime' in a && (typeof a.dailyTime !== 'string' || !DAILY_TIME_RE.test(a.dailyTime))) {
+      throw new Error("حقل automation.dailyTime غير صالح: يجب أن يكون وقتاً بصيغة 'HH:MM'.");
+    }
+    if ('labRecipients' in a) {
+      if (!isPlainObject(a.labRecipients)) {
+        throw new Error('حقل automation.labRecipients غير صالح: يجب أن يكون كائناً.');
+      }
+      for (const [k, v] of Object.entries(a.labRecipients)) {
+        if (typeof v !== 'string') {
+          throw new Error(`قيمة غير نصية في automation.labRecipients: "${k}".`);
+        }
+      }
+    }
+  }
   // Element-level checks: a malformed backup must fail here, not crash the
   // settings screen or report generation later.
   const finiteMap = (m, label) => {
@@ -501,7 +586,7 @@ function validateImport(doc) {
 
 // Only these top-level keys may ever be persisted — the "no PHI in storage"
 // invariant depends on unknown keys being discarded before the merge.
-const IMPORT_KEYS = ['schemaVersion', 'tatLookup', 'displayNames', 'scorecard', 'historicalConstants', 'snapshot', 'snapshotHistory', 'grafana', 'reportOptions', 'cachedTracker'];
+const IMPORT_KEYS = ['schemaVersion', 'tatLookup', 'displayNames', 'scorecard', 'historicalConstants', 'snapshot', 'snapshotHistory', 'grafana', 'reportOptions', 'automation', 'cachedTracker'];
 
 // The exact reportOptions subkeys that may be imported. Unknown slide/card keys
 // are dropped; label values must be strings. Keys mirror REPORT_OPTIONS_SEED.
@@ -585,6 +670,24 @@ function pickImportKeys(doc) {
     }
     out.reportOptions = picked;
   }
+  if (isPlainObject(out.automation)) {
+    // Whitelist exactly {7 boolean switches, dailyTime 'HH:MM', labRecipients map
+    // of strings}. Unknown subkeys are discarded; a non-boolean switch or a
+    // malformed dailyTime is dropped (validateImport already rejected those, this
+    // is the belt-and-braces pass) so the stored default survives the merge.
+    const a = out.automation;
+    const picked = {};
+    for (const k of AUTOMATION_FLAG_KEYS) if (typeof a[k] === 'boolean') picked[k] = a[k];
+    if (typeof a.dailyTime === 'string' && DAILY_TIME_RE.test(a.dailyTime)) {
+      picked.dailyTime = a.dailyTime;
+    }
+    if (isPlainObject(a.labRecipients)) {
+      const r = {};
+      for (const [k, v] of Object.entries(a.labRecipients)) if (typeof v === 'string') r[k] = v;
+      picked.labRecipients = r;
+    }
+    out.automation = picked;
+  }
   if ('cachedTracker' in out) {
     const ct = out.cachedTracker;
     if (ct === null) {
@@ -613,6 +716,26 @@ function deepMergeImportWins(base, over) {
   return out;
 }
 
+/**
+ * Names of the automation switches an import flips ON (absent/false -> true).
+ * The import layer round-trips the automation block verbatim on purpose — that is
+ * how a configured install is restored on another machine — so a backup CAN arm
+ * the unattended pipeline. What the store can do is refuse to be quiet about it:
+ * the caller gets the exact switch list and can tell the user automation was
+ * turned on, instead of the next visit to رفع البيانات pulling and generating
+ * with nothing on screen having said so.
+ * @returns {string[]} subset of AUTOMATION_FLAG_KEYS, in declaration order
+ */
+function armedAutomationSwitches(base, incoming) {
+  const b = isPlainObject(base) ? base : {};
+  const inc = isPlainObject(incoming) ? incoming : {};
+  const armed = [];
+  for (const k of AUTOMATION_FLAG_KEYS) {
+    if (inc[k] === true && b[k] !== true) armed.push(k);
+  }
+  return armed;
+}
+
 function countMapChanges(base, incoming) {
   const b = base || {};
   const inc = incoming || {};
@@ -631,7 +754,11 @@ function countMapChanges(base, incoming) {
  * @param {string} jsonText
  * @returns {{tatLookup:{added:number,updated:number}, displayNames:{added:number,updated:number},
  *   cancelledByMonth:{added:number,updated:number},
- *   scorecard:{before:number,after:number,replaced:boolean}, snapshotChanged:boolean}} summary
+ *   scorecard:{before:number,after:number,replaced:boolean}, snapshotChanged:boolean,
+ *   automationArmed:string[]}} summary
+ *   automationArmed lists the automation switches this import turned ON (empty on
+ *   the common path). Callers MUST surface it — an imported backup can arm the
+ *   unattended pipeline, and that must never happen silently.
  */
 export function importSettings(jsonText) {
   let incoming;
@@ -670,6 +797,7 @@ export function importSettings(jsonText) {
     snapshotChanged:
       !!incoming.snapshot &&
       JSON.stringify(current.snapshot) !== JSON.stringify(merged.snapshot),
+    automationArmed: armedAutomationSwitches(current.automation, incoming.automation),
   };
 
   saveSettings(merged);

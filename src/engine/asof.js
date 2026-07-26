@@ -25,8 +25,8 @@
 //               resulted/report datetime when present, else by orderDate ≤ asOf.
 //               Flagged when any counted rejected row used the orderDate fallback.
 
-import { parseDateTime, toEpochDay, workday, MS_PER_DAY } from './workday.js?v=v2026-07-23.1';
-import { buildTatIndex, resolveTat } from './tat.js?v=v2026-07-23.1';
+import { parseDateTime, toEpochDay, workday, MS_PER_DAY } from './workday.js?v=v2026-07-23.2';
+import { buildTatIndex, resolveTat } from './tat.js?v=v2026-07-23.2';
 
 // engine.js's cascade keys off these exact rawStatus literals (not exported).
 const RAW_CANCELLED = 'Order Cancelled';

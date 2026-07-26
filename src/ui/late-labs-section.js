@@ -5,24 +5,15 @@
 // basis, empty-state, and the sanitized triggerDownload helper. Built from the
 // SAME dataset a generate run uses (order rows + TAT lookup + an as-of instant),
 // so it works in live-snapshot mode and on the upload screen too.
-import { el, toast } from './components.js?v=v2026-07-23.1';
-import { todayISO } from '../i18n/ar.js?v=v2026-07-23.1';
-import { buildLateLabWorkbooks } from '../export/late-labs.js?v=v2026-07-23.1';
-import { parseDateTime } from '../engine/workday.js?v=v2026-07-23.1';
-
-// English email template the team pastes when notifying a lab — verbatim wording.
-function labEmailText(lab) {
-  const subject = `${lab} | Late Test Results — Action Required`;
-  const body = [
-    'Dear all,',
-    'This is a reminder regarding laboratory orders that require your attention.',
-    'Some orders in the attached report are approaching their SLA deadline and will breach within the next 24 hours. These are flagged for priority and should be actioned urgently to avoid an SLA breach.',
-    'Please confirm once the listed orders have been addressed. If you have any questions or are facing issues preventing fulfillment, let us know so we can support you.',
-    'Please find the attachment for more info about the orders.',
-    'Thank you for your cooperation.',
-  ].join('\n\n');
-  return `Subject: ${subject}\n\n${body}`;
-}
+import { el, toast } from './components.js?v=v2026-07-23.2';
+import { todayISO } from '../i18n/ar.js?v=v2026-07-23.2';
+import { buildLateLabWorkbooks } from '../export/late-labs.js?v=v2026-07-23.2';
+import { parseDateTime } from '../engine/workday.js?v=v2026-07-23.2';
+// The English email template the team pastes when notifying a lab — VERBATIM
+// wording, now owned by export/eml-draft.js so the clipboard text and the .eml
+// draft body can never drift apart. buildLabEmailDraft only PREPARES a draft
+// file: nothing here sends mail — the user opens it in Outlook and presses Send.
+import { buildLabEmailDraft, labEmailText } from '../export/eml-draft.js?v=v2026-07-23.2';
 
 // Copy text to the clipboard with an execCommand fallback (keeps user activation
 // on browsers where navigator.clipboard is unavailable). Mirrors buildShareCard.
@@ -64,7 +55,13 @@ export function triggerDownload(blob, name) {
 // state card. asOf resolves from `asOfMs` (epoch-ms) when given — the upload screen
 // passes Date.now() — else from `reportDate` (the generate screen passes the report
 // date); only the calendar day of the as-of instant affects classification.
-export async function buildLateLabsSection({ rows, tatTests, reportDate, asOfMs } = {}) {
+// `labRecipients` is OPTIONAL (callers that omit it behave exactly as before): a
+// { [labName]: string | string[] } map — normally store.settings.automation
+// .labRecipients — used ONLY to pre-fill the To: line of a downloaded .eml draft.
+// No address is ever contacted from here; drafts are files the user sends by hand.
+export async function buildLateLabsSection({
+  rows, tatTests, reportDate, asOfMs, labRecipients,
+} = {}) {
   const title = 'ملفات المختبرات — المتأخر والمستحق (Excel)';
   const orderRows = rows || null;
   const tests = tatTests || {};
@@ -93,6 +90,36 @@ export async function buildLateLabsSection({ rows, tatTests, reportDate, asOfMs 
     triggerDownload(new Blob([w.xlsxBytes], { type: SHEET_MIME }), w.fileName);
   };
 
+  // Recipients are optional and fully guarded: a missing/!object map, a missing
+  // lab key, or a non-string value simply means the draft carries no To: line.
+  const recipientsFor = (lab) => {
+    const map = labRecipients;
+    if (!map || typeof map !== 'object') return null;
+    const v = map[lab];
+    if (Array.isArray(v)) return v;
+    return typeof v === 'string' && v.trim() ? v : null;
+  };
+
+  // Download ONE lab's Outlook draft. This only writes a file to disk — no mail
+  // is sent, no address is contacted; the user reviews it in Outlook and sends.
+  const downloadDraft = (w) => {
+    try {
+      const d = buildLabEmailDraft({
+        lab: w.lab,
+        fileName: w.fileName,
+        xlsxBytes: w.xlsxBytes,
+        recipients: recipientsFor(w.lab),
+        reportDate,
+      });
+      triggerDownload(d.blob, d.fileName);
+      return true;
+    } catch (e) {
+      console.warn('[late-labs] draft failed', e);
+      toast('تعذّر إنشاء مسودة البريد', 'err');
+      return false;
+    }
+  };
+
   const labRows = wbs.map((w) => el('div', { class: 'dl-link', style: 'flex-wrap:wrap;gap:8px' }, [
     el('div', { style: 'display:flex;flex-direction:column;gap:2px;min-width:0;flex:1' }, [
       el('span', { dir: 'ltr', style: 'font-weight:600;overflow-wrap:anywhere', text: w.lab }),
@@ -101,7 +128,13 @@ export async function buildLateLabsSection({ rows, tatTests, reportDate, asOfMs 
         ' • مستحق خلال ٢٤ ساعة: ', el('span', { dir: 'ltr', text: String(w.dueSoon) }),
       ]),
     ]),
-    el('div', { style: 'display:flex;gap:6px;flex-shrink:0' }, [
+    // The action group MUST wrap and shrink: three buttons are 433px at their
+    // natural size, wider than the row's 283px content box at a 375px viewport.
+    // Pinned (flex-shrink:0, no wrap) the third button overflowed the RTL
+    // inline-start edge to x=-104 with no scrollbar — physically untappable on a
+    // phone. Wrapping keeps every button in-bounds down to 320px and leaves the
+    // desktop layout byte-identical (the group still sits on one line at ≥441px).
+    el('div', { style: 'display:flex;gap:6px;flex-wrap:wrap;min-width:0' }, [
       el('button', {
         class: 'btn btn--ghost', text: '⬇ تنزيل',
         onClick: () => downloadOne(w),
@@ -109,6 +142,11 @@ export async function buildLateLabsSection({ rows, tatTests, reportDate, asOfMs 
       el('button', {
         class: 'btn btn--ghost', text: '✉ نسخ نص البريد',
         onClick: async () => { if (await copyText(labEmailText(w.lab))) toast('تم نسخ نص البريد', 'ok'); },
+      }),
+      el('button', {
+        class: 'btn btn--ghost', text: '✉ مسودة بريد (.eml)',
+        title: 'ينزّل مسودة Outlook بالمرفق — لا يُرسل البريد، أنت من يضغط إرسال',
+        onClick: () => { if (downloadDraft(w)) toast('تم تنزيل المسودة — افتحها في Outlook وأرسلها بنفسك', 'ok'); },
       }),
     ]),
   ]));
@@ -119,16 +157,31 @@ export async function buildLateLabsSection({ rows, tatTests, reportDate, asOfMs 
     ...labRows,
   ];
   if (wbs.length > 1) {
-    children.push(el('button', {
-      class: 'btn btn--primary btn--block', style: 'margin-top:10px', text: 'تنزيل الكل',
-      // Sequential downloads ~300ms apart so browsers don't drop stacked clicks.
-      onClick: async () => {
-        for (let i = 0; i < wbs.length; i++) {
-          downloadOne(wbs[i]);
-          if (i < wbs.length - 1) await new Promise((r) => setTimeout(r, 300));
-        }
-      },
-    }));
+    children.push(el('div', { style: 'display:flex;gap:8px;margin-top:10px;flex-wrap:wrap' }, [
+      el('button', {
+        class: 'btn btn--primary', style: 'flex:1 1 160px', text: 'تنزيل الكل',
+        // Sequential downloads ~300ms apart so browsers don't drop stacked clicks.
+        onClick: async () => {
+          for (let i = 0; i < wbs.length; i++) {
+            downloadOne(wbs[i]);
+            if (i < wbs.length - 1) await new Promise((r) => setTimeout(r, 300));
+          }
+        },
+      }),
+      el('button', {
+        class: 'btn btn--ghost', style: 'flex:1 1 160px', text: 'تنزيل كل المسودات',
+        title: 'ينزّل مسودة Outlook لكل مختبر — لا يُرسل أي بريد',
+        // Same 300ms spacing; each draft is just a downloaded file, never sent.
+        onClick: async () => {
+          let ok = 0;
+          for (let i = 0; i < wbs.length; i++) {
+            if (downloadDraft(wbs[i])) ok += 1;
+            if (i < wbs.length - 1) await new Promise((r) => setTimeout(r, 300));
+          }
+          if (ok) toast('تم تنزيل المسودات — راجعها في Outlook وأرسلها بنفسك', 'ok');
+        },
+      }),
+    ]));
   }
   return el('div', { class: 'card', style: 'margin-top:16px;text-align:right' }, children);
 }

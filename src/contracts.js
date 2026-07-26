@@ -140,6 +140,18 @@
  *     deltaMode picks the exec delta-chip comparison window — 'daily' vs the last
  *     report before the report date, 'weekly' vs the report closest to a week back
  *     (see model/delta-baseline.js pickDeltaBaseline).
+ * @property {{enabled:boolean, autoPull:boolean, autoGenerate:boolean, autoDownload:boolean,
+ *             autoLabFiles:boolean, autoEmailDrafts:boolean, autoAcceptTat:boolean,
+ *             dailyTime:string, labRecipients:Object<string,string>}} automation
+ *   - unattended daily pipeline (v4; see automation/pipeline.js AUTOMATION_DEFAULTS
+ *     and seeds/defaults.js AUTOMATION_SEED). EVERY switch defaults to false — a
+ *     fresh install or an upgraded doc never runs a step the user did not arm.
+ *     `enabled` is the master switch; the auto* flags gate the individual steps
+ *     (pull → engine → generate/download → lab files → email drafts) and
+ *     autoAcceptTat auto-applies suggested TAT durations. dailyTime is local
+ *     24-hour 'HH:MM'. labRecipients maps a lab name -> a comma-separated
+ *     recipient list for the per-lab email drafts; a missing/empty entry means
+ *     the draft carries no To: line.
  * @property {{model:TrackerModel, updatedAt:string}|null} cachedTracker
  *   - last successfully parsed Project Tracker, reused when no fresh file is
  *     dropped. NOTE on the no-PHI invariant: this is PROJECT-management content

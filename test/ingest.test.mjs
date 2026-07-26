@@ -38,12 +38,24 @@ const TAT_PATH = firstExisting(
 );
 
 const REPORT_DATE = '2026-07-09';
-const SKIP = { csv: !CSV_PATH, trk: !TRK_PATH, tat: !TAT_PATH };
 
 // Load once, share across tests. Pass Uint8Array to mimic the browser ArrayBuffer path.
-const csvText = CSV_PATH ? readFileSync(CSV_PATH, 'utf8') : '';
-const trkBuf = TRK_PATH ? new Uint8Array(readFileSync(TRK_PATH)) : new Uint8Array();
-const tatBuf = TAT_PATH ? new Uint8Array(readFileSync(TAT_PATH)) : new Uint8Array();
+// A file can exist yet be unreadable — macOS gates Desktop/Documents/Downloads per
+// process, so a home-directory fallback may raise EPERM. That is an environment
+// condition, not a product defect: treat it exactly like a missing file and skip.
+const readOrNull = (path, enc) => {
+  if (!path) return null;
+  try { return readFileSync(path, enc); } catch { return null; }
+};
+const csvRaw = readOrNull(CSV_PATH, 'utf8');
+const trkRaw = readOrNull(TRK_PATH);
+const tatRaw = readOrNull(TAT_PATH);
+
+const SKIP = { csv: csvRaw == null, trk: trkRaw == null, tat: tatRaw == null };
+
+const csvText = csvRaw || '';
+const trkBuf = trkRaw ? new Uint8Array(trkRaw) : new Uint8Array();
+const tatBuf = tatRaw ? new Uint8Array(tatRaw) : new Uint8Array();
 
 test('parseKamcCsv — counts match the real daily export', { skip: SKIP.csv }, () => {
   const { rows, summary, errors } = parseKamcCsv(csvText, Papa);

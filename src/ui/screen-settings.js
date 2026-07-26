@@ -2,12 +2,13 @@
 // Screen-module contract: export render(container, ctx) where
 //   ctx = { state, store, navigate(screenId), rerender() }.
 // Every edit autosaves immediately through ctx.store.saveSettings and flashes a
-// subtle 'تم الحفظ' toast. Seven tabs: TAT durations, lab readiness scorecard,
+// subtle 'تم الحفظ' toast. Eight tabs: TAT durations, lab readiness scorecard,
 // historical constants, previous-report snapshot, report options (exclude no-TAT
-// + included slides/KPI cards), live source (Grafana + cached-tracker), and
+// + included slides/KPI cards), automation (the daily pipeline switches — a
+// mirror of the automation panel), live source (Grafana + cached-tracker), and
 // backup (export/import).
 
-import { SNAPSHOT_SEED, REPORT_OPTIONS_SEED } from '../seeds/defaults.js?v=v2026-07-23.1';
+import { SNAPSHOT_SEED, REPORT_OPTIONS_SEED, AUTOMATION_SEED } from '../seeds/defaults.js?v=v2026-07-23.2';
 
 const TABS = [
   { id: 'tat', label: 'مدة الفحوصات' },
@@ -15,6 +16,7 @@ const TABS = [
   { id: 'const', label: 'ثوابت تاريخية' },
   { id: 'snapshot', label: 'لقطة التقرير السابق' },
   { id: 'report', label: 'خيارات التقرير' },
+  { id: 'automation', label: 'التشغيل الآلي' },
   { id: 'grafana', label: 'الاتصال المباشر' },
   { id: 'backup', label: 'نسخ احتياطي' },
 ];
@@ -36,6 +38,20 @@ const REPORT_CARD_FIELDS = [
   { key: 'rejected', label: 'النتائج المرفوضة' },
   { key: 'lateNoResult', label: 'الطلبات المتأخرة' },
   { key: 'shippedNotReceived', label: 'شُحنت ولم تُستلم' },
+];
+
+// Automation switches (Settings.automation). This tab MIRRORS the automation
+// panel — both surfaces write the same canonical settings block through the same
+// autosave path, so whichever one the user touches the other reflects on reopen.
+// Order is display order; `enabled` is the master switch listed first.
+const AUTOMATION_FIELDS = [
+  { key: 'enabled', label: 'تفعيل التشغيل الآلي' },
+  { key: 'autoPull', label: 'سحب البيانات تلقائياً' },
+  { key: 'autoGenerate', label: 'توليد التقرير تلقائياً' },
+  { key: 'autoDownload', label: 'تنزيل ملفات التقرير تلقائياً' },
+  { key: 'autoLabFiles', label: 'إنشاء ملفات المختبرات تلقائياً' },
+  { key: 'autoEmailDrafts', label: 'تجهيز مسودات البريد تلقائياً' },
+  { key: 'autoAcceptTat', label: 'قبول المدد المقترحة للفحوصات تلقائياً' },
 ];
 
 // Shown after any failed live-connection test. The public GitHub Pages origin the
@@ -97,6 +113,8 @@ function toInt(v) {
 }
 
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
+// Local 24-hour 'HH:MM' — mirrors the store's automation.dailyTime validation.
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 /**
  * @param {HTMLElement} container
@@ -107,7 +125,9 @@ export function render(container, ctx) {
   const state = ctx.state || {};
   // Working document holder; reassigned after every save so closures stay fresh.
   const S = { doc: store.loadSettings() };
-  const ui = { tab: 'tat', tatSearch: '' };
+  // extraLabs: lab keys typed by hand in the automation tab this session — they
+  // become real settings keys only once an address is entered (see paintRecipients).
+  const ui = { tab: 'tat', tatSearch: '', extraLabs: [] };
 
   container.innerHTML = '';
   container.classList.add('st-root');
@@ -129,6 +149,21 @@ export function render(container, ctx) {
   function autosave() {
     save();
     toast('تم الحفظ');
+  }
+
+  // Checkbox field bound to a getter/setter; autosaves like every other edit.
+  // Shared by the report-options and automation tabs.
+  function checkField(labelText, get, set) {
+    const cb = h('input', { type: 'checkbox', class: 'st-check' });
+    cb.checked = !!get();
+    cb.addEventListener('change', () => {
+      set(cb.checked);
+      autosave();
+    });
+    return h('label', { class: 'st-field st-field--check' }, [
+      cb,
+      h('span', { class: 'st-label', text: labelText }),
+    ]);
   }
 
   container.appendChild(toastEl);
@@ -180,6 +215,7 @@ export function render(container, ctx) {
     else if (ui.tab === 'const') renderConst(panel);
     else if (ui.tab === 'snapshot') renderSnapshot(panel);
     else if (ui.tab === 'report') renderReportOptions(panel);
+    else if (ui.tab === 'automation') renderAutomation(panel);
     else if (ui.tab === 'grafana') renderGrafana(panel);
     else if (ui.tab === 'backup') renderBackup(panel);
   }
@@ -798,20 +834,6 @@ export function render(container, ctx) {
       return r;
     }
 
-    // Checkbox field bound to a getter/setter; autosaves like the sibling tabs.
-    function checkField(labelText, get, set) {
-      const cb = h('input', { type: 'checkbox', class: 'st-check' });
-      cb.checked = !!get();
-      cb.addEventListener('change', () => {
-        set(cb.checked);
-        autosave();
-      });
-      return h('label', { class: 'st-field st-field--check' }, [
-        cb,
-        h('span', { class: 'st-label', text: labelText }),
-      ]);
-    }
-
     // Radio group bound to a getter/setter (single value out of `options`);
     // autosaves like the checkbox fields. Mirrors the checkField row styling.
     function radioField(headText, groupName, options, get, set) {
@@ -838,7 +860,10 @@ export function render(container, ctx) {
     const groupHead = (text) =>
       h('div', {
         class: 'st-label',
-        style: { fontSize: '16px', color: 'var(--st-navy)', marginTop: '6px' },
+        // --brand-ink, not --st-navy: settings.css remaps navy-as-TEXT sites to
+        // --brand-ink in dark mode, but an inline style cannot be reached by
+        // those rules, so the raw navy would sit at ~1.35:1 on the dark panel.
+        style: { fontSize: '16px', color: 'var(--brand-ink, #1e3a8a)', marginTop: '6px' },
         text,
       });
 
@@ -882,7 +907,181 @@ export function render(container, ctx) {
   }
 
   // ===========================================================================
-  // (f) الاتصال المباشر — Grafana live source + cached tracker
+  // (f) التشغيل الآلي — automation pipeline switches (automation)
+  // MIRROR of the automation panel: same canonical settings block, same autosave
+  // path, so both surfaces always agree.
+  // ===========================================================================
+  function renderAutomation(root) {
+    // Defensive shape guard, same idiom as ro() above: the store backfills this on
+    // load, this keeps the tab safe with a bare doc. Reads S.doc live so it stays
+    // fresh after each autosave() reload.
+    function auto() {
+      if (!S.doc.automation || typeof S.doc.automation !== 'object') {
+        S.doc.automation = { ...AUTOMATION_SEED, labRecipients: {} };
+      }
+      const a = S.doc.automation;
+      for (const { key } of AUTOMATION_FIELDS) {
+        if (typeof a[key] !== 'boolean') a[key] = AUTOMATION_SEED[key];
+      }
+      if (typeof a.dailyTime !== 'string' || !TIME_RE.test(a.dailyTime)) {
+        a.dailyTime = AUTOMATION_SEED.dailyTime;
+      }
+      if (!a.labRecipients || typeof a.labRecipients !== 'object') a.labRecipients = {};
+      return a;
+    }
+
+    const a0 = auto();
+
+    // -- الوقت اليومي ---------------------------------------------------------
+    const timeInput = h('input', {
+      class: 'st-input st-num',
+      type: 'time',
+      dir: 'ltr',
+      value: a0.dailyTime,
+      'aria-label': 'وقت التشغيل اليومي',
+    });
+    timeInput.addEventListener('change', () => {
+      const v = (timeInput.value || '').trim();
+      if (!TIME_RE.test(v)) {
+        timeInput.value = auto().dailyTime; // revert; never persist a malformed time
+        return toast('أدخل وقتاً بصيغة HH:MM');
+      }
+      auto().dailyTime = v;
+      autosave();
+    });
+
+    // -- مستقبلو بريد المختبرات ----------------------------------------------
+    // Rows are keyed by the SAME string the drafts are keyed by: buildLateLabWorkbooks
+    // groups the late/due rows by the order row's `facility`, and both
+    // late-labs-section (recipientsFor) and the automation pipeline
+    // (resolveRecipients) look the addresses up under that exact value. The
+    // scorecard's display names are a different name space — they match no
+    // facility in the data — so the list comes from the loaded orders' facilities,
+    // taken VERBATIM: ingest already ran normFacility on them and the consumers use
+    // them raw, so re-normalising here would only turn matches into misses.
+    // Union: facilities in the data + keys already in the map + labs added by hand
+    // this session. An emptied field deletes the key, so the map never accumulates
+    // blanks — a lab with no entry gets a draft with no To: line.
+    const recipientRows = () => {
+      const labs = [];
+      const push = (v) => {
+        if (v == null || String(v).trim() === '') return;
+        const key = String(v);
+        if (!labs.includes(key)) labs.push(key);
+      };
+      const orders = (state.parsed && state.parsed.orders) || null;
+      if (Array.isArray(orders)) for (const o of orders) push(o && o.facility);
+      labs.sort((x, y) => x.localeCompare(y));
+      for (const k of Object.keys(auto().labRecipients)) push(k);
+      for (const k of ui.extraLabs) push(k);
+      return labs;
+    };
+
+    const recipientField = (lab) => {
+      const input = h('input', {
+        class: 'st-input st-grow',
+        type: 'text',
+        dir: 'ltr',
+        inputmode: 'email',
+        placeholder: 'name@example.com, name2@example.com',
+        value: auto().labRecipients[lab] || '',
+        'aria-label': `مستقبلو بريد ${lab}`,
+      });
+      input.addEventListener('change', () => {
+        const map = auto().labRecipients;
+        const v = input.value.trim();
+        if (v) map[lab] = v;
+        else delete map[lab];
+        input.value = v;
+        autosave();
+      });
+      return h('div', { class: 'st-field' }, [
+        h('label', { class: 'st-label', dir: 'auto', text: lab }),
+        input,
+      ]);
+    };
+
+    const recipientHost = h('div');
+    function paintRecipients() {
+      recipientHost.innerHTML = '';
+      const labs = recipientRows();
+      if (!labs.length) {
+        recipientHost.appendChild(
+          h('p', {
+            class: 'st-empty',
+            text: 'لا توجد مختبرات بعد — حمّل ملف البيانات أو أضف اسم المختبر يدوياً بالأسفل.',
+          }),
+        );
+        return;
+      }
+      for (const lab of labs) recipientHost.appendChild(recipientField(lab));
+    }
+
+    // Free-text add row: keys a facility that is not in the loaded data (or when no
+    // file is loaded at all). Session-only until an address is typed — an empty row
+    // is never persisted, so the map still never accumulates blanks.
+    const addLabInput = h('input', {
+      class: 'st-input st-grow',
+      type: 'text',
+      dir: 'auto',
+      placeholder: 'اسم المختبر كما يرد في ملف البيانات',
+      'aria-label': 'اسم مختبر جديد',
+    });
+    function addLabRow() {
+      const name = addLabInput.value.trim();
+      if (!name) return toast('أدخل اسم المختبر');
+      if (recipientRows().includes(name)) return toast('هذا المختبر موجود بالفعل');
+      ui.extraLabs.push(name);
+      addLabInput.value = '';
+      paintRecipients();
+    }
+    addLabInput.addEventListener('keydown', (e) => e.key === 'Enter' && addLabRow());
+
+    const groupHead = (text) =>
+      h('div', {
+        class: 'st-label',
+        // --brand-ink, not --st-navy: settings.css remaps navy-as-TEXT sites to
+        // --brand-ink in dark mode, but an inline style cannot be reached by
+        // those rules, so the raw navy would sit at ~1.35:1 on the dark panel.
+        style: { fontSize: '16px', color: 'var(--brand-ink, #1e3a8a)', marginTop: '6px' },
+        text,
+      });
+
+    root.appendChild(
+      h('div', { class: 'st-section' }, [
+        h('p', {
+          class: 'st-help',
+          text: 'تشغيل آلي للتقرير اليومي. جميع المفاتيح معطّلة افتراضياً؛ لا تُنفَّذ أي خطوة إلا بعد تفعيلها هنا. هذه نسخة مطابقة للوحة التشغيل الآلي — التعديل في أي منهما يظهر في الآخر.',
+        }),
+        ...AUTOMATION_FIELDS.map((f) =>
+          checkField(f.label, () => auto()[f.key], (v) => { auto()[f.key] = v; })),
+        h('div', { class: 'st-field' }, [
+          h('label', { class: 'st-label', text: 'وقت التشغيل اليومي (HH:MM)' }),
+          timeInput,
+        ]),
+        groupHead('مستقبلو بريد المختبرات'),
+        h('p', {
+          class: 'st-help',
+          text: 'عناوين مفصولة بفواصل لكل مختبر، تُستخدم في مسودات البريد. يجب أن يطابق اسم المختبر ما يرد في ملف البيانات (وليس اسمه في قائمة الجاهزية). المختبر بلا عناوين تُنشأ مسودته بدون سطر المستقبِل.',
+        }),
+        recipientHost,
+        h('div', { class: 'st-addbar' }, [
+          addLabInput,
+          h('button', {
+            class: 'st-btn st-btn--primary',
+            type: 'button',
+            text: 'إضافة مختبر',
+            onClick: addLabRow,
+          }),
+        ]),
+      ]),
+    );
+
+    paintRecipients();
+  }
+
+  // ===========================================================================
+  // (g) الاتصال المباشر — Grafana live source + cached tracker
   // ===========================================================================
   function renderGrafana(root) {
     function grafana() {
@@ -1092,7 +1291,7 @@ export function render(container, ctx) {
   }
 
   // ===========================================================================
-  // (g) نسخ احتياطي — backup / export / import
+  // (h) نسخ احتياطي — backup / export / import
   // ===========================================================================
   function renderBackup(root) {
     const importMsg = h('div', { class: 'st-import-msg' });

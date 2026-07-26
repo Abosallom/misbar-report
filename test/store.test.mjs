@@ -10,6 +10,7 @@ import { TAT_LOOKUP } from '../src/seeds/tat-lookup.js';
 import { SCORECARD_SEED } from '../src/seeds/scorecard.js';
 import {
   HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED, GRAFANA_SEED, REPORT_OPTIONS_SEED,
+  AUTOMATION_SEED,
 } from '../src/seeds/defaults.js';
 import * as store from '../src/store.js';
 
@@ -706,4 +707,196 @@ test('importSettings whitelists reportOptions keys, coerces flags, drops unknown
   assert.equal(ro.kpiCards.completed, true); // untouched seed key survives
   assert.equal(ro.labels.total, 'الإجمالي');
   assert.equal(ro.unknownSub, undefined); // unknown top-level reportOptions key dropped
+});
+
+// ---- automation block (v4) --------------------------------------------------
+const AUTOMATION_FLAGS = [
+  'enabled', 'autoPull', 'autoGenerate', 'autoDownload', 'autoLabFiles',
+  'autoEmailDrafts', 'autoAcceptTat',
+];
+
+test('first run seeds automation with every switch OFF (deep-copied)', () => {
+  fresh();
+  const s = store.loadSettings();
+  assert.deepEqual(s.automation, AUTOMATION_SEED);
+  // Copied, not the seed object itself (top-level + nested map).
+  assert.notEqual(s.automation, AUTOMATION_SEED);
+  assert.notEqual(s.automation.labRecipients, AUTOMATION_SEED.labRecipients);
+  // The safety invariant: automation is opt-in, nothing is armed on a fresh install.
+  for (const k of AUTOMATION_FLAGS) {
+    assert.equal(s.automation[k], false, `${k} must default to false`);
+  }
+  assert.equal(s.automation.dailyTime, '08:00');
+  assert.deepEqual(s.automation.labRecipients, {});
+});
+
+test('v3 stored doc migrates to v4: automation backfilled all-false, other fields preserved', () => {
+  const mock = fresh();
+  mock.setItem(
+    SETTINGS_KEY,
+    JSON.stringify({
+      schemaVersion: 3,
+      tatLookup: { 'CUSTOM EDIT': 7 },
+      snapshot: { asOf: '2026-07-01', numbers: { completed: 410 } },
+      snapshotHistory: { '2026-07-01': { completed: 410 } },
+      reportOptions: { ...REPORT_OPTIONS_SEED, excludeNoTat: true },
+      grafana: { baseUrl: 'https://g/h', accessToken: 'tk', panelId: 12, enabled: true, dataKey: '' },
+    }),
+  );
+
+  const s = store.loadSettings();
+  assert.equal(s.schemaVersion, store.SCHEMA_VERSION);
+  assert.deepEqual(s.automation, AUTOMATION_SEED);
+  // Pre-v4 fields untouched by the bump.
+  assert.equal(s.tatLookup['CUSTOM EDIT'], 7);
+  assert.equal(s.snapshot.numbers.completed, 410);
+  assert.deepEqual(s.snapshotHistory, { '2026-07-01': { completed: 410 } });
+  assert.equal(s.reportOptions.excludeNoTat, true);
+  assert.equal(s.grafana.panelId, 12);
+  // Persisted with the bump so the migration runs only once.
+  const stored = JSON.parse(mock.getItem(SETTINGS_KEY));
+  assert.equal(stored.schemaVersion, store.SCHEMA_VERSION);
+  assert.deepEqual(stored.automation, AUTOMATION_SEED);
+});
+
+test('v1/v2 stored docs chain all the way to v4 and gain the automation block', () => {
+  for (const v of [1, 2]) {
+    const mock = fresh();
+    mock.setItem(SETTINGS_KEY, JSON.stringify({ schemaVersion: v, tatLookup: { X: 1 } }));
+    const s = store.loadSettings();
+    assert.equal(s.schemaVersion, store.SCHEMA_VERSION, `v${v} → current`);
+    assert.deepEqual(s.automation, AUTOMATION_SEED, `v${v} automation backfilled`);
+  }
+});
+
+test('load backfills missing automation subkeys while preserving user values', () => {
+  const mock = fresh();
+  mock.setItem(
+    SETTINGS_KEY,
+    JSON.stringify({
+      schemaVersion: 3,
+      tatLookup: { X: 1 },
+      // partial automation: two switches on, a bad dailyTime, a junk recipient value.
+      automation: {
+        enabled: true,
+        autoPull: true,
+        dailyTime: '99:99',
+        labRecipients: { 'Lab A': 'a@x.com, b@x.com', 'Lab B': 5 },
+      },
+    }),
+  );
+  const s = store.loadSettings();
+  // User values preserved.
+  assert.equal(s.automation.enabled, true);
+  assert.equal(s.automation.autoPull, true);
+  // Missing switches backfilled false (never inferred from `enabled`).
+  assert.equal(s.automation.autoGenerate, false);
+  assert.equal(s.automation.autoDownload, false);
+  assert.equal(s.automation.autoLabFiles, false);
+  assert.equal(s.automation.autoEmailDrafts, false);
+  assert.equal(s.automation.autoAcceptTat, false);
+  // Malformed dailyTime resets to the seed; non-string recipient dropped.
+  assert.equal(s.automation.dailyTime, '08:00');
+  assert.deepEqual(s.automation.labRecipients, { 'Lab A': 'a@x.com, b@x.com' });
+});
+
+test('importSettings accepts a valid automation block and round-trips it', () => {
+  fresh();
+  store.loadSettings();
+
+  const automation = {
+    enabled: true,
+    autoPull: true,
+    autoGenerate: true,
+    autoDownload: false,
+    autoLabFiles: true,
+    autoEmailDrafts: false,
+    autoAcceptTat: true,
+    dailyTime: '23:59',
+    labRecipients: { 'Lab A': 'a@x.com, b@x.com', 'Lab B': '' },
+  };
+  store.importSettings(JSON.stringify({ schemaVersion: store.SCHEMA_VERSION, automation }));
+
+  store.__resetForTests();
+  const after = store.loadSettings();
+  assert.deepEqual(after.automation, automation);
+
+  // Export → import round-trip preserves the block verbatim.
+  const { blob } = store.exportSettings();
+  return blob.text().then((text) => {
+    fresh();
+    store.loadSettings(); // fresh all-false defaults
+    store.importSettings(text);
+    assert.deepEqual(store.loadSettings().automation, automation);
+  });
+});
+
+test('importSettings rejects a malformed automation block', () => {
+  fresh();
+  store.loadSettings();
+
+  assert.throws(
+    () => store.importSettings(JSON.stringify({ schemaVersion: 3, automation: [] })),
+    /automation/,
+  );
+  // Non-boolean switch: NOT coerced — an unattended run must be armed deliberately.
+  assert.throws(
+    () => store.importSettings(JSON.stringify({ schemaVersion: 3, automation: { enabled: 1 } })),
+    /automation\.enabled/,
+  );
+  assert.throws(
+    () => store.importSettings(JSON.stringify({ schemaVersion: 3, automation: { autoPull: 'yes' } })),
+    /automation\.autoPull/,
+  );
+  // dailyTime must match HH:MM.
+  for (const bad of ['8:00', '24:00', '12:60', 'morning', 830]) {
+    assert.throws(
+      () => store.importSettings(JSON.stringify({ schemaVersion: 3, automation: { dailyTime: bad } })),
+      /automation\.dailyTime/,
+      `dailyTime ${JSON.stringify(bad)} must be rejected`,
+    );
+  }
+  // labRecipients must be a plain object of strings.
+  assert.throws(
+    () => store.importSettings(JSON.stringify({ schemaVersion: 3, automation: { labRecipients: [] } })),
+    /automation\.labRecipients/,
+  );
+  assert.throws(
+    () => store.importSettings(JSON.stringify({ schemaVersion: 3, automation: { labRecipients: 'a@x.com' } })),
+    /automation\.labRecipients/,
+  );
+  assert.throws(
+    () => store.importSettings(JSON.stringify({ schemaVersion: 3, automation: { labRecipients: { 'Lab A': 5 } } })),
+    /automation\.labRecipients/,
+  );
+
+  // Nothing landed: the stored block is still the all-false seed.
+  assert.deepEqual(store.loadSettings().automation, AUTOMATION_SEED);
+});
+
+test('importSettings drops unknown automation subkeys before persisting', () => {
+  fresh();
+  store.loadSettings();
+
+  store.importSettings(
+    JSON.stringify({
+      schemaVersion: 3,
+      automation: {
+        enabled: true,
+        dailyTime: '07:30',
+        labRecipients: { 'Lab A': 'a@x.com' },
+        autoNuke: true, // unknown switch
+        evil: { x: 1 }, // unknown subkey
+      },
+    }),
+  );
+
+  const a = store.loadSettings().automation;
+  assert.deepEqual(Object.keys(a).sort(), [...AUTOMATION_FLAGS, 'dailyTime', 'labRecipients'].sort());
+  assert.equal(a.enabled, true);
+  assert.equal(a.dailyTime, '07:30');
+  assert.equal(a.autoGenerate, false); // untouched seed switch survives the merge
+  assert.equal(a.autoNuke, undefined);
+  assert.equal(a.evil, undefined);
+  assert.equal(a.labRecipients['Lab A'], 'a@x.com');
 });

@@ -1,10 +1,15 @@
 // ui/screen-upload.js — file upload + parse + engine kickoff (Track E).
-import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-07-23.1';
-import { el, dropZone, fileSummaryCard, toast } from './components.js?v=v2026-07-23.1';
-import { normTest } from '../contracts.js?v=v2026-07-23.1';
-import { getPapa, getXLSX } from '../vendor-loader.js?v=v2026-07-23.1';
-import { TAT_LOINC } from '../seeds/tat-lookup.js?v=v2026-07-23.1';
-import { buildLateLabsSection } from './late-labs-section.js?v=v2026-07-23.1';
+import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-07-23.2';
+import { el, dropZone, fileSummaryCard, toast } from './components.js?v=v2026-07-23.2';
+import { normTest } from '../contracts.js?v=v2026-07-23.2';
+import { getPapa, getXLSX } from '../vendor-loader.js?v=v2026-07-23.2';
+import { TAT_LOINC } from '../seeds/tat-lookup.js?v=v2026-07-23.2';
+import { buildLateLabsSection } from './late-labs-section.js?v=v2026-07-23.2';
+import { buildAutomationPanel } from './automation-panel.js?v=v2026-07-23.2';
+
+/** The SAME specifier main.js and ui/automation-panel.js import — resolving to
+ *  the identical URL means the probe below hits the already-cached module. */
+const AUTOMATION_PIPELINE_URL = '../automation/pipeline.js?v=v2026-07-23.2';
 
 /** Format an ISO timestamp as local 'HH:MM' for snapshot-freshness labels. */
 function fmtHHMM(iso) {
@@ -200,7 +205,7 @@ function normalizeTracker(res) {
 
 async function ingestCsv(file) {
   const Papa = await getPapa();
-  const mod = await tryImport('../ingest/csv.js?v=v2026-07-23.1');
+  const mod = await tryImport('../ingest/csv.js?v=v2026-07-23.2');
   const fn = pickFn(mod, ['parseKamcCsv', 'parseCsv', 'ingestCsv', 'parseOrders', 'parse']);
   if (fn) {
     const text = await file.text();
@@ -213,7 +218,7 @@ async function ingestCsv(file) {
 
 async function ingestTracker(file) {
   const XLSX = await getXLSX();
-  const mod = await tryImport('../ingest/xlsx.js?v=v2026-07-23.1');
+  const mod = await tryImport('../ingest/xlsx.js?v=v2026-07-23.2');
   const fn = pickFn(mod, ['parseTracker', 'ingestXlsx', 'parseXlsx', 'parse']);
   if (fn) {
     const buf = await file.arrayBuffer();
@@ -338,12 +343,55 @@ export async function render(container, ctx) {
     } catch { /* offline or file absent — leave the line empty */ }
   }
   paintFreshness();
-  // Daily flow: kick off the live fetch on load so data is already streaming in.
-  // fetchLive() is hoisted; the guards below (and its own button-disable) prevent
-  // a double-invoke if the user also clicks الجلب المباشر.
-  if (grafanaReady && !state.parsed.orders && !fetchInFlight) fetchLive();
 
   const heroHost = el('div'); // 'لمحة اليوم' hero strip (filled by paintHero once data lands)
+  // '⚡ التشغيل التلقائي' card — ALWAYS visible, directly under the data-source
+  // cards and above the late-labs card, usable before any data lands. Built
+  // defensively: a failure here must never take the upload screen down.
+  let automationPanel = null;
+  try {
+    automationPanel = buildAutomationPanel({ store, state, ctx });
+  } catch (e) {
+    console.warn('[upload] automation panel unavailable', e);
+    automationPanel = null;
+  }
+
+  /** Mirrors main.js readAutoMode(): absent/'0'/'false'/'off'/'no' is inert. */
+  function urlAutoMode() {
+    const raw = String(params.get('auto') || '').trim().toLowerCase();
+    if (!raw || raw === '0' || raw === 'false' || raw === 'off' || raw === 'no') return null;
+    return (raw === 'full' || raw === 'all') ? 'full' : 'auto';
+  }
+
+  /** True when an automation run owns the live pull — either the ?auto= URL
+   *  trigger (main.js) or the automation card's own on-render auto-pull. Both
+   *  reach the pipeline's pull step, which writes exactly what fetchLive()
+   *  writes (state.parsed.orders / heroDataAt / files.csv). */
+  function automationWillPull() {
+    const mode = urlAutoMode();
+    if (mode === 'full') return true; // ?auto=full forces every boolean on for that run
+    const a = (store.settings && store.settings.automation) || {};
+    if (!a.enabled || !a.autoPull) return false; // a stored off vetoes both paths
+    return mode === 'auto' || !!automationPanel;
+  }
+
+  // Daily flow: kick off the live fetch on load so data is already streaming in.
+  // fetchLive() is hoisted; the guards here (and its own button-disable) prevent
+  // a double-invoke if the user also clicks الجلب المباشر. When automation is
+  // going to pull, stand down entirely: two concurrent pulls both write the
+  // order rows and the LAST to land wins, so a snapshot fallback can overwrite
+  // fresher direct rows and flip the hero strip back to a stale timestamp. If
+  // the pipeline module turns out to be absent nobody else pulls — take it back.
+  if (grafanaReady && !state.parsed.orders && !fetchInFlight) {
+    if (!automationWillPull()) fetchLive();
+    else {
+      tryImport(AUTOMATION_PIPELINE_URL).then((mod) => {
+        if (mod && typeof mod.runAutomation === 'function') return; // automation owns the pull
+        if (!state.parsed.orders && !fetchInFlight) fetchLive();
+      });
+    }
+  }
+
   const summaryHost = el('div');
   const lateLabsHost = el('div'); // per-lab 'Late & Due' Excel card (filled by paintLateLabs once data lands)
   const unmatchedHost = el('div');
@@ -356,7 +404,7 @@ export async function render(container, ctx) {
   ]) : null;
 
   container.appendChild(el('div', { class: 'screen' }, [
-    head, heroHost, grafanaBar, dropgrid, devBar, summaryHost, lateLabsHost, unmatchedHost, actionsHost,
+    head, heroHost, grafanaBar, dropgrid, devBar, automationPanel, summaryHost, lateLabsHost, unmatchedHost, actionsHost,
   ]));
 
   // Reuse the last-parsed Project Tracker when no fresh file was dropped —
@@ -377,13 +425,14 @@ export async function render(container, ctx) {
   async function fetchLive() {
     if (fetchInFlight) return; // a fetch is already running (auto-load or a prior click)
     fetchInFlight = true;
+    state.liveFetchInFlight = true; // shared signal — the automation pull step can skip on it
     grafanaBtn.disabled = true;
     grafanaBtn.textContent = STR.upload.grafanaFetching;
     errorsByKind.csv = [];
     const gcfg = (store.settings && store.settings.grafana) || {};
     const dataKey = (gcfg.dataKey || '').trim();
     try {
-      const mod = await import('../ingest/grafana.js?v=v2026-07-23.1');
+      const mod = await import('../ingest/grafana.js?v=v2026-07-23.2');
       const asOf = state.reportDate || todayISO();
       const directConfigured = !!(gcfg.baseUrl && gcfg.accessToken);
       try {
@@ -425,6 +474,7 @@ export async function render(container, ctx) {
       toast(isCors ? STR.upload.grafanaCors : `${STR.upload.grafanaFail}: ${(e && e.message) || e}`, 'warn', 9000);
     } finally {
       fetchInFlight = false;
+      state.liveFetchInFlight = false;
       grafanaBtn.disabled = false;
       grafanaBtn.textContent = STR.upload.grafanaFetch;
       paint();
@@ -518,6 +568,12 @@ export async function render(container, ctx) {
     summaryHost.innerHTML = '';
     unmatchedHost.innerHTML = '';
     actionsHost.innerHTML = '';
+
+    // Data may have just landed (or gone) — let the automation card re-evaluate
+    // whether '▶ تشغيل الآن' is runnable. Optional method; guarded.
+    if (automationPanel && typeof automationPanel.refresh === 'function') {
+      try { automationPanel.refresh(); } catch (e) { console.warn('[upload] automation refresh failed', e); }
+    }
 
     // Summary cards
     if (state.parsed.orders) {
@@ -638,6 +694,9 @@ export async function render(container, ctx) {
       section = await buildLateLabsSection({
         rows: orders,
         tatTests: (store.settings || {}).tatLookup || {},
+        // Pre-fills ONLY the To: line of a downloaded .eml draft — nothing is sent
+        // from here; without it the Settings tab's per-lab addresses do nothing.
+        labRecipients: ((store.settings || {}).automation || {}).labRecipients || null,
         asOfMs: Date.now(),
       });
       if (seq !== lateLabsSeq) return; // a newer paint superseded this run
@@ -685,7 +744,7 @@ export async function render(container, ctx) {
     const seq = ++unmatchedSeq;
     let mod;
     try {
-      mod = await import('../ingest/tat-suggest.js?v=v2026-07-23.1');
+      mod = await import('../ingest/tat-suggest.js?v=v2026-07-23.2');
     } catch { return; } // module not present yet — keep the plain panel behavior
     if (seq !== unmatchedSeq) return; // a newer paint superseded this run
     const fn = pickFn(mod, ['suggestTats']);
@@ -831,7 +890,7 @@ export async function render(container, ctx) {
     if (!orders || !orders.length) { heroHost.innerHTML = ''; return; }
     let out;
     try {
-      const mod = await import('../engine/engine.js?v=v2026-07-23.1');
+      const mod = await import('../engine/engine.js?v=v2026-07-23.2');
       if (seq !== heroSeq) return; // a newer run superseded this one
       const compute = pickFn(mod, ['compute', 'runEngine', 'run']);
       if (typeof compute !== 'function') { heroHost.innerHTML = ''; return; }
@@ -856,7 +915,7 @@ export async function render(container, ctx) {
       let out = (state.engineOutput && state.engineOutput.totals) ? state.engineOutput : null;
       if (!out) {
         try {
-          const mod = await tryImport('../engine/engine.js?v=v2026-07-23.1');
+          const mod = await tryImport('../engine/engine.js?v=v2026-07-23.2');
           const compute = pickFn(mod, ['compute', 'runEngine', 'run']);
           if (compute) {
             out = compute(state.parsed.orders, (store.settings || {}).tatLookup, engineOpts());

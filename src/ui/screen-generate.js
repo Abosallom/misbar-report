@@ -1,92 +1,19 @@
 // ui/screen-generate.js — build both variants, produce 4 files, trigger downloads (Track E).
-import { STR, todayISO, buildFileName, formatDateAr } from '../i18n/ar.js?v=v2026-07-23.1';
-import { el, progressBar, toast } from './components.js?v=v2026-07-23.1';
-import { VARIANTS } from '../contracts.js?v=v2026-07-23.1';
-import { getGenLibs } from '../vendor-loader.js?v=v2026-07-23.1';
-import { resetRunData } from '../state.js?v=v2026-07-23.1';
-import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-07-23.1';
-import { autoDraft } from '../model/drafts.js?v=v2026-07-23.1';
-import { buildLateLabsSection, triggerDownload } from './late-labs-section.js?v=v2026-07-23.1';
+// The file-producing core now lives in automation/pipeline.js (produceReportFiles) so
+// an unattended run makes byte-identical files; this screen drives it and paints the
+// very same progress bar, file rows and live slide thumbnails it always has.
+import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-07-23.2';
+import { el, progressBar, toast } from './components.js?v=v2026-07-23.2';
+import { resetRunData } from '../state.js?v=v2026-07-23.2';
+import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-07-23.2';
+import { autoDraft } from '../model/drafts.js?v=v2026-07-23.2';
+import { buildLateLabsSection, triggerDownload } from './late-labs-section.js?v=v2026-07-23.2';
+import {
+  applyDeltaBaseline, buildFileDefs, produceReportFiles, recordRunSnapshot,
+} from '../automation/pipeline.js?v=v2026-07-23.2';
 
 async function tryImport(path) { try { return await import(path); } catch { return null; } }
-function pickFn(mod, names) {
-  if (!mod) return null;
-  for (const n of names) if (typeof mod[n] === 'function') return mod[n];
-  if (typeof mod.default === 'function') return mod.default;
-  return null;
-}
 const isMobile = () => /iP(hone|ad|od)|Android/i.test(navigator.userAgent);
-
-// Engine's 10 published numbers (the delta keys) pulled out of an EngineOutput/kpi.
-function currentNumbersOf(kpi) {
-  const t = (kpi && kpi.totals) || {};
-  const f = (kpi && kpi.funnel) || {};
-  const b = (kpi && kpi.buckets) || {};
-  return {
-    total: t.total, collected: f.collected, dispatched: f.dispatched, received: f.received,
-    completed: b.completed, rejected: b.rejected, awaitingDispatch: b.awaitingDispatch,
-    shippedNotReceived: b.shippedNotReceived, awaitingResults: b.awaitingResults, lateNoResult: b.lateNoResult,
-  };
-}
-// deltaMode baseline (user decision B): recompute model.kpi.deltas against the picked
-// baseline and stamp model.deltaBaseline {baselineDate, mode} so the exec legend renders
-// mode-aware. Signed (no max(0) clamp) so a drop surfaces as a '−N' green chip. Degrades
-// to the engine's legacy deltas when the delta-baseline module is missing or no baseline
-// resolves. Mutates kpi.deltas in place so the generated files match the review preview.
-function applyDeltaBaseline(model, store, pickDeltaBaseline) {
-  if (typeof pickDeltaBaseline !== 'function' || !model || !model.kpi) return;
-  const settings = (store && store.settings) || {};
-  let picked = null;
-  try {
-    picked = pickDeltaBaseline({
-      history: settings.snapshotHistory,
-      legacySnapshot: settings.snapshot,
-      reportDate: model.reportDate,
-      mode: (settings.reportOptions && settings.reportOptions.deltaMode) || 'daily',
-    });
-  } catch (e) { console.warn('[generate] pickDeltaBaseline failed; keeping legacy deltas', e); return; }
-  if (!picked || !picked.numbers) return; // no baseline resolvable → keep engine deltas
-  const cur = currentNumbersOf(model.kpi);
-  const deltas = {};
-  for (const key of Object.keys(cur)) {
-    const prev = picked.numbers[key];
-    deltas[key] = (typeof prev === 'number' && typeof cur[key] === 'number') ? (cur[key] - prev) : 0;
-  }
-  model.kpi.deltas = deltas;
-  model.deltaBaseline = { baselineDate: picked.baselineDate, mode: picked.mode };
-}
-
-function withTimeout(promise, ms, label) {
-  let timer;
-  const guard = new Promise((_, reject) => {
-    timer = setTimeout(() => reject(new Error('timeout:' + (label || ''))), ms);
-  });
-  return Promise.race([promise, guard]).finally(() => clearTimeout(timer));
-}
-
-// Hidden/background tabs clamp setTimeout to >=1s, which stretches JSZip's and
-// html2canvas's chunked loops from seconds to minutes. During generation we route
-// short timeouts through a MessageChannel (not throttled), then restore.
-function installFastTimers() {
-  if (window.__misbarFastTimers) return () => {};
-  const orig = window.setTimeout;
-  const mc = new MessageChannel();
-  const q = [];
-  mc.port1.onmessage = () => {
-    const fn = q.shift();
-    if (fn) { try { fn(); } catch (e) { console.error('[fast-timer]', e); } }
-  };
-  window.setTimeout = function (fn, ms, ...args) {
-    if (typeof fn === 'function' && (ms == null || ms <= 50)) {
-      q.push(() => fn(...args));
-      mc.port2.postMessage(0);
-      return -1;
-    }
-    return orig.call(window, fn, ms, ...args);
-  };
-  window.__misbarFastTimers = true;
-  return () => { window.setTimeout = orig; window.__misbarFastTimers = false; };
-}
 
 function fallbackModel(state, store) {
   const kpi = state.engineOutput || buildMockEngineOutput(store.settings);
@@ -119,42 +46,6 @@ function fallbackModel(state, store) {
     reportOptions: (store.settings && store.settings.reportOptions) || undefined,
     overrides: {},
   };
-}
-
-// Build the SlideSpec per VARIANT — the variant changes slide-5 content
-// (task rows), so one shared spec would leak internal tasks into NUPCO files.
-async function buildVariantSpec(model, variant) {
-  const mod = await tryImport('../slidespec/build-spec.js?v=v2026-07-23.1');
-  const fn = pickFn(mod, ['buildSpec', 'build', 'makeSpec', 'toSpec']);
-  if (!fn) return null;
-  let spec = fn(model, { variant });
-  if (spec && spec.then) spec = await spec;
-  if (spec && !Array.isArray(spec) && spec.slides) spec = spec.slides;
-  return Array.isArray(spec) ? spec : null;
-}
-
-async function toBlob(result, kind) {
-  if (!result) return null;
-  if (result instanceof Blob) return result;
-  if (kind === 'pptx' && typeof result.write === 'function') {
-    const out = await result.write({ outputType: 'blob' });
-    return out instanceof Blob ? out : new Blob([out]);
-  }
-  if (kind === 'pdf' && typeof result.output === 'function') {
-    return result.output('blob');
-  }
-  if (result.blob instanceof Blob) return result.blob;
-  return null;
-}
-
-// renderPptx(spec, {variant, PptxGenJS}) -> Promise<Blob>
-async function makePptx(spec, variant, libs) {
-  if (!spec) return null;
-  const mod = await tryImport('../render/pptx-renderer.js?v=v2026-07-23.1');
-  const fn = pickFn(mod, ['renderPptx', 'buildPptx', 'toPptx', 'makePptx', 'render']);
-  if (!fn) return null;
-  const r = await fn(spec, { variant, PptxGenJS: libs.PptxGenJS });
-  return toBlob(r, 'pptx');
 }
 
 // Live slide thumbnails — during PDF capture the full-size slides already exist in
@@ -199,27 +90,6 @@ function makeThumbStrip() {
     },
   };
   return api;
-}
-
-// renderSlides(spec, {variant}) -> fragment of .sl-slide; exportPdf(slideEls, {jsPDF, html2canvas, onProgress})
-async function makePdf(spec, variant, libs, host, onProgress, thumbs) {
-  if (!spec) return null;
-  const rMod = await tryImport('../render/html-renderer.js?v=v2026-07-23.1');
-  const renderSlides = pickFn(rMod, ['renderSlides', 'renderSpec', 'renderHtml', 'render']);
-  const pMod = await tryImport('../render/pdf-export.js?v=v2026-07-23.1');
-  const exportPdf = pickFn(pMod, ['exportPdf', 'renderPdf', 'toPdf', 'buildPdf', 'render']);
-  if (!renderSlides || !exportPdf) return null;
-  host.innerHTML = '';
-  const frag = renderSlides(spec, { variant });
-  if (frag instanceof Node) host.appendChild(frag);
-  const slideEls = Array.from(host.querySelectorAll('.sl-slide'));
-  if (thumbs) thumbs.load(slideEls); // clone once per variant, before capture starts
-  const onTick = thumbs
-    ? (done, tot) => { thumbs.highlight(done, tot); if (onProgress) onProgress(done, tot); }
-    : onProgress;
-  const r = await exportPdf(slideEls, { jsPDF: libs.jsPDF, html2canvas: libs.html2canvas, onProgress: onTick });
-  host.innerHTML = '';
-  return toBlob(r, 'pdf');
 }
 
 // Share-ready summary card shown after success. Numbers mirror build-spec's
@@ -288,17 +158,13 @@ export async function render(container, ctx) {
   // generated files' exec legend/chips match the review preview. recordSnapshot (below)
   // appends this run to snapshotHistory on success. Guarded → legacy engine deltas if the
   // module isn't present at runtime.
-  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-07-23.1');
+  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-07-23.2');
   const pickBaseline = dbMod && dbMod.pickDeltaBaseline;
   const recordSnapshot = dbMod && dbMod.recordSnapshot;
   applyDeltaBaseline(model, store, pickBaseline);
 
-  const fileDefs = [
-    { id: 'internal-pptx', variant: 'internal', kind: 'pptx', label: STR.generate.fileInternalPptx, icon: '📊', name: buildFileName(VARIANTS.internal.filePrefix, date, 'pptx') },
-    { id: 'nupco-pptx', variant: 'nupco', kind: 'pptx', label: STR.generate.fileNupcoPptx, icon: '📊', name: buildFileName(VARIANTS.nupco.filePrefix, date, 'pptx') },
-    { id: 'internal-pdf', variant: 'internal', kind: 'pdf', label: STR.generate.fileInternalPdf, icon: '📄', name: buildFileName(VARIANTS.internal.filePrefix, date, 'pdf') },
-    { id: 'nupco-pdf', variant: 'nupco', kind: 'pdf', label: STR.generate.fileNupcoPdf, icon: '📄', name: buildFileName(VARIANTS.nupco.filePrefix, date, 'pdf') },
-  ];
+  // Same four definitions produceReportFiles will walk — one shared source.
+  const fileDefs = buildFileDefs(date);
 
   const rowEls = {};
   const fileList = el('div', { class: 'gen-files' }, fileDefs.map((f) => {
@@ -334,61 +200,51 @@ export async function render(container, ctx) {
 
   bar.set(4, STR.generate.preparing);
 
-  const produced = []; // {def, blob, url}
   let hadError = false;
-  const restoreTimers = installFastTimers();
-
-  try {
-    const libs = await getGenLibs();
-    bar.set(6, STR.generate.buildingSpec);
-    const specs = {
-      internal: await buildVariantSpec(model, 'internal'),
-      nupco: await buildVariantSpec(model, 'nupco'),
-    };
-    const total = fileDefs.length;
-
-    for (let i = 0; i < fileDefs.length; i++) {
-      const f = fileDefs[i];
-      const spec = specs[f.variant];
-      const base = (i / total) * 100;
-      rowEls[f.id].status.textContent = f.kind === 'pptx' ? STR.generate.buildingPptx : STR.generate.renderingSlides;
-      bar.set(base + 4, `${f.label} — ${f.kind === 'pptx' ? STR.generate.buildingPptx : STR.generate.buildingPdf}`);
-
-      let blob = null;
-      try {
-        // Guard each file with a timeout so a hanging renderer degrades gracefully
-        // instead of freezing the whole screen (e.g. PptxGenJS.write stalls in some envs).
-        const job = f.kind === 'pptx'
-          ? makePptx(spec, f.variant, libs)
-          : makePdf(spec, f.variant, libs, host, (done, tot) => {
-            const frac = tot ? done / tot : 0;
-            bar.set(base + frac * (100 / total), `${f.label} — ${STR.generate.capturing} ${done}/${tot || '?'}`);
-          }, thumbs);
-        // Generous ceilings: background-tab setTimeout throttling can stretch
-        // JSZip/canvas work from seconds to minutes; only a true hang should trip this.
-        blob = await withTimeout(job, 300000, f.id);
-      } catch (e) {
-        console.error('[generate] file failed', f.id, e);
+  // Every UI moment the inline loop used to paint, now driven by the pipeline's
+  // progress events — same texts, same order, same thumbnail choreography.
+  const produced = await produceReportFiles({ // {def, blob} (+url added on download)
+    model,
+    ctx,
+    host,
+    onProgress: (evt) => {
+      const f = evt.def;
+      switch (evt.phase) {
+        case 'spec':
+          bar.set(6, STR.generate.buildingSpec);
+          break;
+        case 'file-start':
+          rowEls[f.id].status.textContent = f.kind === 'pptx' ? STR.generate.buildingPptx : STR.generate.renderingSlides;
+          bar.set(evt.base + 4, `${f.label} — ${f.kind === 'pptx' ? STR.generate.buildingPptx : STR.generate.buildingPdf}`);
+          break;
+        case 'slides':
+          thumbs.load(evt.slideEls);
+          break;
+        case 'capture': {
+          thumbs.highlight(evt.done, evt.tot);
+          const frac = evt.tot ? evt.done / evt.tot : 0;
+          bar.set(evt.base + frac * (100 / evt.total), `${f.label} — ${STR.generate.capturing} ${evt.done}/${evt.tot || '?'}`);
+          break;
+        }
+        case 'file-done':
+          rowEls[f.id].row.classList.add('is-done');
+          rowEls[f.id].status.textContent = '✓';
+          break;
+        case 'file-error':
+          hadError = true;
+          rowEls[f.id].status.textContent = '—';
+          break;
+        case 'file-end':
+          bar.set(((evt.index + 1) / evt.total) * 100);
+          break;
+        case 'error': // gen libs failed — no file row to mark
+          hadError = true;
+          break;
+        default:
+          break;
       }
-
-      if (blob) {
-        produced.push({ def: f, blob });
-        rowEls[f.id].row.classList.add('is-done');
-        rowEls[f.id].status.textContent = '✓';
-      } else {
-        hadError = true;
-        rowEls[f.id].status.textContent = '—';
-      }
-      bar.set(((i + 1) / total) * 100);
-    }
-  } catch (e) {
-    console.error('[generate] gen libs failed', e);
-    hadError = true;
-  } finally {
-    restoreTimers();
-  }
-
-  host.innerHTML = '';
+    },
+  });
 
   if (!produced.length) {
     bar.set(100, STR.generate.failed);
@@ -401,37 +257,9 @@ export async function render(container, ctx) {
     subtitleEl.textContent = STR.generate.done;
     keepOpenEl.style.display = 'none';
     // Persist the FULL number snapshot — next run's "+N" chips (E6 rule) compare
-    // every exec/journey number against these.
-    try {
-      const k = model.kpi || {};
-      const numbers = {
-        total: k.totals && k.totals.total,
-        collected: k.funnel && k.funnel.collected,
-        dispatched: k.funnel && k.funnel.dispatched,
-        received: k.funnel && k.funnel.received,
-        completed: k.buckets && k.buckets.completed,
-        rejected: k.buckets && k.buckets.rejected,
-        awaitingDispatch: k.buckets && k.buckets.awaitingDispatch,
-        shippedNotReceived: k.buckets && k.buckets.shippedNotReceived,
-        awaitingResults: k.buckets && k.buckets.awaitingResults,
-        lateNoResult: k.buckets && k.buckets.lateNoResult,
-      };
-      if (numbers.completed != null && typeof store.updateSnapshot === 'function') {
-        store.updateSnapshot({ asOf: date, numbers });
-        // ALSO append this run to snapshotHistory (deltaMode baselines read from it).
-        // Persist through loadSettings/saveSettings — the same path review uses for
-        // reportOptions. Guarded so a missing module or a store that rejects the key
-        // degrades gracefully without failing the (already-successful) generation.
-        if (typeof recordSnapshot === 'function') {
-          try {
-            const doc = store.loadSettings();
-            doc.snapshotHistory = recordSnapshot(doc.snapshotHistory, date, numbers);
-            store.saveSettings(doc);
-          } catch (e) { console.warn('[generate] snapshotHistory write failed', e); }
-        }
-        state.settings = store.settings;
-      }
-    } catch (e) { console.warn('[generate] snapshot update failed', e); }
+    // every exec/journey number against these. Shared with automated runs so an
+    // unattended generation feeds the same delta/history features.
+    recordRunSnapshot({ model, store, state, date, recordSnapshot });
 
     // Auto-download works on desktop; iOS/Safari may drop programmatic clicks
     // that fire without recent user activation, so it's attempted on desktop only
@@ -478,11 +306,15 @@ export async function render(container, ctx) {
 
   // Per-lab "Late & Due" Excel export — built from the SAME dataset this run used
   // (works whether or not the four report files were produced, incl. live-snapshot).
+  // labRecipients only pre-fills the To: line of a downloaded .eml draft — nothing
+  // is sent from here; without it the settings tab's per-lab addresses do nothing.
   try {
     resultHost.appendChild(await buildLateLabsSection({
       rows: (state.parsed && state.parsed.orders) || null,
       tatTests: (store.settings && store.settings.tatLookup) || {},
       reportDate: model.reportDate,
+      labRecipients: (store.settings && store.settings.automation
+        && store.settings.automation.labRecipients) || null,
     }));
   } catch (e) {
     console.warn('[generate] late-labs section failed', e);
