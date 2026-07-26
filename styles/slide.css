@@ -40,6 +40,13 @@
   white-space: pre-wrap;
   overflow-wrap: break-word;
   word-break: break-word;
+  /* html-renderer pins direction + text-align per element. `isolate` keeps that
+     paragraph direction authoritative for MIXED runs ('بعد الـ Dispatch', '42.1%',
+     'العينة مُجمَّعة في KAMC') so the ltr slide root can never reorder the Latin token
+     or move the '•' / '↳' / '*' prefix to the wrong end of the line. Preserved
+     newlines (white-space: pre-wrap) start a new bidi paragraph, so every wrapped
+     bullet line keeps its marker on the right. */
+  unicode-bidi: isolate;
 }
 
 .sl-chart {
@@ -60,6 +67,13 @@
 .sl-table {
   border-collapse: collapse;
   table-layout: fixed;
+  /* COLUMN ORDER IS VISUAL, NOT LOGICAL. build-spec reverses every rtl table's cells
+     and colW with rev(), so cell[0] is already the LEFTMOST column ('#' / الإجمالي is
+     last => rightmost). This pin makes that contract LOCAL to the table instead of
+     depending on .sl-slide's root pin: a table nested in any dir=rtl host (the app
+     shell, the html2canvas capture clone) still lays its columns out left-to-right and
+     cannot be mirrored. Per-cell text direction is set inline by html-renderer. */
+  direction: ltr;
 }
 
 .sl-table th,
@@ -70,4 +84,9 @@
   overflow: hidden;
   line-height: 1.15;
   font-family: 'Cairo', 'Segoe UI', Tahoma, sans-serif;
+  /* Each cell declares its own direction (Arabic rtl, numbers/dates/Latin ltr).
+     `isolate` guarantees the cell's content is resolved on its own and never against
+     the ltr table above it — keeps 'نوبكو/لين', '↳ منها متأخرة' and Latin lab names
+     from losing punctuation to the wrong edge. Column order is unaffected. */
+  unicode-bidi: isolate;
 }

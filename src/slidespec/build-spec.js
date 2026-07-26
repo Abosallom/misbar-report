@@ -17,7 +17,7 @@
 //   m.reportOptions.kpiCards[key] toggles the 7 exec KPI cards (row geometry repacks)
 //                                 + the OPT-IN 'turnaround' block on the monthly slide
 //   m.overrides[key]              per-run manual NUMBER overrides (suppresses that delta chip)
-import { COLORS as C, GEOM } from '../theme.js?v=v2026-07-23.3';
+import { COLORS as C, GEOM } from '../theme.js?v=v2026-07-23.4';
 
 // OPT-IN kpiCards KEYS. reportOptions.kpiCards normally reads "on unless === false"
 // (see buildExec's cardDefs filter). The keys in this set INVERT that: they render only
@@ -49,15 +49,30 @@ export const DEFAULT_LABELS = {
   coverSubtitle: 'متابعة تقدم الطلبات وقياس جاهزية المختبرات',
   coverPreparedBy: 'إعداد: لين لخدمات الأعمال',
   thanks: 'شكرا لكم',
-  // Exec KPI card labels (keys mirror the deltas/overrides keys)
-  kpiTotal: 'إجمالي الطلبات',
-  kpiAwaitingDispatch: 'بانتظار الشحن (المستشفى)',
-  kpiAwaitingResults: 'بانتظار النتائج (المختبر)',
-  kpiCompleted: 'نتائج مكتملة',
+  // Exec KPI card labels (keys mirror the deltas/overrides keys).
+  // WORDING IS THE 20-07 REFERENCE DECK's, verbatim (user decision 2026-07-26): the user
+  // hand-retyped these cards in PowerPoint from 'طلبات' to 'فحوصات' ("all numbers are for
+  // tests"), so his own hand-typed strings are the spec. Extracted run-by-run from
+  // ppt/slides/slide2.xml — the reference splits several of them across runs
+  // ('إجمالي' + ' ' + 'الفحوصات', 'فحوصات' + ' مكتملة', 'فحوصات ' + 'شُحنت' + ' ولم تُستلم');
+  // the concatenated string is what is stored here.
+  kpiTotal: 'إجمالي الفحوصات',
+  // The reference's awaitingDispatch card carries 'في انتظار شحن العينة من المستشفى' in the
+  // LABEL (its box was hand-widened to 1.75in to fit) and the fragment 'قبل الـ' in the
+  // sublabel — the user typed 'من المستشفى' up into the label and deleted ' Dispatch' off
+  // the sublabel in the same pass. We keep the generator's 1.479in label box, so the split
+  // is restored to label + sublabel with every reference word preserved.
+  kpiAwaitingDispatch: 'في انتظار شحن العينة',
+  kpiAwaitingResults: 'فحوصات تحت الإجراء',
+  kpiCompleted: 'فحوصات مكتملة',
+  // NOT RENDERED in the exec KPI row any more — the reference row is SIX cards and drops
+  // المرفوضة (user decision 2026-07-26). The metric still ships in the per-lab compliance
+  // table (compRejected). This key stays in both registries for parity, like execPartition.
   kpiRejected: 'النتائج المرفوضة',
   kpiLate: 'الطلبات المتأخرة',
-  kpiShipped: 'شُحنت ولم تُستلم',
-  // Exec slide — overall completion-rate line (label part; value appended as ': N%')
+  kpiShipped: 'فحوصات شُحنت ولم تُستلم',
+  // Exec slide — overall completion-rate line. NOT RENDERED (user decision 2026-07-26:
+  // the 20-07 reference deck has no such line); kept for registry parity like execPartition.
   execCompletionRate: 'نسبة الاكتمال الإجمالية',
   // Exec slide — delta-chip legend. ALL chips are green now (user decision 2026-07-23):
   // the old red/green colour key was removed. The legend is MODE-AWARE — the daily/weekly
@@ -81,11 +96,23 @@ export const DEFAULT_LABELS = {
   // two lines in BOTH outputs and grew the 0.456in row in PowerPoint. The reference wording
   // measures 102.4px = 1.067in and fits on one line; it is also the series name the
   // reference deck's monthly bar chart used.
-  monthlyRowOrders: 'الطلبات',
-  monthlyRowResults: 'النتائج المستلمة',
+  // TABLE wording is the reference's own 'فحوصات' family (user decision 2026-07-26 — same
+  // hand-retype as the KPI cards); the bar chart keeps the 'طلبات' family, see
+  // chartMonthly* below.
+  monthlyRowOrders: 'الفحوصات',
+  monthlyRowResults: 'نتائج الفحوصات المستلمة',
   monthlyRowRejected: 'النتائج المرفوضة',
   monthlyRowIncomplete: 'النتائج غير المكتملة',
   monthlyRowCompletion: 'نسبة الاكتمال',
+  // Monthly BAR-CHART series names. These used to reuse the monthlyRow* keys, but the
+  // reference deck's table and chart no longer agree: the user retyped the TABLE rows to
+  // the 'فحوصات' family and left the chart's legend on the original 'طلبات' family
+  // (ppt/charts/chart1.xml c:ser c:tx = 'الطلبات' / 'النتائج المستلمة' /
+  // 'النتائج غير المكتملة' — a pristine chart part PowerPoint never rewrote). So the two
+  // are SPLIT into their own keys, each independently overridable.
+  chartMonthlyOrders: 'الطلبات',
+  chartMonthlyResults: 'النتائج المستلمة',
+  chartMonthlyIncomplete: 'النتائج غير المكتملة',
   // Monthly partition footnote (under the table) — the orders add-up identity.
   monthlyPartition: 'الطلبات = النتائج المستلمة + المرفوضة + قيد المعالجة',
   // Compliance (byLab) table headers — back to the SEVEN reference columns (user
@@ -164,24 +191,27 @@ export const LABEL_NAMES = {
   coverSubtitle: 'العنوان الفرعي للغلاف',
   coverPreparedBy: 'سطر جهة الإعداد في الغلاف',
   thanks: 'نص شريحة الشكر',
-  kpiTotal: 'بطاقة: إجمالي الطلبات',
+  kpiTotal: 'بطاقة: إجمالي الفحوصات',
   kpiAwaitingDispatch: 'بطاقة: في انتظار شحن العينة',
-  kpiAwaitingResults: 'بطاقة: في انتظار النتائج',
-  kpiCompleted: 'بطاقة: نتائج مكتملة',
-  kpiRejected: 'بطاقة: النتائج المرفوضة',
+  kpiAwaitingResults: 'بطاقة: فحوصات تحت الإجراء',
+  kpiCompleted: 'بطاقة: فحوصات مكتملة',
+  kpiRejected: 'بطاقة: النتائج المرفوضة (غير مستخدم حالياً)',
   kpiLate: 'بطاقة: الطلبات المتأخرة',
-  kpiShipped: 'بطاقة: شُحنت ولم تُستلم',
-  execCompletionRate: 'سطر نسبة الاكتمال الإجمالية (الملخص التنفيذي)',
+  kpiShipped: 'بطاقة: فحوصات شُحنت ولم تُستلم',
+  execCompletionRate: 'سطر نسبة الاكتمال الإجمالية (غير مستخدم حالياً)',
   execDeltaLegend: 'مفتاح التغيّر — الصيغة الافتراضية (منذ التقرير السابق)',
   execDeltaLegendDaily: 'مفتاح التغيّر اليومي — منذ آخر تقرير ({date})',
   execDeltaLegendWeekly: 'مفتاح التغيّر الأسبوعي — منذ تقرير قبل أسبوع ({date})',
   execDeltaLegendWeeklySun: 'مفتاح التغيّر الأسبوعي — منذ تقرير الأحد ({date})',
   execDeltaLegendWeeklyThu: 'مفتاح التغيّر الأسبوعي — منذ تقرير الخميس ({date})',
-  monthlyRowOrders: 'صف الجدول الشهري: الطلبات',
-  monthlyRowResults: 'صف الجدول الشهري: النتائج المستلمة',
-  monthlyRowRejected: 'صف الجدول الشهري: النتائج المرفوضة',
+  monthlyRowOrders: 'صف الجدول الشهري: الفحوصات',
+  monthlyRowResults: 'صف الجدول الشهري: نتائج الفحوصات المستلمة',
+  monthlyRowRejected: 'صف الجدول الشهري: النتائج المرفوضة (غير مستخدم حالياً)',
   monthlyRowIncomplete: 'صف الجدول الشهري: النتائج غير المكتملة',
   monthlyRowCompletion: 'صف الجدول الشهري: نسبة الاكتمال',
+  chartMonthlyOrders: 'سلسلة الرسم الشهري: الطلبات',
+  chartMonthlyResults: 'سلسلة الرسم الشهري: النتائج المستلمة',
+  chartMonthlyIncomplete: 'سلسلة الرسم الشهري: النتائج غير المكتملة',
   compHash: 'عمود الالتزام: الرقم',
   compLab: 'عمود الالتزام: المختبر',
   compTotal: 'عمود الالتزام: مجموع الطلبات',
@@ -241,6 +271,12 @@ const valueOf = (m) => (key, computed) => (Number.isFinite(m.overrides?.[key]) ?
 // Colors present in the deck charts/cards but not in theme.js:
 const CHART_BLUE = '#4472C4';   // chart1 series "الطلبات" (accent1)
 const CHART_GRAY = '#A5A5A5';   // chart1 series "النتائج غير المكتملة" (accent3)
+// 'فحوصات تحت الإجراء' card — the user RECOLOURED it in PowerPoint from the app's amber
+// (#F59E0B) to a theme colour: slide2.xml carries <a:schemeClr val="accent1"><a:lumMod
+// val="75000"/> on both that card's value run and its accent bar. theme1.xml's accent1 is
+// srgbClr 4472C4; lumMod 75% (HSL L×0.75) resolves to #2F5597 — Office's "Blue, Accent 1,
+// Darker 25%". Baked as a literal hex because the deck we emit carries no theme part.
+const CARD_DEEP_BLUE = '#2F5597';
 const CARD_TITLE = '#DCE6F1';   // overall-average card sub-title
 
 // Gregorian month-name lookup ('01'..'12' -> Arabic). Drives the monthly table
@@ -332,37 +368,45 @@ function buildCover(m) {
 // ============================================================================
 // Slide 2 — Executive summary + order-journey funnel (merged)
 // ============================================================================
-// KPI card factory. Width AND number-font are params (the row repacks for N cards).
-// Interior REDESIGNED for narrow (7-card) widths where 3-digit live values + long
-// labels collided: the number sits in an upper right-aligned band (28pt narrow /
-// 40pt wide), the green "+N" delta chip is pinned to the TOP-LEFT corner (13pt, left-
-// aligned) so it can never touch the right-aligned number, the label gets a tight
-// 3-line band below the number, and the sublabel sits in a bottom band clear of both.
-function kpiCard({ x, w, nf = 28, v, vc, lab, sub, ac, delta }) {
+// KPI card factory. Width is a param (the row repacks for N cards).
+// INTERIOR GEOMETRY IS THE 20-07 REFERENCE DECK's, verbatim (user decision 2026-07-26 —
+// the reference deck is the spec). Fixed offsets from the card origin, NOT derived from
+// an ink-line formula: value 34pt at (x+0.08, y+0.13, w−0.24, 0.72), label 11.5pt at
+// (x+0.08, y+0.90, w−0.16, 0.42) with NO line-spacing override (the reference slide
+// carries zero <a:lnSpc>), sublabel 9.5pt at (x+0.08, y+1.28, w−0.16, 0.28).
+// The one deliberate departure is the delta chip: the reference's chip box sits at
+// (x+0.10, y+0.30, 0.9, 0.42) at 20pt, i.e. straight over the restored 34pt value band
+// (y+0.13 → y+0.85). It only looked clean in the reference because the '+N' runs were
+// hand-deleted there. The chips are a KEPT feature, so they stay pinned to the TOP-LEFT
+// corner at 13pt where they are left-aligned and the value is right-aligned — the two
+// can never touch. See the delta-legend note in buildExecFunnel.
+// EMPHASIS (emph: true) is the treatment the user hand-built for الطلبات المتأخرة on the
+// reference slide: he duplicated the 0.063in accent bar twice, stretched each to the full
+// card width and dropped one on the card's top edge and one on its bottom edge, so the
+// white card reads as a red-outlined box. Reference shapes (slide2.xml, the last two in the
+// spTree, i.e. drawn on top): #FF0000, w 1.639 = card width, h 0.0793, top bar y 0.9296
+// (= card y) and bottom bar y 2.4643 (= card y + h − 0.0657, straddling the bottom edge).
+// Their x values are −0.0088 / −0.0315, i.e. the card x minus hand-drag noise; the
+// generator emits them at the card x. The right accent bar STAYS — the reference kept it.
+function kpiCard({ x, w, v, vc, lab, sub, ac, delta, emph }) {
   const y = 0.93, h = 1.6;
-  // The Cairo Range ink-line is ~1.88x the font px (much taller than the CSS box), so
-  // the number's tall glyph line must be reckoned with directly: inkHalf is half that
-  // line, in inches. The number is centred just low enough that its ink top clears the
-  // delta-legend above the row, and the label/sublabel bands are derived from the ink
-  // line so 3-digit live numbers never touch the label below.
-  const numH = 0.48;
-  const inkHalf = nf * 1.253 / 96;                       // half the number's ink-line (in)
-  const numY = inkHalf + 0.016 - numH / 2;              // ink top ≈ 0.016in below the card top
-  const labY = Math.min(2 * inkHalf + 0.13, 0.90);      // label clears the number ink-line
-  const subY = Math.min(labY + 0.50, 1.29);            // sublabel below the (≤2-line) label
   const els = [
     rect(x, y, w, h, C.white, { radius: 0.05, line: { color: C.border, w: 0.75 } }),
     rect(x + w - 0.063, y, 0.063, h, ac),
-    // number — right-aligned (28pt narrow / 30pt wide)
-    text(x + 0.08, y + numY, w - 0.22, numH, v, nf, { bold: true, color: vc, align: 'right', valign: 'middle' }),
-    // label — up to 2 tight lines below the number ink-line
-    text(x + 0.08, y + labY, w - 0.16, subY - labY - 0.02, lab, 10, { bold: true, color: C.slate900, align: 'right', valign: 'top', rtl: true, lineSpacing: 0.95 }),
+    // value — 34pt, right-aligned (reference: sz=3400 on every card)
+    text(x + 0.08, y + 0.13, w - 0.24, 0.72, v, 34, { bold: true, color: vc, align: 'right', valign: 'middle' }),
+    // label — 11.5pt (reference: sz=1150, no lnSpc)
+    text(x + 0.08, y + 0.9, w - 0.16, 0.42, lab, 11.5, { bold: true, color: C.slate900, align: 'right', valign: 'top', rtl: true }),
   ];
-  // delta chip — TOP-LEFT corner, left-aligned; horizontally clear of the number.
+  // delta chip — TOP-LEFT corner, left-aligned; horizontally clear of the value.
   // ALWAYS green now (user decision 2026-07-23) — no per-metric colour branching.
   if (delta) els.push(text(x + 0.06, y + 0.06, 0.55, 0.24, delta, 13, { bold: true, color: C.deltaGreen, align: 'left', valign: 'middle' }));
-  // sublabel — bottom band
-  if (sub) els.push(text(x + 0.08, y + subY, w - 0.16, h - subY - 0.03, sub, 8, { color: C.slate500, align: 'right', valign: 'top', rtl: true }));
+  // sublabel — 9.5pt (reference: sz=950)
+  if (sub) els.push(text(x + 0.08, y + 1.28, w - 0.16, 0.28, sub, 9.5, { color: C.slate500, align: 'right', valign: 'top', rtl: true }));
+  // emphasis bars LAST so they paint over the card body, as they do in the reference.
+  if (emph) {
+    els.push(rect(x, y, w, 0.0793, ac), rect(x, y + h - 0.0657, w, 0.0793, ac));
+  }
   return els;
 }
 
@@ -381,9 +425,23 @@ function kpiRowGeom(n) {
   cardW = Math.floor(cardW * 1000) / 1000;          // N=7 => 1.639 (byte-stable)
   const step = cardW + KPI_GAP;
   const xOf = (i) => Math.round((KPI_RIGHT - cardW - i * step) * 1000) / 1000; // i=0 rightmost
-  const numFont = cardW >= 1.9 ? 30 : 28;           // N=7 => 28; wider cards a touch larger (30)
-  return { cardW, xOf, numFont };
+  return { cardW, xOf };
 }
+
+// CANONICAL SIX-CARD ROW — pinned to the reference deck's own boxes (user decision
+// 2026-07-26). kpiRowGeom(6) would NOT reproduce them: at N=6 the computed width
+// (11.618/6 = 1.936) clamps to the KPI_CAP_W 1.903 cap, giving six 1.903in cards on a
+// 2.043 pitch. The reference instead keeps the 7-card 1.639in card and simply deletes
+// المرفوضة, leaving the remaining five in their old slots and dragging الطلبات المتأخرة
+// flush to the left edge. Card x, EMU→in from slide2.xml (index 0 = rightmost):
+//   11.179 · 9.400 · 7.587 · 5.774 · 3.995 · 0.000   (w 1.639, y 0.93, h 1.6)
+// Two hand-drag artefacts are normalised: the شُحنت card sits at y 0.9500 in the reference
+// (0.02in below its five neighbours) and the الطلبات المتأخرة emphasis bars at x −0.0088 /
+// −0.0315; we emit y 0.93 for every card and x 0.000 for that card's bars.
+// A NON-canonical row (any card switched off in reportOptions.kpiCards) falls back to
+// kpiRowGeom, which repacks and re-centres as before.
+const KPI_REF_W = 1.639;
+const KPI_REF_X = [11.179, 9.400, 7.587, 5.774, 3.995, 0.000];
 
 function buildExecFunnel(m) {
   const L = labelOf(m);
@@ -409,34 +467,42 @@ function buildExecFunnel(m) {
     ? `${arMonthLabel(monthsWithOrders[0].month)} – ${arMonthLabel(monthsWithOrders[monthsWithOrders.length - 1].month)}`
     : '';
 
-  // Overall completion rate — SAME override-aware total/completed the cards use (guard /0).
-  const vTotalCard = V('total', m.kpi.totals.total);
-  const vCompletedCard = V('completed', b.completed);
-  const completionRate = vTotalCard > 0 ? Math.round((vCompletedCard / vTotalCard) * 1000) / 10 : 0; // 1-decimal — consistent with نسبة الاكتمال elsewhere
-
-  // -- ZONE A: KPI cards in one row, right-to-left (total rightmost). المرفوضة sits
-  // between المكتملة and المتأخرة. Card defs in RTL logical order (index 0 = rightmost).
+  // -- ZONE A: KPI cards in one row, right-to-left (total rightmost). Card defs in RTL
+  // logical order (index 0 = rightmost). ORDER AND MEMBERSHIP ARE THE 20-07 REFERENCE
+  // DECK's (user decision 2026-07-26): إجمالي · في انتظار شحن العينة · فحوصات شُحنت ولم
+  // تُستلم · فحوصات تحت الإجراء · فحوصات مكتملة · الطلبات المتأخرة — SIX cards. النتائج
+  // المرفوضة was dropped from this row by the user (it stays in the per-lab compliance
+  // table's مرفوضة column, which is untouched); kpiRejected stays in the label registries.
+  // الطلبات المتأخرة is last and, in the reference, dragged flush to the left edge with a
+  // red bar on its top and bottom edge — see KPI_REF_X and kpiCard's `emph`.
   // dk = the delta/override/kpiCards key. A card renders unless kpiCards[dk] === false;
   // its value is the manual override (if finite) else the computed metric, and its green
   // "+N" chip is suppressed when that value was overridden.
   const cardDefs = [
-    { v: V('total', m.kpi.totals.total),                vc: C.blue,      lab: L('kpiTotal'),            sub: dataWindow,                 ac: C.blue,      dk: 'total' },
-    { v: V('awaitingDispatch', b.awaitingDispatch),     vc: C.greenSoft, lab: L('kpiAwaitingDispatch'),  sub: 'قبل الـ Dispatch',         ac: C.greenSoft, dk: 'awaitingDispatch' },
-    { v: vAwait,                                        vc: C.amber,     lab: L('kpiAwaitingResults'),   sub: 'بعد الـ Dispatch',         ac: C.amber,     dk: 'awaitingResults' },
-    { v: V('completed', b.completed),                   vc: C.green,     lab: L('kpiCompleted'),         sub: '',                         ac: C.green,     dk: 'completed' },
-    { v: V('rejected', b.rejected),                     vc: C.redSoft,   lab: L('kpiRejected'),          sub: 'نتائج مرفوضة من المختبر',   ac: C.redSoft,   dk: 'rejected' },
-    { v: vLate,                                         vc: C.redPure,   lab: L('kpiLate'),              sub: `تمثل ${latePctShown}% من الطلبات بانتظار النتيجة`, ac: C.redPure, dk: 'lateNoResult' },
-    { v: V('shippedNotReceived', b.shippedNotReceived), vc: C.redSoft,   lab: L('kpiShipped'),           sub: '',                         ac: C.redSoft,   dk: 'shippedNotReceived' },
+    { v: V('total', m.kpi.totals.total),                vc: C.blue,           lab: L('kpiTotal'),            sub: dataWindow,                 ac: C.blue,           dk: 'total' },
+    // sub is ONE line on purpose: 'من المستشفى قبل الـ Dispatch' wrapped to two and its
+    // ink crossed the (already two-line) label inside this 1.479in card.
+    { v: V('awaitingDispatch', b.awaitingDispatch),     vc: C.greenSoft,      lab: L('kpiAwaitingDispatch'),  sub: 'قبل الـ Dispatch',         ac: C.greenSoft,      dk: 'awaitingDispatch' },
+    { v: V('shippedNotReceived', b.shippedNotReceived), vc: C.redSoft,        lab: L('kpiShipped'),           sub: '',                         ac: C.redSoft,        dk: 'shippedNotReceived' },
+    // CARD_DEEP_BLUE, not C.amber: the user recoloured this card in the reference deck.
+    { v: vAwait,                                        vc: CARD_DEEP_BLUE,   lab: L('kpiAwaitingResults'),   sub: 'بعد الـ Dispatch',         ac: CARD_DEEP_BLUE,   dk: 'awaitingResults' },
+    { v: V('completed', b.completed),                   vc: C.green,          lab: L('kpiCompleted'),         sub: '',                         ac: C.green,          dk: 'completed' },
+    { v: vLate,                                         vc: C.redPure,        lab: L('kpiLate'),              sub: `تمثل ${latePctShown}% من الطلبات`, ac: C.redPure, dk: 'lateNoResult', emph: true },
   ];
   const visible = cardDefs.filter((c) => m.reportOptions?.kpiCards?.[c.dk] !== false);
-  const { cardW, xOf, numFont } = kpiRowGeom(visible.length);
+  // Canonical row (nothing switched off) => the reference's own pinned boxes; otherwise
+  // fall back to the computed repacking layout. See KPI_REF_X.
+  const refRow = visible.length === KPI_REF_X.length;
+  const { cardW, xOf } = refRow
+    ? { cardW: KPI_REF_W, xOf: (i) => KPI_REF_X[i] }
+    : kpiRowGeom(visible.length);
   // ALL delta chips are green now (user decision 2026-07-23) — the old BAD_DELTA
   // red-chip branch was removed. fmtDelta yields '+N' on a rise, '−N' on a drop, and
   // nothing (chip hidden) for a 0/missing delta. An overridden card value suppresses
   // its chip (a manual number has no meaningful delta vs the baseline).
   const kpiEls = visible.flatMap((c, i) => kpiCard({
-    x: xOf(i), w: cardW, nf: numFont, v: String(c.v), vc: c.vc, lab: c.lab, sub: c.sub, ac: c.ac,
-    delta: isOv(c.dk) ? undefined : fmtDelta(d[c.dk]),
+    x: xOf(i), w: cardW, v: String(c.v), vc: c.vc, lab: c.lab, sub: c.sub, ac: c.ac,
+    delta: isOv(c.dk) ? undefined : fmtDelta(d[c.dk]), emph: c.emph,
   }));
 
   // -- ZONE B: order-journey funnel (from old buildJourney; X unchanged, Y +0.40).
@@ -461,23 +527,23 @@ function buildExecFunnel(m) {
   const anyChip = visible.some((c) => !isOv(c.dk) && fmtDelta(d[c.dk]) !== undefined)
     || rows.some((r) => !KPI_DELTA_KEYS.has(r.key) && !isOv(r.ov) && fmtDelta(d[r.key]) !== undefined);
 
-  // Cancelled note — displayed count is override-aware; the historical (pre-April)
-  // breakdown is hist = raw cancelledNote − cancelledInData (rows counted from the
-  // CSV), appended only when positive. Text parts are registry-driven.
+  // Cancelled note — displayed count is override-aware. Geometry/size are the 20-07
+  // reference deck's: (10.542, 2.55, 2.271, 0.32) at 11pt (its shape survives there with
+  // endParaRPr sz="1100" even though the visible run was hand-deleted). The
+  // '(منها N قبل أبريل)' historical breakdown is NOT appended any more — the reference
+  // note is just '* N طلب ملغي'. execCancelledHistPre/Post stay in both registries as
+  // harmless orphans, exactly like execPartition.
   const vCancelled = V('cancelledNote', m.kpi.cancelledNote);
-  const cancelledHist = m.kpi.cancelledNote - (m.kpi.totals?.cancelledInData ?? 0);
-  const cancelledText = `* ${vCancelled} ${L('execCancelledLabel')}`
-    + (cancelledHist > 0 ? ` (${L('execCancelledHistPre')} ${cancelledHist} ${L('execCancelledHistPost')})` : '');
+  const cancelledText = `* ${vCancelled} ${L('execCancelledLabel')}`;
 
   const els = [
     ...chrome(L('titleExec')),
     ...kpiEls,
-    text(9.0, 2.55, 3.813, 0.32, cancelledText, 10, { bold: true, color: C.slate600, align: 'right', valign: 'middle', rtl: true }),
-    // NOTE: the KPI-row partition footnote (execPartition) is NOT rendered any more —
-    // user decision 2026-07-26 restored the simpler 20-07 deck, which carries no add-up
-    // equation notes. The label key stays in both registries for parity.
-    // Overall completion-rate line — mirrors the cancelled note on the left side.
-    text(0.5, 2.55, 2.271, 0.32, `${L('execCompletionRate')}: ${completionRate}%`, 11, { bold: true, color: C.navy, align: 'left', valign: 'middle', rtl: true }),
+    text(10.542, 2.55, 2.271, 0.32, cancelledText, 11, { bold: true, color: C.slate600, align: 'right', valign: 'middle', rtl: true }),
+    // NOTE: neither the KPI-row partition footnote (execPartition) nor the overall
+    // completion-rate line (execCompletionRate) is rendered — user decision 2026-07-26
+    // restored the 20-07 reference deck, which has no shape at (0.5, 2.55) and carries no
+    // add-up equation notes. Both label keys stay in the registries for parity.
     // Funnel column labels
     text(9.05, 2.906, 3.0, 0.3, L('funnelStage'), 10, { bold: true, color: C.slate500, align: 'right', valign: 'middle', rtl: true }),
     text(8.629, 2.906, 1.0, 0.3, L('funnelCount'), 10, { bold: true, color: C.slate500, align: 'center', valign: 'middle', rtl: true }),
@@ -528,20 +594,21 @@ function buildMonthly(m) {
   // Totals column computed from the rows (guard divide-by-zero on completion).
   const oTot = mo.reduce((s, x) => s + x.orders, 0);
   const rTot = mo.reduce((s, x) => s + x.results, 0);
-  const rejTot = mo.reduce((s, x) => s + (x.rejected || 0), 0);
-  // Partition field: orders = results + rejected + pending. Use the engine's
-  // `pending` when present, else derive it (older models carried only `incomplete`,
-  // which double-counts rejected and must NOT be used for the partition).
-  const pendingOf = (x) => (Number.isFinite(x.pending) ? x.pending : x.orders - x.results - (x.rejected || 0));
-  const pTot = mo.reduce((s, x) => s + pendingOf(x), 0);
+  // Third metric = `incomplete` (orders − results), which is what the 20-07 reference
+  // deck shows in BOTH the table and the bar chart (chart1.xml, pristine app output:
+  // 295−59=236, 410−383=27, 106−77=29). The النتائج المرفوضة row was removed with it
+  // (user decision 2026-07-26 — the reference table is header + 4 rows), so the visible
+  // partition is once again orders = results + incomplete, which adds up on the page.
+  // The engine still publishes the finer `pending` (orders − results − rejected); it is
+  // simply not what this slide reports. monthlyRowRejected stays in both registries.
+  const iTot = mo.reduce((s, x) => s + x.incomplete, 0);
   const cPct = oTot > 0 ? Math.round((rTot / oTot) * 1000) / 10 : null; // round1(results/orders*100)
   const cTot = pctMonthly(cPct);
   // logical (deck) order: [label, months…, total]; reverse -> visual L->R
   const header = rev(['المؤشر', ...monthLabels, { text: 'الإجمالي', fill: C.navyDark }]);
   const rowOrders = rev([{ text: L('monthlyRowOrders'), align: 'right' }, ...mo.map((x) => String(x.orders)), { text: String(oTot), fill: bg, bold: true }]);
   const rowResults = rev([{ text: L('monthlyRowResults'), align: 'right' }, ...mo.map((x) => String(x.results)), { text: String(rTot), fill: bg, bold: true }]);
-  const rowRejected = rev([{ text: L('monthlyRowRejected'), align: 'right' }, ...mo.map((x) => String(x.rejected || 0)), { text: String(rejTot), fill: bg, bold: true }]);
-  const rowIncomplete = rev([{ text: L('monthlyRowIncomplete'), align: 'right' }, ...mo.map((x) => String(pendingOf(x))), { text: String(pTot), fill: bg, bold: true }]);
+  const rowIncomplete = rev([{ text: L('monthlyRowIncomplete'), align: 'right' }, ...mo.map((x) => String(x.incomplete)), { text: String(iTot), fill: bg, bold: true }]);
   const rowCompletion = rev([{ text: L('monthlyRowCompletion'), align: 'right' }, ...mo.map((x) => pctMonthly(x.completionPct)), { text: cTot, fill: bg, bold: true }]);
 
   // Column widths: label + N month cols + total over the fixed table width. The
@@ -561,37 +628,48 @@ function buildMonthly(m) {
   //  · turnaround ON  — the historic split band: table+bar chart in the upper band
   //    (y≈1.07), line chart + card in the lower band (y 4.583 → 6.972). Byte-identical
   //    to what shipped before the toggle existed, so opting in changes nothing else.
-  //  · turnaround OFF — the freed lower band is reclaimed by CENTRING both survivors on
-  //    one shared centreline in the content band (1.07 → 6.95, centre 4.01) instead of
-  //    leaving ~2.0in dead space underneath. Chart keeps the reference's own 6.0×3.4
-  //    (not stretched); the table keeps its columns, labels and 0.456 rowH (6 rows =
-  //    2.736in). Result: chart 2.31→5.71, table 2.642→5.378 — the reference deck's own
-  //    proportions (its chart sits 2.195→5.595 beside the table).
-  const CONTENT_TOP = 1.07, CONTENT_MID = (CONTENT_TOP + 6.95) / 2; // 4.01
-  const CHART_H = 3.4, TABLE_H = 6 * 0.456;
-  const tableY = showTurnaround ? 1.069 : Math.round((CONTENT_MID - TABLE_H / 2) * 1000) / 1000;
-  const chartY = showTurnaround ? 1.07 : Math.round((CONTENT_MID - CHART_H / 2) * 1000) / 1000;
+  //  · turnaround OFF — the 20-07 REFERENCE DECK's own placement: table and chart share
+  //    ONE top edge at y≈2.194/2.195 (reference graphicFrame offsets, EMU→in). They are
+  //    NOT centred independently — centring each on its own height staggered their tops
+  //    by 0.33in (table 2.642, chart 2.310), which is the visible mismatch the reference
+  //    does not have. Chart 6.0×3.4 → bottom 5.595; table 5×0.456 → bottom 4.474.
+  //    The two reference offsets differ by 0.001in (2.194 vs 2.195) — that is the
+  //    reference's own rounding, kept verbatim rather than averaged.
+  const CHART_H = 3.4;
+  const tableY = showTurnaround ? 1.069 : 2.194;     // reference table frame y
+  const chartY = showTurnaround ? 1.07 : 2.195;      // reference chart frame y
 
   const table = {
     t: 'table', x: 6.604, y: tableY, w: TABLE_W, rtl: true, rowH: 0.456,
     header: { fill: C.navy, color: C.white, bold: true },
     colW: rev([LABEL_COLW, ...monthColW, TOTAL_COLW]),
-    rows: [header, rowOrders, rowResults, rowRejected, rowIncomplete, rowCompletion],
+    rows: [header, rowOrders, rowResults, rowIncomplete, rowCompletion],
   };
 
-  // Bar-chart series names reuse the monthly row labels (same metrics, same slide).
-  // Both monthly charts read RIGHT→LEFT to match the RTL monthly table on this slide:
-  // the categories AND every series `values` array are reversed at SPEC level (oldest
-  // month at the RIGHT, time flowing leftward). The renderers are index-aligned
-  // (category i drawn at xOf(i)), so reversing the arrays flips the visual order — data
-  // labels, category labels and legend all follow — and SVG/PDF/PPTX stay in lockstep.
+  // CATEGORY DIRECTION IS RIGHT-TO-LEFT — oldest month at the RIGHT, newest at the LEFT,
+  // so the time axis reads in Arabic order alongside the RTL table beside it. This is the
+  // ONE attribute where the 20-07 reference deck is deliberately NOT followed: its chart
+  // part (chart1.xml c:cat strCache idx 0..6 = يناير…يوليو) reads LEFT-to-right, but the
+  // reference predates the user's later, explicit instruction ("bar chart to be from right
+  // to left"), so that instruction overrides the reference here. Categories AND every
+  // series' values are reversed in lockstep — reversing only one would relabel the bars.
+  // Same treatment on the opt-in turnaround line chart below.
+  //
+  // HOW THE RTL IS PRODUCED — read this before touching the arrays. The RENDERERS are
+  // now RTL-native: charts-svg.js maps category index 0 to the RIGHTMOST band (CAT_DIR)
+  // and pptx-renderer.js emits catAxisOrientation 'maxMin', PowerPoint's own reversed
+  // category axis. So the spec must hand over categories in NATURAL chronological order
+  // (يناير…يوليو) and let the renderer place index 0 on the right. Reversing here as well
+  // double-reversed it: the chart came out newest-at-right while the table beside it reads
+  // oldest-at-right. Direction is the renderers' single knob (opts.catDir escapes it).
+  const monthLabelsRtl = monthLabels;
   const monthlyChart = {
     t: 'chart', kind: 'colClustered', x: 0.5, y: chartY, w: 6.0, h: CHART_H,
-    categories: rev(monthLabels),
+    categories: monthLabelsRtl,
     series: [
-      { name: L('monthlyRowOrders'), values: rev(mo.map((x) => x.orders)), color: CHART_BLUE },
-      { name: L('monthlyRowResults'), values: rev(mo.map((x) => x.results)), color: C.greenBright },
-      { name: L('monthlyRowIncomplete'), values: rev(mo.map((x) => pendingOf(x))), color: CHART_GRAY },
+      { name: L('chartMonthlyOrders'), values: mo.map((x) => x.orders), color: CHART_BLUE },
+      { name: L('chartMonthlyResults'), values: mo.map((x) => x.results), color: C.greenBright },
+      { name: L('chartMonthlyIncomplete'), values: mo.map((x) => x.incomplete), color: CHART_GRAY },
     ],
     opts: { dataLabels: true, legend: 'bottom' },
   };
@@ -600,14 +678,13 @@ function buildMonthly(m) {
   // Key both series by month over the SAME derived month list as the categories,
   // so a month absent from perMonth becomes a null gap in place (rather than
   // shifting the later months' points left and misaligning the line).
-  // Reversed to RIGHT→LEFT too (see monthlyChart note): categories and both series
-  // `values` arrays reversed in lockstep so the null-gap alignment is preserved.
+  // RIGHT-TO-LEFT, same as monthlyChart (see its note) — oldest month at the RIGHT.
   const turnaroundChart = {
     t: 'chart', kind: 'line', x: 4.139, y: 4.583, w: 9.139, h: 2.389,
-    categories: rev(monthLabels),
+    categories: monthLabelsRtl,
     series: [
-      { name: L('chartActual'), values: rev(monthKeys.map((k) => t.perMonth.find((p) => p.month === k)?.actual ?? null)), color: C.navyChart, marker: 'circle' },
-      { name: L('chartExpected'), values: rev(monthKeys.map((k) => t.perMonth.find((p) => p.month === k)?.expected ?? null)), color: C.orangeSeries, dash: true, marker: 'diamond' },
+      { name: L('chartActual'), values: monthKeys.map((k) => t.perMonth.find((p) => p.month === k)?.actual ?? null), color: C.navyChart, marker: 'circle' },
+      { name: L('chartExpected'), values: monthKeys.map((k) => t.perMonth.find((p) => p.month === k)?.expected ?? null), color: C.orangeSeries, dash: true, marker: 'diamond' },
     ],
     opts: { legend: 'bottom', title: L('chartDaysAxis'), valMin: 0 },
   };
@@ -672,13 +749,9 @@ function buildCompliance(m) {
   const rejTot = lab.reduce((s, r) => s + (r.rejected || 0), 0);
   const latePctTot = awaitTot > 0 ? Math.round((lateTot / awaitTot) * 1000) / 10 : 0;
 
-  // Per-column body-cell emphasis (kept from the richer table): late red+bold when >0,
-  // muted when 0; worst-lab late-% (≥50%) red+bold.
-  const lateCell = (n) => (n > 0
-    ? { text: String(n), color: C.redPure, bold: true }
-    : { text: String(n || 0), color: C.slate500 });
-  const latePctCell = (n) => (n >= 50 ? { text: pctLab(n), bold: true, color: C.redPure } : pctLab(n));
-
+  // NO conditional body-cell emphasis. The 20-07 reference deck prints EVERY body cell
+  // in #1E293B, non-bold — including late=80, 100.0% and 55.6%, i.e. values the
+  // red/bold rules would have flagged. Restored to that (user decision 2026-07-26).
   const header = rev([
     L('compHash'), L('compLab'), L('compTotal'), L('compAwaiting'),
     L('compRejected'), L('compLate'), L('compLatePct'),
@@ -689,8 +762,8 @@ function buildCompliance(m) {
     String(r.total),
     String(r.awaitingResult),
     String(r.rejected || 0),
-    lateCell(r.late || 0),
-    latePctCell(r.latePct),
+    String(r.late),
+    pctLab(r.latePct),
   ]));
   // Totals row — '#' cell left blank (as in the reference deck), 'المجموع' in the lab column.
   const totalRow = rev([
@@ -699,7 +772,7 @@ function buildCompliance(m) {
     { text: String(totalTot), bold: true, fill: C.bgLighter },
     { text: String(awaitTot), bold: true, fill: C.bgLighter },
     { text: String(rejTot), bold: true, fill: C.bgLighter },
-    { text: String(lateTot), bold: true, fill: C.bgLighter, ...(lateTot > 0 ? { color: C.redPure } : {}) },
+    { text: String(lateTot), bold: true, fill: C.bgLighter },
     { text: pctLab(latePctTot), bold: true, fill: C.bgLighter },
   ]);
 
@@ -719,25 +792,20 @@ function buildCompliance(m) {
   //   الطلبات المتأخرة 1.596 (1.004) · نسبة الطلبات المتأخرة 2.153 (1.351)
   // Sum = 11.667 = the table width, unchanged.
   const COL_W = [0.556, 2.714, 1.667, 2.083, 0.898, 1.596, 2.153];
-  // Table-only slide, so rowH GROWS to fill the vertical space, capped at ROW_H_CAP
-  // (0.40in). With the equation footnote gone the table owns the band down to
-  // CONTENT_BOTTOM (6.95); past ~14 rows (≈13 labs) the rows shrink dynamically so the
-  // totals row still clears it. Fonts 10/10.5 — verified clean at 9 labs.
-  const TABLE_Y = 1.194, ROW_H_CAP = 0.40, CONTENT_BOTTOM = 6.95;
-  const nTableRows = labRows.length + 2;            // header + labRows + totals
-  const fillRowH = (CONTENT_BOTTOM - TABLE_Y) / nTableRows;
-  const rowH = Math.min(ROW_H_CAP, Math.floor(fillRowH * 1000) / 1000);
-  // Header font is the reference deck's uniform 10pt — with the reference column widths
-  // every header fits on ONE line at 10pt (see COL_W above), so the 9pt shrink the equal-
-  // width scheme forced is gone. It still steps DOWN once many labs shrink rowH, and the
-  // steps are tied to what actually fits a row: one Cairo line inks ≈1.875×the font px
-  // (10pt → 0.260in) and pptxgenjs adds 0.05in top + 0.05in bottom cell margin, so a size
-  // needs rowH ≥ pt×1.875/72 + 0.10 (10pt → 0.360, 9pt → 0.334, 8pt → 0.308) to avoid
-  // PowerPoint growing that row past the computed geometry. ≤13 labs keep 10pt.
-  const headerSize = rowH >= 0.36 ? 10 : rowH >= 0.335 ? 9 : 8;
-  const bodySize = rowH >= 0.30 ? 10.5 : 9;
+  // POSITION AND ROW HEIGHT ARE THE 20-07 REFERENCE DECK's (user decision 2026-07-26):
+  // frame y = 1959540 EMU = 2.143in, every a:tr h = 251460 EMU = 0.275in, so 9 rows span
+  // 2.143 → 4.618. An earlier change pinned the table at y 1.194 and GREW rowH to 0.40 to
+  // fill the band freed by deleting the late-by-test chart; the reference does neither —
+  // its author moved the surviving table DOWN and left the band below it empty.
+  // NO headerSize/bodySize keys: every run in the reference table is 10pt, which is
+  // exactly what the renderer's `e.headerSize || 10` / `e.bodySize || 10` defaults give
+  // (src/render/pptx-renderer.js). The old stepped font ladder keyed off rowH and would
+  // silently drop the header to 8pt and the body to 9pt at rowH 0.275.
+  // x stays 0.833 — the principled centre ((13.333 − 11.667)/2); the reference's 0.8165
+  // is a 0.017in manual drag, not an authored value.
+  const TABLE_Y = 2.143, ROW_H = 0.275;
   const labTable = {
-    t: 'table', x: 0.833, y: TABLE_Y, w: 11.667, rtl: true, rowH, headerSize, bodySize,
+    t: 'table', x: 0.833, y: TABLE_Y, w: 11.667, rtl: true, rowH: ROW_H,
     header: { fill: C.navy, color: C.white, bold: true },
     colW: rev(COL_W),
     rows: [header, ...labRows, totalRow],
@@ -755,9 +823,9 @@ function buildCompliance(m) {
 // ============================================================================
 // Slide 5 — Tasks + challenges + risks (variant changes the task ROWS)
 // ============================================================================
-// 'مغلق' (closed) reads as DONE — greenBright (#00B050) fill, white text — so a fully
-// closed لين action never looks "in progress". Other statuses are unchanged.
-const STATUS_FILL = { 'مستمر': { fill: C.taskNavy, color: C.white }, 'متأخر': { fill: C.redDark, color: C.white }, 'قيد التنفيذ': { fill: C.amberStatus, color: C.black }, 'مغلق': { fill: C.greenBright, color: C.white }, 'مفتوح': { fill: C.slate500, color: C.white } };
+// Status chip fills as the 20-07 reference build had them — 'مغلق' is C.green (#16A34A);
+// the later switch to C.greenBright (#00B050) was a post-reference cosmetic change.
+const STATUS_FILL = { 'مستمر': { fill: C.taskNavy, color: C.white }, 'متأخر': { fill: C.redDark, color: C.white }, 'قيد التنفيذ': { fill: C.amberStatus, color: C.black }, 'مغلق': { fill: C.green, color: C.white }, 'مفتوح': { fill: C.slate500, color: C.white } };
 
 // Full-width tasks table. '#' is renumbered by row index (startIndex + i + 1) —
 // internal rows do NOT keep their own tk.num (which restarts at 1). startIndex lets a
@@ -890,8 +958,12 @@ function buildAction(m, variant) {
     + (support.length > SUP_CAP ? `\n+ ${support.length - SUP_CAP} أخرى` : '');
   els.push(
     rect(0.5, 4.62, 12.3, 0.92, C.bgRed, { radius: 0.06 }),
-    text(0.7, 4.62, 11.9, 0.26, L('supportTitle'), 11.5, { bold: true, color: C.navy, align: 'right', valign: 'middle', rtl: true }),
-    text(0.9, 5.02, 11.7, 0.52, supText, 9, { color: C.slate900, align: 'right', valign: 'top', rtl: true, lineSpacing: 0.9 }),
+    // Title + bullet typography are the 20-07 reference deck's: title 14pt at
+    // (0.7, 4.66, 11.9, 0.34), bullets 10.5pt at (0.9, 5.02, 11.7, 0.50) lineSpacing 1.0.
+    // They had been shrunk to 11.5pt / 9pt with lineSpacing 0.9 to buy room for a 4th+
+    // bullet; SUP_CAP above now handles that overflow instead, so the sizes revert.
+    text(0.7, 4.66, 11.9, 0.34, L('supportTitle'), 14, { bold: true, color: C.navy, align: 'right', valign: 'middle', rtl: true }),
+    text(0.9, 5.02, 11.7, 0.50, supText, 10.5, { color: C.slate900, align: 'right', valign: 'top', rtl: true, lineSpacing: 1.0 }),
   );
 
   // Blocks 3 & 4 — challenges (right) + risks (left), side-by-side, subheads at y 5.60.
@@ -907,7 +979,7 @@ function buildAction(m, variant) {
   const chTable = {
     t: 'table', x: 6.80, y: CR_TABLE_Y, w: 6.0, rtl: true, rowH: CR_ROW_H, bodySize: 8.5, headerSize: 9,
     header: { fill: C.navy, color: C.white, bold: true },
-    colW: [1.738, 0.50, 1.245, 2.281, 0.236], // التأثير widened: 'متوسط' clipped at 0.406 (analyst finding)
+    colW: [1.832, 0.406, 1.245, 2.281, 0.235], // 20-07 reference deck's own gridCol widths
     rows: [chHeader, ...chCap.rows],
   };
 

@@ -16,8 +16,8 @@
 // as-of the sampled date from raw order timestamps). Both engine imports are GUARDED —
 // with the module absent the panel degrades to published-history rows only, the chart
 // is hidden, and it never crashes. Pure presentation; it mutates nothing it is handed.
-import { el } from './components.js?v=v2026-07-23.3';
-import { formatDateAr } from '../i18n/ar.js?v=v2026-07-23.3';
+import { el } from './components.js?v=v2026-07-23.4';
+import { formatDateAr } from '../i18n/ar.js?v=v2026-07-23.4';
 
 /* Relative imports carry ?v=… — the orchestrator re-stamps this token. */
 const V = '?v=v2026-07-22.13';
@@ -341,7 +341,11 @@ function labelIdxs(n) {
 function buildTrendChart(samples) {
   const n = samples.length;
   if (!n) return null;
-  const W = 600, H = 210, m = { top: 16, right: 36, bottom: 30, left: 38 };
+  // RTL chart: time runs right→left (xOf below), so the VALUE axis belongs on the
+  // right (leading) edge too — the tick labels used to sit on the trailing left edge,
+  // reading against the flow. `right` is now the label gutter, `left` the label-overflow
+  // gutter for the newest point.
+  const W = 600, H = 210, m = { top: 16, right: 38, bottom: 30, left: 36 };
   const pw = W - m.left - m.right, ph = H - m.top - m.bottom;
   const vals = [];
   for (const s of samples) for (const ser of CHART_SERIES) {
@@ -356,7 +360,7 @@ function buildTrendChart(samples) {
   for (let t = 0; t <= ticks; t++) {
     const v = (vmax * t) / ticks, y = yOf(v);
     body += `<line x1="${m.left}" y1="${y.toFixed(1)}" x2="${m.left + pw}" y2="${y.toFixed(1)}" style="stroke:var(--border,#E2E8F0)" stroke-width="1"/>`;
-    body += svgText(m.left - 6, y + 3, String(Math.round(v)), 9, { anchor: 'end' });
+    body += svgText(m.left + pw + 6, y + 3, String(Math.round(v)), 9, { anchor: 'start' });
   }
   body += `<line x1="${m.left}" y1="${(m.top + ph).toFixed(1)}" x2="${m.left + pw}" y2="${(m.top + ph).toFixed(1)}" style="stroke:var(--border-dark,#CBD5E1)" stroke-width="1"/>`;
   for (const i of labelIdxs(n)) body += svgText(xOf(i), m.top + ph + 16, shortDate(samples[i].date), 8.5, {});
@@ -445,8 +449,8 @@ export function buildHistoryPanel({ rows, tatTests, history, endIso, deltaMode, 
 
   (async () => {
     const [asofMod, wdMod] = await Promise.all([
-      tryImport('../engine/asof.js?v=v2026-07-23.3' + V),
-      tryImport('../engine/workday.js?v=v2026-07-23.3' + V),
+      tryImport('../engine/asof.js?v=v2026-07-23.4' + V),
+      tryImport('../engine/workday.js?v=v2026-07-23.4' + V),
     ]);
     const computeAsOf = asofMod && typeof asofMod.computeNumbersAsOf === 'function' ? asofMod.computeNumbersAsOf : null;
     const degraded = !computeAsOf;

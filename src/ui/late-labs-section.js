@@ -5,15 +5,15 @@
 // basis, empty-state, and the sanitized triggerDownload helper. Built from the
 // SAME dataset a generate run uses (order rows + TAT lookup + an as-of instant),
 // so it works in live-snapshot mode and on the upload screen too.
-import { el, toast } from './components.js?v=v2026-07-23.3';
-import { todayISO } from '../i18n/ar.js?v=v2026-07-23.3';
-import { buildLateLabWorkbooks } from '../export/late-labs.js?v=v2026-07-23.3';
-import { parseDateTime } from '../engine/workday.js?v=v2026-07-23.3';
+import { el, toast } from './components.js?v=v2026-07-23.4';
+import { todayISO } from '../i18n/ar.js?v=v2026-07-23.4';
+import { buildLateLabWorkbooks } from '../export/late-labs.js?v=v2026-07-23.4';
+import { parseDateTime } from '../engine/workday.js?v=v2026-07-23.4';
 // The English email template the team pastes when notifying a lab — VERBATIM
 // wording, now owned by export/eml-draft.js so the clipboard text and the .eml
 // draft body can never drift apart. buildLabEmailDraft only PREPARES a draft
 // file: nothing here sends mail — the user opens it in Outlook and presses Send.
-import { buildLabEmailDraft, labEmailText } from '../export/eml-draft.js?v=v2026-07-23.3';
+import { buildLabEmailDraft, labEmailText } from '../export/eml-draft.js?v=v2026-07-23.4';
 
 // Copy text to the clipboard with an execCommand fallback (keeps user activation
 // on browsers where navigator.clipboard is unavailable). Mirrors buildShareCard.
@@ -122,7 +122,12 @@ export async function buildLateLabsSection({
 
   const labRows = wbs.map((w) => el('div', { class: 'dl-link', style: 'flex-wrap:wrap;gap:8px' }, [
     el('div', { style: 'display:flex;flex-direction:column;gap:2px;min-width:0;flex:1' }, [
-      el('span', { dir: 'ltr', style: 'font-weight:600;overflow-wrap:anywhere', text: w.lab }),
+      // Lab names come from the CSV and are Arabic OR Latin ('NUPCO', 'مختبر …').
+      // A hard dir=ltr blockified this stretched flex item to text-align:left, so an
+      // ARABIC lab name sat left-aligned above its right-aligned counts line. Keep the
+      // inherited RTL alignment and isolate instead, so either script reads correctly
+      // and both lines share the same (right) edge.
+      el('span', { style: 'font-weight:600;overflow-wrap:anywhere;unicode-bidi:isolate', text: w.lab }),
       el('span', { class: 'small muted' }, [
         'فحص متأخر: ', el('span', { dir: 'ltr', text: String(w.late) }),
         ' • مستحق خلال ٢٤ ساعة: ', el('span', { dir: 'ltr', text: String(w.dueSoon) }),
@@ -144,7 +149,10 @@ export async function buildLateLabsSection({
         onClick: async () => { if (await copyText(labEmailText(w.lab))) toast('تم نسخ نص البريد', 'ok'); },
       }),
       el('button', {
-        class: 'btn btn--ghost', text: '✉ مسودة بريد (.eml)',
+        // U+2066…U+2069 (LRI…PDI): without the isolate the '.' — a neutral between an
+        // Arabic run and the Latin 'eml' — resolves to the RTL paragraph level and the
+        // group renders '(eml.)'. Inside the isolate it renders '(.eml)' as authored.
+        class: 'btn btn--ghost', text: '✉ مسودة بريد ⁦(.eml)⁩',
         title: 'ينزّل مسودة Outlook بالمرفق — لا يُرسل البريد، أنت من يضغط إرسال',
         onClick: () => { if (downloadDraft(w)) toast('تم تنزيل المسودة — افتحها في Outlook وأرسلها بنفسك', 'ok'); },
       }),

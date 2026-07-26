@@ -3,8 +3,8 @@
 // (1280x720 px = inches * 96). Skips internalOnly slides when variant === 'nupco'.
 // html2canvas-safe: absolute positioning, solid fills, borders, border-radius only.
 // No box-shadow, no CSS gap, no transforms. Charts are delegated to charts-svg.js (inline SVG).
-import { GEOM } from '../theme.js?v=v2026-07-23.3';
-import { renderChartSVG } from './charts-svg.js?v=v2026-07-23.3';
+import { GEOM } from '../theme.js?v=v2026-07-23.4';
+import { renderChartSVG } from './charts-svg.js?v=v2026-07-23.4';
 
 const PX = GEOM.pxPerIn;          // 96
 const PT2PX = 96 / 72;            // points -> px
@@ -40,10 +40,23 @@ function renderText(e) {
   st.justifyContent = e.valign === 'middle' ? 'center' : e.valign === 'bottom' ? 'flex-end' : 'flex-start';
   const inner = document.createElement('span');
   inner.className = 'sl-text-inner';
-  inner.style.textAlign = e.align || (e.rtl ? 'right' : 'left');
-  inner.style.direction = e.rtl ? 'rtl' : 'ltr';
+  const t = e.text != null ? String(e.text) : '';
+  // PARAGRAPH DIRECTION. The spec's `rtl` flag wins when present (it is what
+  // pptx-renderer feeds PowerPoint's rtlMode, so both renderers agree); when it is
+  // ABSENT the direction is derived from the content, because the slide root is pinned
+  // `direction: ltr` (see styles/slide.css) and an unflagged Arabic string would
+  // otherwise be laid out in an LTR paragraph — which pushes leading/trailing
+  // punctuation, bullets and '↳'-style prefixes to the wrong end of the line. Matches
+  // renderTable's per-cell rule below, and is a no-op on the current spec (every
+  // Arabic text element build-spec emits already carries rtl:true).
+  const rtl = e.rtl != null ? !!e.rtl : isArabic(t);
+  // The direction MUST live on the element that directly parents the text node:
+  // html2canvas (PDF path) reads the computed `direction` of the text container to set
+  // the canvas ctx.direction it draws each run with.
+  inner.style.direction = rtl ? 'rtl' : 'ltr';
+  inner.style.textAlign = e.align || (rtl ? 'right' : 'left');
   if (e.lineSpacing) inner.style.lineHeight = String(e.lineSpacing);
-  inner.textContent = e.text != null ? String(e.text) : '';
+  inner.textContent = t;
   d.appendChild(inner);
   return d;
 }
@@ -96,7 +109,14 @@ function renderTable(e) {
       cell.style.fontWeight = bold ? '700' : '400';
       cell.style.fontSize = `${isHead ? headerSize : bodySize}px`;
       cell.style.textAlign = c.align || 'center';
-      cell.style.direction = isArabic(t) ? 'rtl' : 'ltr';
+      // PER-CELL text direction only. The table's own `direction` stays LTR (pinned in
+      // styles/slide.css) because e.rtl on a table means "cells were already reversed
+      // into visual order by build-spec's rev()" — flipping the table would re-mirror
+      // the columns. Each cell is its own bidi paragraph, so pinning direction here
+      // (rtl for Arabic/mixed, ltr for numbers, dates and Latin lab names) is what
+      // decides where punctuation and Latin tokens land inside the cell. Mirrors
+      // pptx-renderer's `rtlMode: isArabic(t)`; an explicit c.rtl can override.
+      cell.style.direction = (c.rtl != null ? !!c.rtl : isArabic(t)) ? 'rtl' : 'ltr';
       cell.textContent = t;
       tr.appendChild(cell);
     });

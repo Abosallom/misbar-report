@@ -15,12 +15,12 @@
 //     NB: a resulted row is still labelled On Time / Late off asOf−Due, exactly
 //     as the workbook does (verified against every _cachedStatus).
 
-import { normTest, normFacility } from '../contracts.js?v=v2026-07-23.3';
+import { normTest, normFacility } from '../contracts.js?v=v2026-07-23.4';
 import {
   parseDateTime, toEpochDay, workday, dayDiff, calDaysBetween, monthKey,
-} from './workday.js?v=v2026-07-23.3';
-import { buildTatIndex, resolveTat, CHART_TEST_CATALOG } from './tat.js?v=v2026-07-23.3';
-import { dedupeRows } from './dedupe.js?v=v2026-07-23.3';
+} from './workday.js?v=v2026-07-23.4';
+import { buildTatIndex, resolveTat, CHART_TEST_CATALOG } from './tat.js?v=v2026-07-23.4';
+import { dedupeRows } from './dedupe.js?v=v2026-07-23.4';
 
 export const STATUS = Object.freeze({
   CANCELLED: 'Cancelled',

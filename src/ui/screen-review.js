@@ -1,10 +1,10 @@
 // ui/screen-review.js — review/edit report content with a live slide preview (Track E).
-import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-07-23.3';
-import { el, editableTable, textareaField, toast } from './components.js?v=v2026-07-23.3';
-import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-07-23.3';
-import { autoDraft } from '../model/drafts.js?v=v2026-07-23.3';
-import { buildHistoryPanel } from './history-table.js?v=v2026-07-23.3';
-import { normalizeDeltaMode } from '../model/delta-baseline.js?v=v2026-07-23.3';
+import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-07-23.4';
+import { el, editableTable, textareaField, toast } from './components.js?v=v2026-07-23.4';
+import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-07-23.4';
+import { autoDraft } from '../model/drafts.js?v=v2026-07-23.4';
+import { buildHistoryPanel } from './history-table.js?v=v2026-07-23.4';
+import { normalizeDeltaMode } from '../model/delta-baseline.js?v=v2026-07-23.4';
 
 /* small local module helpers (kept local to avoid cross-screen coupling) */
 async function tryImport(path) { try { return await import(path); } catch { return null; } }
@@ -255,7 +255,7 @@ export async function render(container, ctx) {
   // pickDeltaBaseline export degrades to the legacy engine deltas instead of throwing
   // (same URL as the static normalizeDeltaMode import → already-evaluated module, no
   // second fetch). Re-run per preview (below) so a report-date change re-picks.
-  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-07-23.3');
+  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-07-23.4');
   const pickBaseline = dbMod && dbMod.pickDeltaBaseline;
   applyDeltaBaseline(model, store, pickBaseline);
   const kpi = model.kpi;
@@ -325,9 +325,9 @@ export async function render(container, ctx) {
     const token = ++renderToken;
     model.reportDate = state.reportDate;
     applyDeltaBaseline(model, store, pickBaseline); // re-pick baseline for the current report date
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-07-23.3');
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-07-23.4');
     const buildSpec = pickFn(specMod, ['buildSpec', 'build', 'makeSpec', 'toSpec']);
-    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-07-23.3');
+    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-07-23.4');
     const renderFn = pickFn(rendMod, ['renderSpec', 'renderSlides', 'renderHtml', 'render']);
 
     if (!buildSpec || !renderFn) {
@@ -680,7 +680,7 @@ export async function render(container, ctx) {
     el('summary', { class: 'card__title', style: 'cursor:pointer', text: STR.review.labelsCardTitle }),
   ]);
   (async () => {
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-07-23.3');
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-07-23.4');
     const LABEL_NAMES = specMod && specMod.LABEL_NAMES;
     const DEFAULT_LABELS = (specMod && specMod.DEFAULT_LABELS) || {};
     if (!LABEL_NAMES || typeof LABEL_NAMES !== 'object') {
@@ -778,12 +778,18 @@ export async function render(container, ctx) {
     }
     // Sign glyphs match build-spec's fmtDelta exactly (ASCII '+' / U+2212 '−') so the
     // banner and the exec slide of the same run never read differently.
+    // RTL: the signed number is its OWN dir=ltr flex item. As part of one Arabic
+    // text run the leading '+' / '−' (bidi class ES → ON → resolved to the RTL
+    // paragraph level) rendered on the WRONG side of the digits ('12+' instead of
+    // '+12'). Same isolation the history panel's delta and the upload hero pill use.
     const chips = active.map((m) => {
       const n = Number(deltas[m.key]);
       return el('span', {
         style: DELTA_CHIP_BASE + ';' + (DELTA_CHIP_TONE[m.intent] || DELTA_CHIP_TONE.info),
-        text: `${n > 0 ? '+' + n : '−' + Math.abs(n)} ${m.label}`,
-      });
+      }, [
+        el('span', { dir: 'ltr', text: n > 0 ? '+' + n : '−' + Math.abs(n) }),
+        el('span', { text: m.label }),
+      ]);
     });
     return el('div', { class: 'card', style: 'padding:16px 18px;border-inline-start:4px solid var(--navy)' }, [
       el('div', { style: 'font-weight:800;font-size:1.05rem;color:var(--navy);margin-bottom:3px', text: 'ما الجديد منذ التقرير السابق' }),

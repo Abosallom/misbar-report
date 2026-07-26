@@ -2,15 +2,15 @@
 // The file-producing core now lives in automation/pipeline.js (produceReportFiles) so
 // an unattended run makes byte-identical files; this screen drives it and paints the
 // very same progress bar, file rows and live slide thumbnails it always has.
-import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-07-23.3';
-import { el, progressBar, toast } from './components.js?v=v2026-07-23.3';
-import { resetRunData } from '../state.js?v=v2026-07-23.3';
-import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-07-23.3';
-import { autoDraft } from '../model/drafts.js?v=v2026-07-23.3';
-import { buildLateLabsSection, triggerDownload } from './late-labs-section.js?v=v2026-07-23.3';
+import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-07-23.4';
+import { el, progressBar, toast } from './components.js?v=v2026-07-23.4';
+import { resetRunData } from '../state.js?v=v2026-07-23.4';
+import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-07-23.4';
+import { autoDraft } from '../model/drafts.js?v=v2026-07-23.4';
+import { buildLateLabsSection, triggerDownload } from './late-labs-section.js?v=v2026-07-23.4';
 import {
   applyDeltaBaseline, buildFileDefs, produceReportFiles, recordRunSnapshot,
-} from '../automation/pipeline.js?v=v2026-07-23.3';
+} from '../automation/pipeline.js?v=v2026-07-23.4';
 
 async function tryImport(path) { try { return await import(path); } catch { return null; } }
 const isMobile = () => /iP(hone|ad|od)|Android/i.test(navigator.userAgent);
@@ -158,7 +158,7 @@ export async function render(container, ctx) {
   // generated files' exec legend/chips match the review preview. recordSnapshot (below)
   // appends this run to snapshotHistory on success. Guarded → legacy engine deltas if the
   // module isn't present at runtime.
-  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-07-23.3');
+  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-07-23.4');
   const pickBaseline = dbMod && dbMod.pickDeltaBaseline;
   const recordSnapshot = dbMod && dbMod.recordSnapshot;
   applyDeltaBaseline(model, store, pickBaseline);
@@ -171,7 +171,10 @@ export async function render(container, ctx) {
     const status = el('span', { class: 'gen-file__status', text: '…' });
     const row = el('div', { class: 'gen-file', id: 'genrow-' + f.id }, [
       el('span', { class: 'gen-file__icon', text: f.icon }),
-      el('span', { class: 'gen-file__name', dir: 'ltr', text: f.name }), // dir=ltr: keeps '….pptx' after the digits in RTL context
+      // dir=ltr: keeps '….pptx' after the digits in RTL context. text-align:right keeps
+      // the LTR-ordered name at the row's RTL START edge (it is a flex:1 stretched box,
+      // so ltr alone left-aligned it away from its icon and onto the status text).
+      el('span', { class: 'gen-file__name', dir: 'ltr', style: 'text-align:right', text: f.name }),
       status,
     ]);
     rowEls[f.id] = { row, status };

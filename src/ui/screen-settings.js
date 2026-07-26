@@ -8,8 +8,8 @@
 // mirror of the automation panel), live source (Grafana + cached-tracker), and
 // backup (export/import).
 
-import { SNAPSHOT_SEED, REPORT_OPTIONS_SEED, AUTOMATION_SEED } from '../seeds/defaults.js?v=v2026-07-23.3';
-import { normalizeDeltaMode } from '../model/delta-baseline.js?v=v2026-07-23.3';
+import { SNAPSHOT_SEED, REPORT_OPTIONS_SEED, AUTOMATION_SEED } from '../seeds/defaults.js?v=v2026-07-23.4';
+import { normalizeDeltaMode } from '../model/delta-baseline.js?v=v2026-07-23.4';
 
 const TABS = [
   { id: 'tat', label: 'مدة الفحوصات' },
@@ -36,7 +36,9 @@ const REPORT_CARD_FIELDS = [
   { key: 'awaitingDispatch', label: 'في انتظار الشحن' },
   { key: 'awaitingResults', label: 'في انتظار النتائج' },
   { key: 'completed', label: 'نتائج مكتملة' },
-  { key: 'rejected', label: 'النتائج المرفوضة' },
+  // 'rejected' is intentionally NOT listed: the exec KPI row is the reference deck's six
+  // cards, so this card no longer exists and its toggle would be a dead control. Rejected
+  // still appears in the report — as the مرفوضة column on the compliance slide.
   { key: 'lateNoResult', label: 'الطلبات المتأخرة' },
   { key: 'shippedNotReceived', label: 'شُحنت ولم تُستلم' },
   // OPT-IN key (build-spec OPT_IN_CARDS) — not an exec KPI card: it gates the monthly

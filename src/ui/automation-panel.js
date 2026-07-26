@@ -14,10 +14,10 @@
 // (window.__misbarAutoRun / misbar:autorun / misbar:autodone — AUTOMATION.md §4)
 // so an unattended run paints its progress here and its produced files get
 // download rows. It never starts a second run on top of one it can see.
-import { el, toast, progressBar } from './components.js?v=v2026-07-23.3';
-import { triggerDownload } from './late-labs-section.js?v=v2026-07-23.3';
+import { el, toast, progressBar } from './components.js?v=v2026-07-23.4';
+import { triggerDownload } from './late-labs-section.js?v=v2026-07-23.4';
 
-const PIPELINE_URL = '../automation/pipeline.js?v=v2026-07-23.3';
+const PIPELINE_URL = '../automation/pipeline.js?v=v2026-07-23.4';
 const SHEET_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 /* ---- the ?auto= run bus published by main.js (AUTOMATION.md §4) ---------- */
@@ -83,7 +83,10 @@ const OPTION_ROWS = [
   { key: 'autoGenerate', label: 'توليد التقارير', desc: 'توليد التقارير الأربعة تلقائياً بعد جاهزية البيانات' },
   { key: 'autoDownload', label: 'تنزيل الملفات', desc: 'تنزيل الملفات تلقائياً بعد التوليد' },
   { key: 'autoLabFiles', label: 'ملفات المختبرات', desc: 'تجهيز ملفات المختبرات المتأخرة (Excel) تلقائياً' },
-  { key: 'autoEmailDrafts', label: 'مسودات البريد', desc: 'إنشاء مسودات بريد (.eml) لكل مختبر — لا يتم الإرسال تلقائياً أبداً' },
+  // '(.eml)' is wrapped in U+2066…U+2069 (LRI…PDI): the '.' is a neutral between an
+  // Arabic run and the Latin 'eml', so at the RTL paragraph level it lands AFTER the
+  // letters and the group renders '(eml.)'. The isolate pins it to '(.eml)'.
+  { key: 'autoEmailDrafts', label: 'مسودات البريد', desc: 'إنشاء مسودات بريد ⁦(.eml)⁩ لكل مختبر — لا يتم الإرسال تلقائياً أبداً' },
   // NOTE: pipeline.js acceptSuggestedTats() applies EVERY suggestion with a
   // value — it does not read `confidence` — so the label must not promise a
   // high-confidence-only filter.
@@ -296,7 +299,10 @@ export function buildAutomationPanel({ store, state, ctx } = {}) {
 
   function fileRow(name, blob) {
     return el('div', { class: 'dl-link', style: 'flex-wrap:wrap;gap:8px' }, [
-      el('span', { dir: 'ltr', style: 'font-weight:600;overflow-wrap:anywhere;flex:1;min-width:0', text: name }),
+      // dir=ltr keeps '….xlsx' / '….eml' glued after the Arabic+digits stem; text-align
+      // :right keeps that LTR-ordered name at the row's RTL start edge (flex:1 stretches
+      // the box, and ltr alone left-aligned it against the buttons).
+      el('span', { dir: 'ltr', style: 'font-weight:600;overflow-wrap:anywhere;flex:1;min-width:0;text-align:right', text: name }),
       el('button', {
         class: 'btn btn--ghost btn--sm', text: '⬇ تنزيل',
         onClick: () => triggerDownload(blob, name),

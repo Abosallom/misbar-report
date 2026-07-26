@@ -151,7 +151,11 @@ input, select, textarea { font-family: inherit; font-size: 1rem; }
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  padding: 6px 12px 6px 8px;
+  /* Logical padding: the marker is the FIRST child (right side in RTL) and wants
+     the tight 8px; the label edge wants 12px. A physical 4-value shorthand put
+     12px on the marker side in this dir=rtl document. */
+  padding-block: 6px;
+  padding-inline: 8px 12px;
   border-radius: 999px;
   border: 1px solid transparent;
   background: transparent;
@@ -550,7 +554,7 @@ input, select, textarea { font-family: inherit; font-size: 1rem; }
 @media (max-width: 600px) {
   .journey-label--full { display: none; }
   .journey-label--short { display: inline; }
-  .journey-step { font-size: .82rem; font-weight: 600; padding: 5px 9px 5px 6px; gap: 5px; }
+  .journey-step { font-size: .82rem; font-weight: 600; padding-block: 5px; padding-inline: 6px 9px; gap: 5px; }
   .journey-marker { width: 23px; height: 23px; font-size: .76rem; }
   .journey-wrap { padding: 10px 12px; }
   .journey { gap: 5px; }
