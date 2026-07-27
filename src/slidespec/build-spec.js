@@ -17,7 +17,7 @@
 //   m.reportOptions.kpiCards[key] toggles the 7 exec KPI cards (row geometry repacks)
 //                                 + the OPT-IN 'turnaround' block on the monthly slide
 //   m.overrides[key]              per-run manual NUMBER overrides (suppresses that delta chip)
-import { COLORS as C, GEOM } from '../theme.js?v=v2026-07-23.5';
+import { COLORS as C, GEOM } from '../theme.js?v=v2026-07-23.6';
 
 // OPT-IN kpiCards KEYS. reportOptions.kpiCards normally reads "on unless === false"
 // (see buildExec's cardDefs filter). The keys in this set INVERT that: they render only
@@ -124,6 +124,7 @@ export const DEFAULT_LABELS = {
   compHash: '#',
   compLab: 'المختبر',
   compTotal: 'مجموع الطلبات',
+  compCompleted: 'فحوصات مكتملة',
   compPipeline: 'قبل الاستلام',
   compAwaiting: 'طلبات مستلمة بانتظار نتيجة',
   compLate: 'الطلبات المتأخرة',
@@ -215,6 +216,7 @@ export const LABEL_NAMES = {
   compHash: 'عمود الالتزام: الرقم',
   compLab: 'عمود الالتزام: المختبر',
   compTotal: 'عمود الالتزام: مجموع الطلبات',
+  compCompleted: 'عمود الالتزام: فحوصات مكتملة',
   compPipeline: 'عمود الالتزام: قبل الاستلام (غير مستخدم حالياً)',
   compAwaiting: 'عمود الالتزام: طلبات مستلمة بانتظار نتيجة',
   compLate: 'عمود الالتزام: الطلبات المتأخرة',
@@ -753,13 +755,21 @@ function buildCompliance(m) {
   // in #1E293B, non-bold — including late=80, 100.0% and 55.6%, i.e. values the
   // red/bold rules would have flagged. Restored to that (user decision 2026-07-26).
   const header = rev([
-    L('compHash'), L('compLab'), L('compTotal'), L('compAwaiting'),
+    L('compHash'), L('compLab'), L('compTotal'), L('compCompleted'), L('compAwaiting'),
     L('compRejected'), L('compLate'), L('compLatePct'),
   ]);
+  // Completed per lab = engine byLab `resulted` — non-rejected rows that HAVE a result
+  // date (= onTime + resultedLate, see engine.js buildByLab). It is the same definition
+  // as the exec 'فحوصات مكتملة' card, so the two surfaces cannot disagree. Rendered
+  // green+bold when > 0, mirroring how the deck treats a good number elsewhere.
+  const completedOf = (r) => (r.resulted != null ? r.resulted : (r.onTime || 0) + (r.resultedLate || 0));
+  const completedTot = lab.reduce((s, r) => s + completedOf(r), 0);
+  const completedCell = (n) => (n > 0 ? { text: String(n), color: C.green, bold: true } : String(n || 0));
   const labRows = lab.map((r, i) => rev([
     String(i + 1),
     { text: r.lab, align: 'right' },
     String(r.total),
+    completedCell(completedOf(r)),
     String(r.awaitingResult),
     String(r.rejected || 0),
     String(r.late),
@@ -770,6 +780,7 @@ function buildCompliance(m) {
     { text: '', bold: true, fill: C.bgLighter },
     { text: 'المجموع', bold: true, fill: C.bgLighter, align: 'right' },
     { text: String(totalTot), bold: true, fill: C.bgLighter },
+    { text: String(completedTot), bold: true, fill: C.bgLighter, ...(completedTot > 0 ? { color: C.green } : {}) },
     { text: String(awaitTot), bold: true, fill: C.bgLighter },
     { text: String(rejTot), bold: true, fill: C.bgLighter },
     { text: String(lateTot), bold: true, fill: C.bgLighter },
@@ -791,7 +802,17 @@ function buildCompliance(m) {
   //   مجموع الطلبات 1.667 (0.938) · بانتظار نتيجة 2.083 (1.699) · مرفوضة 0.898 (0.519)
   //   الطلبات المتأخرة 1.596 (1.004) · نسبة الطلبات المتأخرة 2.153 (1.351)
   // Sum = 11.667 = the table width, unchanged.
-  const COL_W = [0.556, 2.714, 1.667, 2.083, 0.898, 1.596, 2.153];
+  // EIGHT columns since 'فحوصات مكتملة' was added (user request 2026-07-27). The
+  // reference's seven widths are re-budgeted rather than squeezed evenly: every
+  // header must still fit on ONE line at 10pt bold, and a column offers only
+  // colW−0.2in of text width in PPTX (pptxgenjs cell margins). Widths are taken
+  // from the longest header/content each column must hold, and still total 11.667.
+  // Measured, not guessed: each header at 10pt bold and each column's longest real
+  // content at 10pt regular in Cairo, against colW−0.2in of usable width (pptxgenjs
+  // cell margins). Worst case for المختبر is the longest live lab name
+  // ('Genomics innovations Limited Company' = 2.331in) — an earlier 2.500 box
+  // overflowed it by 0.031in. Tightest surviving margin is +0.069in.
+  const COL_W = [0.450, 2.600, 1.300, 1.450, 2.050, 0.850, 1.350, 1.617];
   // POSITION AND ROW HEIGHT ARE THE 20-07 REFERENCE DECK's (user decision 2026-07-26):
   // frame y = 1959540 EMU = 2.143in, every a:tr h = 251460 EMU = 0.275in, so 9 rows span
   // 2.143 → 4.618. An earlier change pinned the table at y 1.194 and GREW rowH to 0.40 to

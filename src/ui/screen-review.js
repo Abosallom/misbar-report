@@ -1,10 +1,10 @@
 // ui/screen-review.js — review/edit report content with a live slide preview (Track E).
-import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-07-23.5';
-import { el, editableTable, textareaField, toast } from './components.js?v=v2026-07-23.5';
-import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-07-23.5';
-import { autoDraft } from '../model/drafts.js?v=v2026-07-23.5';
-import { buildHistoryPanel } from './history-table.js?v=v2026-07-23.5';
-import { normalizeDeltaMode } from '../model/delta-baseline.js?v=v2026-07-23.5';
+import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-07-23.6';
+import { el, editableTable, textareaField, toast } from './components.js?v=v2026-07-23.6';
+import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-07-23.6';
+import { autoDraft } from '../model/drafts.js?v=v2026-07-23.6';
+import { buildHistoryPanel } from './history-table.js?v=v2026-07-23.6';
+import { normalizeDeltaMode } from '../model/delta-baseline.js?v=v2026-07-23.6';
 
 /* small local module helpers (kept local to avoid cross-screen coupling) */
 async function tryImport(path) { try { return await import(path); } catch { return null; } }
@@ -255,7 +255,7 @@ export async function render(container, ctx) {
   // pickDeltaBaseline export degrades to the legacy engine deltas instead of throwing
   // (same URL as the static normalizeDeltaMode import → already-evaluated module, no
   // second fetch). Re-run per preview (below) so a report-date change re-picks.
-  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-07-23.5');
+  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-07-23.6');
   const pickBaseline = dbMod && dbMod.pickDeltaBaseline;
   applyDeltaBaseline(model, store, pickBaseline);
   const kpi = model.kpi;
@@ -325,9 +325,9 @@ export async function render(container, ctx) {
     const token = ++renderToken;
     model.reportDate = state.reportDate;
     applyDeltaBaseline(model, store, pickBaseline); // re-pick baseline for the current report date
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-07-23.5');
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-07-23.6');
     const buildSpec = pickFn(specMod, ['buildSpec', 'build', 'makeSpec', 'toSpec']);
-    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-07-23.5');
+    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-07-23.6');
     const renderFn = pickFn(rendMod, ['renderSpec', 'renderSlides', 'renderHtml', 'render']);
 
     if (!buildSpec || !renderFn) {
@@ -680,7 +680,7 @@ export async function render(container, ctx) {
     el('summary', { class: 'card__title', style: 'cursor:pointer', text: STR.review.labelsCardTitle }),
   ]);
   (async () => {
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-07-23.5');
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-07-23.6');
     const LABEL_NAMES = specMod && specMod.LABEL_NAMES;
     const DEFAULT_LABELS = (specMod && specMod.DEFAULT_LABELS) || {};
     if (!LABEL_NAMES || typeof LABEL_NAMES !== 'object') {

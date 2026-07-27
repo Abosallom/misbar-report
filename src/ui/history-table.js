@@ -16,8 +16,8 @@
 // as-of the sampled date from raw order timestamps). Both engine imports are GUARDED —
 // with the module absent the panel degrades to published-history rows only, the chart
 // is hidden, and it never crashes. Pure presentation; it mutates nothing it is handed.
-import { el } from './components.js?v=v2026-07-23.5';
-import { formatDateAr } from '../i18n/ar.js?v=v2026-07-23.5';
+import { el } from './components.js?v=v2026-07-23.6';
+import { formatDateAr } from '../i18n/ar.js?v=v2026-07-23.6';
 
 /* Relative imports carry ?v=… — the orchestrator re-stamps this token. */
 const V = '?v=v2026-07-22.13';
@@ -449,8 +449,8 @@ export function buildHistoryPanel({ rows, tatTests, history, endIso, deltaMode, 
 
   (async () => {
     const [asofMod, wdMod] = await Promise.all([
-      tryImport('../engine/asof.js?v=v2026-07-23.5' + V),
-      tryImport('../engine/workday.js?v=v2026-07-23.5' + V),
+      tryImport('../engine/asof.js?v=v2026-07-23.6' + V),
+      tryImport('../engine/workday.js?v=v2026-07-23.6' + V),
     ]);
     const computeAsOf = asofMod && typeof asofMod.computeNumbersAsOf === 'function' ? asofMod.computeNumbersAsOf : null;
     const degraded = !computeAsOf;

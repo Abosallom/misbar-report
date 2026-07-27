@@ -11,14 +11,14 @@
 // throws on write; on failure we fall back to an in-memory doc and expose
 // isEphemeral() so the UI can warn the user their edits will not persist.
 
-import { SETTINGS_KEY } from './contracts.js?v=v2026-07-23.5';
-import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-07-23.5';
-import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-07-23.5';
+import { SETTINGS_KEY } from './contracts.js?v=v2026-07-23.6';
+import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-07-23.6';
+import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-07-23.6';
 import {
   HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED, GRAFANA_SEED, REPORT_OPTIONS_SEED,
   SNAPSHOT_HISTORY_SEED, AUTOMATION_SEED,
-} from './seeds/defaults.js?v=v2026-07-23.5';
-import { DELTA_MODES } from './model/delta-baseline.js?v=v2026-07-23.5';
+} from './seeds/defaults.js?v=v2026-07-23.6';
+import { DELTA_MODES } from './model/delta-baseline.js?v=v2026-07-23.6';
 
 export const SCHEMA_VERSION = 5;
 
