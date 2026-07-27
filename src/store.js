@@ -11,14 +11,14 @@
 // throws on write; on failure we fall back to an in-memory doc and expose
 // isEphemeral() so the UI can warn the user their edits will not persist.
 
-import { SETTINGS_KEY } from './contracts.js?v=v2026-07-23.4';
-import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-07-23.4';
-import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-07-23.4';
+import { SETTINGS_KEY } from './contracts.js?v=v2026-07-23.5';
+import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-07-23.5';
+import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-07-23.5';
 import {
   HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED, GRAFANA_SEED, REPORT_OPTIONS_SEED,
   SNAPSHOT_HISTORY_SEED, AUTOMATION_SEED,
-} from './seeds/defaults.js?v=v2026-07-23.4';
-import { DELTA_MODES } from './model/delta-baseline.js?v=v2026-07-23.4';
+} from './seeds/defaults.js?v=v2026-07-23.5';
+import { DELTA_MODES } from './model/delta-baseline.js?v=v2026-07-23.5';
 
 export const SCHEMA_VERSION = 5;
 
@@ -433,11 +433,25 @@ export function updateCachedTracker(model) {
 }
 
 /**
- * Serialize the whole config doc for download.
+ * Serialize the config doc for download — MINUS the two access secrets.
+ * SECURITY: the backup file lives in cleartext on disk/email/USB, so the
+ * secrets the sign-in gate injects (grafana.accessToken → live source,
+ * grafana.dataKey → snapshot decryption) are REDACTED here; otherwise a
+ * leaked "backup" would bypass the accounts gate entirely. The keys are
+ * DELETED, not blanked: pickImportKeys() only picks string values, so a
+ * re-import of a redacted backup leaves the device's existing secrets
+ * untouched (deepMergeImportWins only overwrites keys present in the
+ * import) — and signing in restores them on a fresh device.
+ * Works on a clone: loadSettings() may return the live in-memory doc
+ * (ephemeral mode), which must not lose its secrets.
  * @returns {{filename:string, blob:Blob}}
  */
 export function exportSettings() {
-  const doc = loadSettings();
+  const doc = clone(loadSettings());
+  if (isPlainObject(doc.grafana)) {
+    delete doc.grafana.accessToken;
+    delete doc.grafana.dataKey;
+  }
   const d = new Date();
   const yyyy = d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, '0');

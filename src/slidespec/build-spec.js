@@ -17,7 +17,7 @@
 //   m.reportOptions.kpiCards[key] toggles the 7 exec KPI cards (row geometry repacks)
 //                                 + the OPT-IN 'turnaround' block on the monthly slide
 //   m.overrides[key]              per-run manual NUMBER overrides (suppresses that delta chip)
-import { COLORS as C, GEOM } from '../theme.js?v=v2026-07-23.4';
+import { COLORS as C, GEOM } from '../theme.js?v=v2026-07-23.5';
 
 // OPT-IN kpiCards KEYS. reportOptions.kpiCards normally reads "on unless === false"
 // (see buildExec's cardDefs filter). The keys in this set INVERT that: they render only

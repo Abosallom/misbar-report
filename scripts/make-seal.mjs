@@ -9,12 +9,23 @@
 // The passphrase never lands on disk; only the sealed base64 blob is written.
 // Crypto parameters (PBKDF2 iterations, salt/iv sizes, cipher) are shared with
 // the browser lock screen by importing seal()+SEAL from src/ui/lock.js.
+//
+// STRENGTH IS ENFORCED HERE, and it is not optional. data/access.seal is PUBLIC and
+// unseals the SAME payload as every per-user record, so its passphrase silently caps
+// the strength of the whole scheme: an offline attacker ignores the hardened per-user
+// rows and grinds this single file instead. A measured benchmark on a laptop reached
+// ~45 guesses/sec/core against these parameters — fine against a 20-char random
+// secret, useless against a memorable one. So this tool applies the SAME policy the
+// account tool applies to user passwords, and refuses anything weaker. Treat the
+// phrase as break-glass recovery (password manager), not as a day-to-day login.
+//   ALLOW_WEAK_PASSPHRASE=1 overrides, for local throwaway seals only.
 
 import { writeFile, readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
 import { seal, SEAL } from '../src/ui/lock.js';
+import { passwordProblems, generatePassword } from './make-user.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
@@ -40,6 +51,17 @@ async function main() {
 
   const passphrase = process.env.PASSPHRASE;
   if (!passphrase) fail('عيّن متغير البيئة PASSPHRASE.');
+
+  // Same floor as user passwords — see the header for why this file is the weak link.
+  const problems = passwordProblems(passphrase);
+  if (problems.length && process.env.ALLOW_WEAK_PASSPHRASE !== '1') {
+    fail(
+      `عبارة الوصول ضعيفة (${problems.join('، ')}).\n`
+      + '  data/access.seal ملف عام: عبارة ضعيفة تُسقط حماية جميع الحسابات مهما كانت قوية.\n'
+      + `  اقتراح عبارة قوية: ${generatePassword()}\n`
+      + '  (للاختبار المحلي فقط: ALLOW_WEAK_PASSPHRASE=1)',
+    );
+  }
 
   let payloadText;
   if (args.payloadFile) {

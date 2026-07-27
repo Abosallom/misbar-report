@@ -2,15 +2,15 @@
 // The file-producing core now lives in automation/pipeline.js (produceReportFiles) so
 // an unattended run makes byte-identical files; this screen drives it and paints the
 // very same progress bar, file rows and live slide thumbnails it always has.
-import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-07-23.4';
-import { el, progressBar, toast } from './components.js?v=v2026-07-23.4';
-import { resetRunData } from '../state.js?v=v2026-07-23.4';
-import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-07-23.4';
-import { autoDraft } from '../model/drafts.js?v=v2026-07-23.4';
-import { buildLateLabsSection, triggerDownload } from './late-labs-section.js?v=v2026-07-23.4';
+import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-07-23.5';
+import { el, progressBar, toast } from './components.js?v=v2026-07-23.5';
+import { resetRunData } from '../state.js?v=v2026-07-23.5';
+import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-07-23.5';
+import { autoDraft } from '../model/drafts.js?v=v2026-07-23.5';
+import { buildLateLabsSection, triggerDownload } from './late-labs-section.js?v=v2026-07-23.5';
 import {
   applyDeltaBaseline, buildFileDefs, produceReportFiles, recordRunSnapshot,
-} from '../automation/pipeline.js?v=v2026-07-23.4';
+} from '../automation/pipeline.js?v=v2026-07-23.5';
 
 async function tryImport(path) { try { return await import(path); } catch { return null; } }
 const isMobile = () => /iP(hone|ad|od)|Android/i.test(navigator.userAgent);
@@ -158,7 +158,7 @@ export async function render(container, ctx) {
   // generated files' exec legend/chips match the review preview. recordSnapshot (below)
   // appends this run to snapshotHistory on success. Guarded → legacy engine deltas if the
   // module isn't present at runtime.
-  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-07-23.4');
+  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-07-23.5');
   const pickBaseline = dbMod && dbMod.pickDeltaBaseline;
   const recordSnapshot = dbMod && dbMod.recordSnapshot;
   applyDeltaBaseline(model, store, pickBaseline);

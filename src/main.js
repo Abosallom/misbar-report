@@ -1,12 +1,12 @@
 // main.js — boot, settings store, top app bar, and screen router (Track E).
-import { state } from './state.js?v=v2026-07-23.4';
-import { STR } from './i18n/ar.js?v=v2026-07-23.4';
-import { APP_VERSION } from './version.js?v=v2026-07-23.4';
-import { el, toast } from './ui/components.js?v=v2026-07-23.4';
-import { SETTINGS_KEY } from './contracts.js?v=v2026-07-23.4';
-import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-07-23.4';
-import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-07-23.4';
-import { HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED, GRAFANA_SEED } from './seeds/defaults.js?v=v2026-07-23.4';
+import { state } from './state.js?v=v2026-07-23.5';
+import { STR } from './i18n/ar.js?v=v2026-07-23.5';
+import { APP_VERSION } from './version.js?v=v2026-07-23.5';
+import { el, toast } from './ui/components.js?v=v2026-07-23.5';
+import { SETTINGS_KEY } from './contracts.js?v=v2026-07-23.5';
+import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-07-23.5';
+import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-07-23.5';
+import { HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED, GRAFANA_SEED } from './seeds/defaults.js?v=v2026-07-23.5';
 
 /* ------------------------------------------------------------------ *
  * Settings store — prefers Track C's src/store.js, falls back to a
@@ -162,7 +162,7 @@ async function resolveStore() {
   const local = createLocalStore(persistent);
   let backend = null;
   try {
-    const mod = await import('./store.js?v=v2026-07-23.4');
+    const mod = await import('./store.js?v=v2026-07-23.5');
     if (mod && typeof mod.loadSettings === 'function' && typeof mod.saveSettings === 'function') {
       const s = mod.loadSettings();
       if (s && s.tatLookup) backend = mod;
@@ -176,10 +176,10 @@ async function resolveStore() {
  * ------------------------------------------------------------------ */
 
 const SCREEN_MODULES = {
-  upload: './ui/screen-upload.js?v=v2026-07-23.4',
-  review: './ui/screen-review.js?v=v2026-07-23.4',
-  generate: './ui/screen-generate.js?v=v2026-07-23.4',
-  settings: './ui/screen-settings.js?v=v2026-07-23.4', // Track C
+  upload: './ui/screen-upload.js?v=v2026-07-23.5',
+  review: './ui/screen-review.js?v=v2026-07-23.5',
+  generate: './ui/screen-generate.js?v=v2026-07-23.5',
+  settings: './ui/screen-settings.js?v=v2026-07-23.5', // Track C
 };
 
 let appEl = null;
@@ -335,19 +335,66 @@ function buildShell(store) {
   navSettings = el('button', { class: 'navbtn', text: STR.nav.settings, onClick: () => navigate('settings') });
   const navTheme = el('button', { class: 'navbtn navbtn--theme', onClick: () => toggleTheme(navTheme) });
   syncThemeButton(navTheme);
+  // قفل is now sign-out as well as re-lock: lockMod.lock() clears the unlocked
+  // marker AND the remembered username, then blanks the sealed grafana secrets.
   const navLock = (lockMod && typeof lockMod.lock === 'function')
     ? el('button', {
-      class: 'navbtn', text: 'قفل 🔒', title: 'قفل البوابة على هذا الجهاز',
+      class: 'navbtn', text: 'قفل 🔒', title: 'تسجيل الخروج وقفل البوابة على هذا الجهاز',
       onClick: () => { try { lockMod.lock(store); } finally { location.reload(); } },
     })
     : null;
 
-  const versionChip = el('span', { class: 'appbar__version', title: 'إصدار التطبيق', dir: 'ltr', text: APP_VERSION });
+  // Who is signed in, shown beside قفل. Display name only — never a password,
+  // and it carries no authority (lock.js's isUnlocked is what gates the app).
+  // A shared-passphrase sign-in identifies nobody, so it renders no chip.
+  // Styled with the existing version-chip pill so it needs no new CSS; dir=ltr
+  // because usernames are latin. textContent-only, so the name cannot inject.
+  //
+  // The app bar is already at its minimum width on a phone (the brand title is
+  // fully clipped there), so the chip must not add a fixed 90px: under 560px it
+  // collapses to the 👤 glyph alone, with the name on title/aria-label. It also
+  // stays shrinkable and capped so a long username can never widen the bar.
+  const signedInAs = (lockMod && typeof lockMod.currentUser === 'function') ? lockMod.currentUser() : null;
+  let userChip = null;
+  if (signedInAs) {
+    const label = 'المستخدم الحالي: ' + signedInAs;
+    userChip = el('span', {
+      class: 'appbar__version appbar__user', dir: 'ltr',
+      title: label, 'aria-label': label, text: '👤 ' + signedInAs,
+    });
+    Object.assign(userChip.style, {
+      flex: '0 1 auto', minWidth: '0', maxWidth: 'min(22ch, 30vw)',
+      overflow: 'hidden', textOverflow: 'ellipsis',
+    });
+    const mq = window.matchMedia ? window.matchMedia('(max-width: 560px)') : null;
+    const syncUserChip = () => {
+      const compact = mq ? mq.matches : (document.documentElement.clientWidth <= 560);
+      const next = compact ? '👤' : '👤 ' + signedInAs;
+      if (userChip.textContent !== next) userChip.textContent = next;
+    };
+    syncUserChip();
+    // Both hooks on purpose: `change` is the right event, but it does not fire
+    // under every viewport-override path (device emulation, some orientation
+    // changes), and a stale chip would show the wrong width forever.
+    if (mq && typeof mq.addEventListener === 'function') mq.addEventListener('change', syncUserChip);
+    window.addEventListener('resize', syncUserChip);
+  }
+
+  // The version pill is the one app-bar item with nothing to lose from being
+  // clipped, so it is the one made shrinkable: on a phone it now absorbs the
+  // overflow (ellipsised, full string still on the tooltip) instead of pushing
+  // the whole bar — and the page — into a horizontal scroll.
+  const versionChip = el('span', {
+    class: 'appbar__version', title: 'إصدار التطبيق: ' + APP_VERSION, dir: 'ltr', text: APP_VERSION,
+  });
+  Object.assign(versionChip.style, {
+    flex: '0 1 auto', minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis',
+  });
 
   const bar = el('header', { class: 'appbar' }, [
     el('div', { class: 'appbar__brand' }, [logo, el('div', { class: 'appbar__title', text: STR.appTitle })]),
     el('div', { class: 'appbar__spacer' }),
-    el('nav', { class: 'appbar__nav' }, [navHome, navSettings, navTheme, navLock]),
+    el('nav', { class: 'appbar__nav' }, [navHome, navSettings, navTheme, userChip, navLock]),
     versionChip,
   ]);
 
@@ -430,7 +477,7 @@ async function downloadAutoExtras(result) {
   if (!items.length) return 0;
   let mod = null;
   try {
-    mod = await import('./ui/late-labs-section.js?v=v2026-07-23.4');
+    mod = await import('./ui/late-labs-section.js?v=v2026-07-23.5');
   } catch (e) {
     console.warn('[auto] download helper unavailable — lab files/drafts not saved', e);
     return 0;
@@ -569,7 +616,7 @@ async function startAutomationRun(mode, store) {
 
   let mod = null;
   try {
-    mod = await import('./automation/pipeline.js?v=v2026-07-23.4');
+    mod = await import('./automation/pipeline.js?v=v2026-07-23.5');
   } catch (e) {
     console.warn('[auto] pipeline module unavailable — trigger ignored', e);
     release();
@@ -673,29 +720,64 @@ async function startAutomationRun(mode, store) {
  * ------------------------------------------------------------------ */
 let lockMod = null;
 
+/* Fatal-boot painter — shared by boot().catch and the post-unlock start so a
+ * failure after sign-in shows the same error card instead of a frozen gate. */
+function paintFatal(e) {
+  console.error('[boot] fatal', e);
+  document.body.appendChild(el('div', { class: 'card', style: 'margin:16px' }, [
+    el('div', { class: 'card__title', text: STR.common.error }),
+    el('p', { text: String(e && e.message || e) }),
+  ]));
+}
+
 async function boot() {
   const store = await resolveStore();
 
-  // Access gate — when the lock module + deployed seal exist, EVERYTHING waits
-  // behind the passphrase screen. Devices remember a successful unlock; the
-  // قفل nav button re-locks (clears the marker + sealed secrets).
+  // Access gate — when the lock module is present, EVERYTHING waits behind the
+  // sign-in screen (per-user account, or the legacy shared passphrase in the
+  // password field alone). Devices remember a successful sign-in plus the
+  // display username; the قفل nav button signs out and re-locks.
+  //
+  // onUnlocked starts the app DIRECTLY with this same store instance — never
+  // location.reload(). When the browser blocks localStorage (private mode,
+  // "block all cookies", restrictive webviews) the store is in-memory only and
+  // applyUnlock's marker write is silently swallowed, so a reload would discard
+  // the just-unsealed config, land back on an empty gate, and loop a user with
+  // CORRECT credentials forever. Continuing in-place works for persistent and
+  // ephemeral storage alike (and drops the reload flash for everyone); the
+  // ephemeral case then reaches buildShell/startApp's storage warning, which
+  // tells the user the sign-in cannot be remembered on this browser.
   try {
-    lockMod = await import('./ui/lock.js?v=v2026-07-23.4');
+    lockMod = await import('./ui/lock.js?v=v2026-07-23.5');
   } catch { lockMod = null; /* lock module absent — open boot (dev) */ }
   if (lockMod && typeof lockMod.isUnlocked === 'function' && !lockMod.isUnlocked(store)) {
     const root = document.getElementById('app-shell') || document.body;
     root.innerHTML = '';
-    lockMod.renderLock(root, { store, onUnlocked: () => location.reload() });
+    lockMod.renderLock(root, {
+      store,
+      onUnlocked: () => {
+        // Thrown errors must not vanish into lock.js's submit handler as an
+        // unhandled rejection — paint the same fatal card boot() would.
+        try { startApp(store); } catch (e) { paintFatal(e); }
+      },
+    });
     return;
   }
 
+  startApp(store);
+}
+
+/* Everything after the access gate: state wiring, app shell, routing, and the
+ * ?auto= trigger. Extracted from boot() so a successful sign-in can start the
+ * app in-place with the live store instead of reloading (see the gate note). */
+function startApp(store) {
   state.settings = store.settings;
 
   // TAT-lookup Excel merge hook consumed by the settings screen (Track C).
   state.onTatFileMerge = async (file) => {
     const [{ getXLSX }, { parseTatLookupXlsx }] = await Promise.all([
-      import('./vendor-loader.js?v=v2026-07-23.4'),
-      import('./ingest/xlsx.js?v=v2026-07-23.4'),
+      import('./vendor-loader.js?v=v2026-07-23.5'),
+      import('./ingest/xlsx.js?v=v2026-07-23.5'),
     ]);
     const XLSX = await getXLSX();
     const { tests } = parseTatLookupXlsx(await file.arrayBuffer(), XLSX);
@@ -715,7 +797,7 @@ async function boot() {
   // Connection test consumed by the settings screen's اختبار الاتصال button.
   state.onGrafanaTest = async () => {
     try {
-      const mod = await import('./ingest/grafana.js?v=v2026-07-23.4');
+      const mod = await import('./ingest/grafana.js?v=v2026-07-23.5');
       const g = store.loadSettings().grafana || {};
       const now = Date.now();
       const res = await mod.fetchKamcOrders(g, { fromMs: now - 7 * 86400000, toMs: now });
@@ -752,10 +834,4 @@ async function boot() {
   }
 }
 
-boot().catch((e) => {
-  console.error('[boot] fatal', e);
-  document.body.appendChild(el('div', { class: 'card', style: 'margin:16px' }, [
-    el('div', { class: 'card__title', text: STR.common.error }),
-    el('p', { text: String(e && e.message || e) }),
-  ]));
-});
+boot().catch(paintFatal);
