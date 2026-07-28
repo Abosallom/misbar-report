@@ -15,12 +15,12 @@
 //     NB: a resulted row is still labelled On Time / Late off asOf−Due, exactly
 //     as the workbook does (verified against every _cachedStatus).
 
-import { normTest, normFacility } from '../contracts.js?v=v2026-07-23.6';
+import { normTest, normFacility } from '../contracts.js?v=v2026-07-23.7';
 import {
   parseDateTime, toEpochDay, workday, dayDiff, calDaysBetween, monthKey,
-} from './workday.js?v=v2026-07-23.6';
-import { buildTatIndex, resolveTat, CHART_TEST_CATALOG } from './tat.js?v=v2026-07-23.6';
-import { dedupeRows } from './dedupe.js?v=v2026-07-23.6';
+} from './workday.js?v=v2026-07-23.7';
+import { buildTatIndex, resolveTat, CHART_TEST_CATALOG } from './tat.js?v=v2026-07-23.7';
+import { dedupeRows } from './dedupe.js?v=v2026-07-23.7';
 
 export const STATUS = Object.freeze({
   CANCELLED: 'Cancelled',
@@ -84,41 +84,79 @@ function enrichRow(row, tatIndex, asOfMs, opts) {
 }
 
 /**
+ * COMPLETED — the single definition every "مكتمل / completed" surface uses.
+ *
+ * user decision 2026-07-28: "consider rejected as completed test". Rejection is a
+ * lab's FINAL outcome for a test, so a rejected line is finished work, not work in
+ * progress. A completed line is therefore a non-cancelled line that has reached a
+ * terminal state: it either carries a Result report date OR was rejected.
+ *
+ *   completed = non-cancelled AND (resultedMs != null OR rejected)
+ *             = resulted + rejected            (the two are disjoint in practice:
+ *               a rejected row never carries a result date in live or golden data,
+ *               and the OR keeps the count exact even if one ever did)
+ *
+ * HISTORY: 2026-07-19 → 2026-07-28 completed counted ONLY dated rows (rejected
+ * excluded); before that the workbook's C6 folded rejectedAll in. This restores
+ * rejected to the completed side, deliberately.
+ *
+ * `rejected` is still published as its own value everywhere, but it is now a
+ * SUBSET of completed — never add the two together.
+ * @param {{resultedMs:number|null, rejected:boolean}} e enriched, already non-cancelled
+ */
+function isCompleted(e) {
+  return e.resultedMs != null || e.rejected;
+}
+
+/**
  * Slide-3 funnel — all counts exclude cancelled.
- * Resulted counts ONLY rows with a Result report date (resultedMs != null).
- * Rejected rows have no result date and are NO LONGER counted here (user
- * decision 2026-07-19). This supersedes the old workbook C6 behavior, which
- * folded rejectedAll into resulted.
+ * FINAL STAGE (user decision 2026-07-28): the funnel ends at COMPLETED, i.e.
+ * isCompleted() — a result date OR a rejection, because both are terminal lab
+ * outcomes. `completed` is the canonical field; `resulted` is kept as an alias
+ * carrying the SAME number so the long-lived override key 'funnel.resulted'
+ * (contracts.js, i18n, screen-review) and the slide that reads it can never show a
+ * different figure from the exec KPI card. It is NOT the dated-only count anymore.
  */
 function buildFunnel(nonCancelled) {
+  const completed = nonCancelled.filter(isCompleted).length;
   return {
     created: nonCancelled.filter((e) => e.hasCreated).length,
     collected: nonCancelled.filter((e) => e.collectedMs != null).length,
     dispatched: nonCancelled.filter((e) => e.dispatchedMs != null).length,
     received: nonCancelled.filter((e) => e.receivedMs != null).length,
-    resulted: nonCancelled.filter((e) => e.resultedMs != null).length,
+    resulted: completed, // legacy alias of `completed` — same number, by design
+    completed,
   };
 }
 
 /**
  * Slide-2 status buckets.
- * completed counts ONLY rows with a Result report date (resultedMs != null);
- * Rejected rows are NO LONGER counted (user decision 2026-07-19), superseding
- * the old workbook C6 behavior that added rejectedAll here.
+ * PARTITION (user decision 2026-07-28):
+ *   total = awaitingDispatch + shippedNotReceived + awaitingResults + completed
+ * completed follows isCompleted() (result date OR rejected). `rejected` is still
+ * reported as its own value but is a SUBSET of completed — it must never be added
+ * alongside completed, or the rejected lines get counted twice.
+ *
+ * Every pre-completion bucket therefore carries the SAME `!e.rejected` guard that
+ * buildByLab's `pipeline` / `awaitingResult` terms carry: once a rejection counts as
+ * completed, a rejected line that never reached 'received' would otherwise be counted
+ * a second time in awaitingDispatch or shippedNotReceived and break the identity
+ * (and contradict the compliance table's split of the very same total).
  */
 function buildBuckets(nonCancelled) {
   const awaitingDispatch = nonCancelled.filter(
-    (e) => e.dispatchedMs == null && e.hasCreated,
+    (e) => e.dispatchedMs == null && e.hasCreated && !e.rejected,
   ).length;
   const shippedNotReceived = nonCancelled.filter(
-    (e) => e.dispatchedMs != null && e.receivedMs == null,
+    (e) => e.dispatchedMs != null && e.receivedMs == null && !e.rejected,
   ).length;
   const awaitingResults = nonCancelled.filter(
     (e) => e.receivedMs != null && e.resultedMs == null && !e.rejected,
   ).length;
-  const completed = nonCancelled.filter((e) => e.resultedMs != null).length;
+  const completed = nonCancelled.filter(isCompleted).length;
   // rejected surfaced as its own value (user decision 2026-07-19): non-cancelled
-  // rows whose Order Status was 'Result Rejected'. Excluded from completed above.
+  // rows whose Order Status was 'Result Rejected'. Since 2026-07-28 it is a SUBSET
+  // of completed above (rejection = a terminal outcome), NOT a sibling of it.
   const rejected = nonCancelled.filter((e) => e.rejected).length;
   const lateNoResult = nonCancelled.filter(
     (e) => e.status === STATUS.LATE && e.resultedMs == null,
@@ -136,18 +174,20 @@ function buildBuckets(nonCancelled) {
  * Months present only in the manual map still surface (orders 0, cancelled =
  * manual). This replaces the earlier max(stored, computed) merge.
  *
- * Per-month `results` counts ONLY rows with a Result report date
- * (resultedMs != null); Rejected rows are NO LONGER added (user decision
- * 2026-07-19), superseding the old workbook C6 behavior that folded
- * rejectedAll into each month's results.
+ * Per-month `results` is the COMPLETED count for that order-month — isCompleted()
+ * (a Result report date OR a rejection), user decision 2026-07-28. It is the same
+ * rule as buckets.completed / funnel.completed / byLab.completed, so Σ results
+ * over the months equals the exec KPI card exactly.
  *
- * PARTITION (user decision 2026-07-22): each month's orders split into three
- * disjoint states — orders = results + rejected + pending — so the monthly
- * table columns actually add up. `pending = orders − results − rejected` is the
- * canonical partition field (rows received/dispatched/created but neither
- * resulted nor rejected). `incomplete = orders − results` is kept ONLY for
- * backward compatibility; it silently DOUBLE-COUNTS the rejected rows (which is
- * the incoherence pending fixes) and must not be used for the partition.
+ * PARTITION: each month's orders split into two disjoint states —
+ *   orders = results + pending          (pending = orders − results)
+ * `rejected` is still reported per month as its own value but is a SUBSET of
+ * `results`, so it is NOT a partition term anymore (adding it would double-count).
+ * `pending` and `incomplete` are now the SAME number (both orders − results): the
+ * 2026-07-22 split existed only because rejected sat outside results, and moving
+ * rejected inside completed removes that incoherence. `incomplete` is kept as the
+ * name the monthly slide's third row uses; its VALUES change (it no longer
+ * double-counts the rejected lines).
  * @returns {{monthly: object[], cancelledNote: number}}
  */
 function buildMonthly(nonCancelled, cancelledEnriched, cancelledByMonth) {
@@ -176,16 +216,17 @@ function buildMonthly(nonCancelled, cancelledEnriched, cancelledByMonth) {
 
   const monthly = sorted.map((m) => {
     const orders = nonCancelled.filter((e) => e.hasCreated && monthKey(e.orderMs) === m).length;
+    // results = the COMPLETED rule (result date OR rejected) for this order-month.
     const results =
-      nonCancelled.filter((e) => e.resultedMs != null && monthKey(e.orderMs) === m).length;
-    // rejected per order-month (own value; part of the orders partition below).
+      nonCancelled.filter((e) => isCompleted(e) && monthKey(e.orderMs) === m).length;
+    // rejected per order-month — own value, but a SUBSET of results above.
     const rejected =
       nonCancelled.filter((e) => e.rejected && monthKey(e.orderMs) === m).length;
     const cancelled = merged.get(m) || 0;
-    // pending: canonical partition field — orders = results + rejected + pending.
-    const pending = orders - results - rejected;
-    // incomplete: LEGACY only (= orders − results); double-counts rejected. Kept
-    // for backward compatibility; use pending for the partition.
+    // pending / incomplete: the partition remainder — orders = results + pending.
+    // Same number by construction now that rejected lives inside results; both
+    // names are published because both are read downstream.
+    const pending = orders - results;
     const incomplete = orders - results;
     const completionPct = orders > 0 ? round1((results / orders) * 100) : null;
     return { month: m, orders, results, rejected, pending, incomplete, completionPct, cancelled };
@@ -196,6 +237,9 @@ function buildMonthly(nonCancelled, cancelledEnriched, cancelledByMonth) {
 
 /**
  * Slide-4 turnaround (resulted rows, excl. Rejected). Per order-month + overall.
+ * Deliberately NOT the completed set: a rejected line has no result timestamp, so
+ * it cannot contribute a received→result duration. measuredCount is therefore
+ * `resulted` (422 golden), which is LESS than completed (437) — that is expected.
  *   actual   = mean(resulted − received)  [fractional calendar days]
  *   expected = mean(dueDate − received)    [calendar span of the WORKDAY window]
  * Both keep time-of-day; values are rounded to 1 decimal, report-style.
@@ -228,20 +272,24 @@ function buildTurnaround(nonCancelled) {
 
 /**
  * Slide-5 by-lab table (facility-normalized, excl. cancelled), total-desc.
- * Each row is a TRUE PARTITION of that lab's non-cancelled lines — the five
- * disjoint states below sum to `total`, so the compliance table's columns
- * actually add up to the total (user-visible coherence):
- *   total = pipeline + awaitingResult + onTime + resultedLate + rejected
+ *
+ * HEADLINE PARTITION (user decision 2026-07-28) — three disjoint states:
+ *   total = pipeline + awaitingResult + completed
  *   • pipeline       = NO received date yet (pre-receipt: awaiting dispatch / in transit)
  *   • awaitingResult = received, no result yet, not rejected
- *   • onTime         = resulted within due (day-granular "success")
- *   • resultedLate   = resulted − onTime: resulted AFTER the due date. Resulted
- *                      rows with NO due (No-Match TAT, dueMs null) also land here
- *                      so the partition stays exact.
- *   • rejected       = Result Rejected (own value)
- * `resulted` (= onTime + resultedLate, non-rejected rows with a result date) is
- * carried as a convenience subtotal. `late` (late-no-result, a SUBSET of
- * awaitingResult) and `latePct` are unchanged from before.
+ *   • completed      = isCompleted(): a result date OR rejected (= resulted + rejected)
+ * This is the identity the compliance table's columns must add up to.
+ *
+ * FINER BREAKDOWN of `completed`, all still published, all SUBSETS of it — never
+ * add any of them alongside `completed`:
+ *   completed = onTime + resultedLate + rejected  (= resulted + rejected)
+ *   • onTime       = resulted within due (day-granular "success")
+ *   • resultedLate = resulted − onTime: resulted AFTER the due date. Resulted rows
+ *                    with NO due (No-Match TAT, dueMs null) also land here so the
+ *                    split stays exact.
+ *   • rejected     = Result Rejected (own value; terminal outcome, hence completed)
+ *   • resulted     = onTime + resultedLate — non-rejected rows WITH a result date
+ * `late` (late-no-result, a SUBSET of awaitingResult) and `latePct` are unchanged.
  */
 function buildByLab(nonCancelled) {
   const labs = new Map();
@@ -249,7 +297,7 @@ function buildByLab(nonCancelled) {
     if (!labs.has(name)) {
       labs.set(name, {
         lab: name, total: 0, pipeline: 0, awaitingResult: 0,
-        onTime: 0, resulted: 0, rejected: 0, late: 0,
+        onTime: 0, resulted: 0, completed: 0, rejected: 0, late: 0,
       });
     }
     return labs.get(name);
@@ -262,8 +310,9 @@ function buildByLab(nonCancelled) {
     if (e.receivedMs != null && e.resultedMs == null && !e.rejected) L.awaitingResult++;
     // resulted: parent of the onTime / resultedLate split (non-rejected, has a result).
     if (!e.rejected && e.resultedMs != null) L.resulted++;
+    if (isCompleted(e)) L.completed++; // result date OR rejected — the headline term
     if (e.onTime) L.onTime++; // resulted within TAT (day-granular "success")
-    if (e.rejected) L.rejected++; // rejected count per lab (own value)
+    if (e.rejected) L.rejected++; // rejected count per lab (own value, ⊂ completed)
     // late = COUNTIFS(D=lab, T="Late", N="") — "Late" already excludes cancelled/rejected
     if (e.status === STATUS.LATE && e.resultedMs == null) L.late++;
   }
@@ -273,6 +322,7 @@ function buildByLab(nonCancelled) {
       total: L.total,
       pipeline: L.pipeline,
       awaitingResult: L.awaitingResult,
+      completed: L.completed, // headline: total = pipeline + awaitingResult + completed
       onTime: L.onTime,
       resulted: L.resulted,
       resultedLate: L.resulted - L.onTime, // resulted after due (+ No-Match resulted)

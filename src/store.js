@@ -11,14 +11,14 @@
 // throws on write; on failure we fall back to an in-memory doc and expose
 // isEphemeral() so the UI can warn the user their edits will not persist.
 
-import { SETTINGS_KEY } from './contracts.js?v=v2026-07-23.6';
-import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-07-23.6';
-import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-07-23.6';
+import { SETTINGS_KEY } from './contracts.js?v=v2026-07-23.7';
+import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-07-23.7';
+import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-07-23.7';
 import {
   HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED, GRAFANA_SEED, REPORT_OPTIONS_SEED,
   SNAPSHOT_HISTORY_SEED, AUTOMATION_SEED,
-} from './seeds/defaults.js?v=v2026-07-23.6';
-import { DELTA_MODES } from './model/delta-baseline.js?v=v2026-07-23.6';
+} from './seeds/defaults.js?v=v2026-07-23.7';
+import { DELTA_MODES } from './model/delta-baseline.js?v=v2026-07-23.7';
 
 export const SCHEMA_VERSION = 5;
 
@@ -389,6 +389,17 @@ export function saveSettings(s) {
  * Records the previous-report snapshot after a successful generation. The full
  * number set (E6). Partial `numbers` are merged over the existing snapshot's
  * numbers (only finite numeric values land); asOf is updated when provided.
+ *
+ * `defVersion` (the definition stamp — model/delta-baseline.js) lives NEXT TO
+ * `numbers`, deliberately outside the number set so it never leaks into deltas or
+ * history. This rebuild must therefore CARRY IT OVER explicitly: dropping it would
+ * silently downgrade a stamped snapshot to date inference, and the shipped seed
+ * (asOf 2026-07-09, already re-stated in the new definition) would then be read as
+ * pre-change and raise a false definitionShift on numbers that are already 437.
+ * A stamp supplied INSIDE `numbers` wins — it travels with the very numbers being
+ * written, whereas the sibling describes the ones being replaced, so keeping the
+ * old sibling alongside it would let a stale version outrank the fresh one (the
+ * picker prefers the sibling).
  * @param {{asOf?:string, numbers?:Object<string,number>}} snap
  */
 export function updateSnapshot({ asOf, numbers } = {}) {
@@ -400,8 +411,11 @@ export function updateSnapshot({ asOf, numbers } = {}) {
       if (typeof v === 'number' && Number.isFinite(v)) nextNumbers[k] = v;
     }
   }
+  const isFiniteNum = (v) => typeof v === 'number' && Number.isFinite(v);
+  const keepStamp = isFiniteNum(cur.defVersion) && !isFiniteNum(nextNumbers.defVersion);
   doc.snapshot = {
     asOf: asOf != null ? String(asOf) : cur.asOf,
+    ...(keepStamp ? { defVersion: cur.defVersion } : {}),
     numbers: nextNumbers,
   };
   return saveSettings(doc);
@@ -667,6 +681,14 @@ function pickImportKeys(doc) {
     const snap = out.snapshot;
     const picked = {};
     if (snap.asOf != null) picked.asOf = snap.asOf;
+    // The definition stamp (model/delta-baseline.js) is a sibling of `numbers`, so
+    // it has to be whitelisted here or an exported-then-reimported backup would come
+    // back unstamped and fall through to date inference — reading a snapshot that is
+    // already stated in the new definition as pre-change. Finite numbers only;
+    // anything else is dropped, which degrades to inference (disclose, never hide).
+    if (typeof snap.defVersion === 'number' && Number.isFinite(snap.defVersion)) {
+      picked.defVersion = snap.defVersion;
+    }
     if (isPlainObject(snap.numbers)) {
       const nums = {};
       for (const [k, v] of Object.entries(snap.numbers)) {
@@ -844,6 +866,15 @@ export function importSettings(jsonText) {
 
   const current = clone(loadSettings());
   const merged = deepMergeImportWins(current, incoming);
+  // The definition stamp REPLACES, it never merges: it describes the number set it
+  // ships with. An imported snapshot that carries no stamp is an unstamped snapshot,
+  // so it must not inherit this device's leftover one — that would hide a real
+  // definition shift instead of disclosing it (model/delta-baseline.js). A valid
+  // incoming stamp was kept by pickImportKeys and wins here as usual.
+  if (isPlainObject(incoming.snapshot) && isPlainObject(merged.snapshot)
+      && !('defVersion' in incoming.snapshot)) {
+    delete merged.snapshot.defVersion;
+  }
 
   const summary = {
     tatLookup: countMapChanges(current.tatLookup, incoming.tatLookup),

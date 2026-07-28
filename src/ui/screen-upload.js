@@ -1,15 +1,15 @@
 // ui/screen-upload.js — file upload + parse + engine kickoff (Track E).
-import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-07-23.6';
-import { el, dropZone, fileSummaryCard, toast } from './components.js?v=v2026-07-23.6';
-import { normTest } from '../contracts.js?v=v2026-07-23.6';
-import { getPapa, getXLSX } from '../vendor-loader.js?v=v2026-07-23.6';
-import { TAT_LOINC } from '../seeds/tat-lookup.js?v=v2026-07-23.6';
-import { buildLateLabsSection } from './late-labs-section.js?v=v2026-07-23.6';
-import { buildAutomationPanel } from './automation-panel.js?v=v2026-07-23.6';
+import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-07-23.7';
+import { el, dropZone, fileSummaryCard, toast } from './components.js?v=v2026-07-23.7';
+import { normTest } from '../contracts.js?v=v2026-07-23.7';
+import { getPapa, getXLSX } from '../vendor-loader.js?v=v2026-07-23.7';
+import { TAT_LOINC } from '../seeds/tat-lookup.js?v=v2026-07-23.7';
+import { buildLateLabsSection } from './late-labs-section.js?v=v2026-07-23.7';
+import { buildAutomationPanel } from './automation-panel.js?v=v2026-07-23.7';
 
 /** The SAME specifier main.js and ui/automation-panel.js import — resolving to
  *  the identical URL means the probe below hits the already-cached module. */
-const AUTOMATION_PIPELINE_URL = '../automation/pipeline.js?v=v2026-07-23.6';
+const AUTOMATION_PIPELINE_URL = '../automation/pipeline.js?v=v2026-07-23.7';
 
 /** Format an ISO timestamp as local 'HH:MM' for snapshot-freshness labels. */
 function fmtHHMM(iso) {
@@ -78,24 +78,36 @@ export function buildMockTracker() {
   };
 }
 
-/** EngineOutput mock seeded from test/fixtures numbers; deltas computed vs settings. */
+/** EngineOutput mock seeded from test/fixtures numbers; deltas computed vs settings.
+ *  Re-baselined 2026-07-28 alongside test/fixtures/golden-expected.js for the user
+ *  decision "consider rejected as completed test": completed = non-cancelled AND
+ *  (has a result date OR rejected) = 422 + 15 = 437. Every surface that prints
+ *  'فحوصات مكتملة' (exec KPI card, funnel stage 5, monthly row, compliance column)
+ *  resolves to 437 here, so the ?mock=1 deck cannot contradict itself. */
 export function buildMockEngineOutput(settings) {
   const snap = (settings && settings.snapshot) || {};
   const prev = (snap.numbers && snap.numbers.completed) != null
     ? snap.numbers.completed
-    : (snap.prevCompleted != null ? snap.prevCompleted : 422); // legacy shape tolerance
+    : (snap.prevCompleted != null ? snap.prevCompleted : 437); // legacy shape tolerance
   return {
     totals: { lines: 628, cancelledInData: 10, total: 618 },
-    funnel: { created: 618, collected: 612, dispatched: 608, received: 596, resulted: 422 },
-    buckets: { awaitingDispatch: 10, shippedNotReceived: 12, awaitingResults: 159, completed: 422, rejected: 15, lateNoResult: 67, latePct: 42.1 },
-    // PARTITION: orders = results + rejected + pending; incomplete (= orders−results) is legacy.
+    // FINAL STAGE = COMPLETED. `resulted` is the LEGACY ALIAS carrying the SAME
+    // number as `completed` (never the dated-only 422) — never add the two.
+    funnel: { created: 618, collected: 612, dispatched: 608, received: 596, resulted: 437, completed: 437 },
+    // PARTITION: total = awaitingDispatch + shippedNotReceived + awaitingResults +
+    // completed (10 + 12 + 159 + 437 = 618). `rejected` keeps its own value but is a
+    // SUBSET of completed — reported, never added alongside it.
+    buckets: { awaitingDispatch: 10, shippedNotReceived: 12, awaitingResults: 159, completed: 437, rejected: 15, lateNoResult: 67, latePct: 42.1 },
+    // PARTITION: orders = results + pending, where `results` follows the COMPLETED
+    // rule (result date OR rejected), so `rejected` is a SUBSET of results and
+    // incomplete (= orders − results) equals pending — no double count.
     monthly: [
       { month: '2026-01', orders: 0, results: 0, rejected: 0, pending: 0, incomplete: 0, completionPct: null, cancelled: 8 },
       { month: '2026-02', orders: 0, results: 0, rejected: 0, pending: 0, incomplete: 0, completionPct: null, cancelled: 1 },
       { month: '2026-03', orders: 0, results: 0, rejected: 0, pending: 0, incomplete: 0, completionPct: null, cancelled: 30 },
       { month: '2026-04', orders: 3, results: 3, rejected: 0, pending: 0, incomplete: 0, completionPct: 100, cancelled: 4 },
-      { month: '2026-05', orders: 105, results: 76, rejected: 14, pending: 15, incomplete: 29, completionPct: 72.4, cancelled: 6 },
-      { month: '2026-06', orders: 410, results: 340, rejected: 1, pending: 69, incomplete: 70, completionPct: 82.9, cancelled: 4 },
+      { month: '2026-05', orders: 105, results: 90, rejected: 14, pending: 15, incomplete: 15, completionPct: 85.7, cancelled: 6 },
+      { month: '2026-06', orders: 410, results: 341, rejected: 1, pending: 69, incomplete: 69, completionPct: 83.2, cancelled: 4 },
       { month: '2026-07', orders: 100, results: 3, rejected: 0, pending: 97, incomplete: 97, completionPct: 3, cancelled: 0 },
     ],
     cancelledNote: 53,
@@ -111,15 +123,19 @@ export function buildMockEngineOutput(settings) {
         { month: '2026-07', actual: 2.0, expected: 2.5 },
       ],
     },
-    // pipeline/resultedLate derived from the partition (total = pipeline +
-    // awaitingResult + onTime + resultedLate + rejected); resulted = onTime + resultedLate.
+    // HEADLINE PARTITION: total = pipeline + awaitingResult + completed, where
+    // completed = resulted + rejected (sums to 437 — the same number as
+    // buckets.completed / funnel / the monthly results row). resulted, onTime,
+    // resultedLate and rejected are all SUBSETS of completed — never added
+    // alongside it; the old 5-way identity (pipeline + awaitingResult + onTime +
+    // resultedLate + rejected = total) still holds exactly.
     byLab: [
-      { lab: 'Advanced Laboratory Services .Co', total: 301, pipeline: 11, awaitingResult: 89, onTime: 29, resulted: 187, resultedLate: 158, rejected: 14, late: 60, latePct: 67.4 },
-      { lab: 'Fal Specialized Medical Lab', total: 151, pipeline: 6, awaitingResult: 21, onTime: 75, resulted: 123, resultedLate: 48, rejected: 1, late: 2, latePct: 9.5 },
-      { lab: 'king Abdullaziz Medical city in Riyadh', total: 113, pipeline: 1, awaitingResult: 35, onTime: 42, resulted: 77, resultedLate: 35, rejected: 0, late: 3, latePct: 8.6 },
-      { lab: 'Eurofins clinical', total: 27, pipeline: 3, awaitingResult: 0, onTime: 20, resulted: 24, resultedLate: 4, rejected: 0, late: 0, latePct: 0 },
-      { lab: 'Saudi Diagnostics Limited Company', total: 19, pipeline: 1, awaitingResult: 7, onTime: 4, resulted: 11, resultedLate: 7, rejected: 0, late: 2, latePct: 28.6 },
-      { lab: 'Anwa  Medical Company', total: 7, pipeline: 0, awaitingResult: 7, onTime: 0, resulted: 0, resultedLate: 0, rejected: 0, late: 0, latePct: 0 },
+      { lab: 'Advanced Laboratory Services .Co', total: 301, pipeline: 11, awaitingResult: 89, completed: 201, onTime: 29, resulted: 187, resultedLate: 158, rejected: 14, late: 60, latePct: 67.4 },
+      { lab: 'Fal Specialized Medical Lab', total: 151, pipeline: 6, awaitingResult: 21, completed: 124, onTime: 75, resulted: 123, resultedLate: 48, rejected: 1, late: 2, latePct: 9.5 },
+      { lab: 'king Abdullaziz Medical city in Riyadh', total: 113, pipeline: 1, awaitingResult: 35, completed: 77, onTime: 42, resulted: 77, resultedLate: 35, rejected: 0, late: 3, latePct: 8.6 },
+      { lab: 'Eurofins clinical', total: 27, pipeline: 3, awaitingResult: 0, completed: 24, onTime: 20, resulted: 24, resultedLate: 4, rejected: 0, late: 0, latePct: 0 },
+      { lab: 'Saudi Diagnostics Limited Company', total: 19, pipeline: 1, awaitingResult: 7, completed: 11, onTime: 4, resulted: 11, resultedLate: 7, rejected: 0, late: 2, latePct: 28.6 },
+      { lab: 'Anwa  Medical Company', total: 7, pipeline: 0, awaitingResult: 7, completed: 0, onTime: 0, resulted: 0, resultedLate: 0, rejected: 0, late: 0, latePct: 0 },
     ],
     byTest: [
       { testName: 'BK Virus Quantitative PCR', late: 0, onTime: 20 },
@@ -143,7 +159,7 @@ export function buildMockEngineOutput(settings) {
     unmatchedTests: [],
     deltas: {
       total: 0, collected: 0, dispatched: 0, received: 0,
-      completed: Math.max(0, 422 - prev),
+      completed: Math.max(0, 437 - prev),
       rejected: 0,
       awaitingDispatch: 0, shippedNotReceived: 0, awaitingResults: 0, lateNoResult: 0,
     },
@@ -205,7 +221,7 @@ function normalizeTracker(res) {
 
 async function ingestCsv(file) {
   const Papa = await getPapa();
-  const mod = await tryImport('../ingest/csv.js?v=v2026-07-23.6');
+  const mod = await tryImport('../ingest/csv.js?v=v2026-07-23.7');
   const fn = pickFn(mod, ['parseKamcCsv', 'parseCsv', 'ingestCsv', 'parseOrders', 'parse']);
   if (fn) {
     const text = await file.text();
@@ -218,7 +234,7 @@ async function ingestCsv(file) {
 
 async function ingestTracker(file) {
   const XLSX = await getXLSX();
-  const mod = await tryImport('../ingest/xlsx.js?v=v2026-07-23.6');
+  const mod = await tryImport('../ingest/xlsx.js?v=v2026-07-23.7');
   const fn = pickFn(mod, ['parseTracker', 'ingestXlsx', 'parseXlsx', 'parse']);
   if (fn) {
     const buf = await file.arrayBuffer();
@@ -432,7 +448,7 @@ export async function render(container, ctx) {
     const gcfg = (store.settings && store.settings.grafana) || {};
     const dataKey = (gcfg.dataKey || '').trim();
     try {
-      const mod = await import('../ingest/grafana.js?v=v2026-07-23.6');
+      const mod = await import('../ingest/grafana.js?v=v2026-07-23.7');
       const asOf = state.reportDate || todayISO();
       const directConfigured = !!(gcfg.baseUrl && gcfg.accessToken);
       try {
@@ -744,7 +760,7 @@ export async function render(container, ctx) {
     const seq = ++unmatchedSeq;
     let mod;
     try {
-      mod = await import('../ingest/tat-suggest.js?v=v2026-07-23.6');
+      mod = await import('../ingest/tat-suggest.js?v=v2026-07-23.7');
     } catch { return; } // module not present yet — keep the plain panel behavior
     if (seq !== unmatchedSeq) return; // a newer paint superseded this run
     const fn = pickFn(mod, ['suggestTats']);
@@ -892,7 +908,7 @@ export async function render(container, ctx) {
     if (!orders || !orders.length) { heroHost.innerHTML = ''; return; }
     let out;
     try {
-      const mod = await import('../engine/engine.js?v=v2026-07-23.6');
+      const mod = await import('../engine/engine.js?v=v2026-07-23.7');
       if (seq !== heroSeq) return; // a newer run superseded this one
       const compute = pickFn(mod, ['compute', 'runEngine', 'run']);
       if (typeof compute !== 'function') { heroHost.innerHTML = ''; return; }
@@ -917,7 +933,7 @@ export async function render(container, ctx) {
       let out = (state.engineOutput && state.engineOutput.totals) ? state.engineOutput : null;
       if (!out) {
         try {
-          const mod = await tryImport('../engine/engine.js?v=v2026-07-23.6');
+          const mod = await tryImport('../engine/engine.js?v=v2026-07-23.7');
           const compute = pickFn(mod, ['compute', 'runEngine', 'run']);
           if (compute) {
             out = compute(state.parsed.orders, (store.settings || {}).tatLookup, engineOpts());

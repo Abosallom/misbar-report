@@ -1,10 +1,10 @@
 // ui/screen-review.js — review/edit report content with a live slide preview (Track E).
-import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-07-23.6';
-import { el, editableTable, textareaField, toast } from './components.js?v=v2026-07-23.6';
-import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-07-23.6';
-import { autoDraft } from '../model/drafts.js?v=v2026-07-23.6';
-import { buildHistoryPanel } from './history-table.js?v=v2026-07-23.6';
-import { normalizeDeltaMode } from '../model/delta-baseline.js?v=v2026-07-23.6';
+import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-07-23.7';
+import { el, editableTable, textareaField, toast } from './components.js?v=v2026-07-23.7';
+import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-07-23.7';
+import { autoDraft } from '../model/drafts.js?v=v2026-07-23.7';
+import { buildHistoryPanel } from './history-table.js?v=v2026-07-23.7';
+import { normalizeDeltaMode } from '../model/delta-baseline.js?v=v2026-07-23.7';
 
 /* small local module helpers (kept local to avoid cross-screen coupling) */
 async function tryImport(path) { try { return await import(path); } catch { return null; } }
@@ -46,8 +46,9 @@ function currentNumbersOf(kpi) {
 const isWeeklyMode = (m) => normalizeDeltaMode(m).startsWith('weekly');
 
 // deltaMode baseline (user decision B): recompute model.kpi.deltas against the picked
-// baseline and stamp model.deltaBaseline {baselineDate, mode, anchored} so the exec
-// legend renders mode-aware and the banner can flag a non-anchored fallback. Signed (no
+// baseline and stamp model.deltaBaseline {baselineDate, mode, anchored, definitionShift}
+// so the exec legend renders mode-aware and the banner can flag a non-anchored fallback
+// or a baseline recorded under the old `completed` definition. Signed (no
 // max(0) clamp) so a drop surfaces as a '−N' green chip. Degrades to the engine's legacy
 // deltas when the delta-baseline module is missing or no baseline resolves. Mutates
 // kpi.deltas in place so the banner + live preview stay in sync.
@@ -76,6 +77,13 @@ function applyDeltaBaseline(model, store, pickDeltaBaseline) {
   // banner labels the comparison instead of presenting it as a true Sunday/Thursday gap.
   model.deltaBaseline = { baselineDate: picked.baselineDate, mode: picked.mode };
   if ('anchored' in picked) model.deltaBaseline.anchored = !!picked.anchored;
+  // definitionShift:true = the picked baseline's `completed` was recorded under the
+  // PRE-2026-07-28 rule (rejected EXCLUDED from completed), so part of this run's
+  // completed delta is the definition change, not movement — on the first report after
+  // the change the whole chip can be definitional. It is a disclosure exactly like
+  // anchored:false and MUST be forwarded, not dropped: this stamp is what the banner
+  // below reads, and it travels on the same model object to generate/build-spec.
+  if (picked.definitionShift) model.deltaBaseline.definitionShift = true;
 }
 
 const STATUS_OPTIONS = [
@@ -255,7 +263,7 @@ export async function render(container, ctx) {
   // pickDeltaBaseline export degrades to the legacy engine deltas instead of throwing
   // (same URL as the static normalizeDeltaMode import → already-evaluated module, no
   // second fetch). Re-run per preview (below) so a report-date change re-picks.
-  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-07-23.6');
+  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-07-23.7');
   const pickBaseline = dbMod && dbMod.pickDeltaBaseline;
   applyDeltaBaseline(model, store, pickBaseline);
   const kpi = model.kpi;
@@ -325,9 +333,9 @@ export async function render(container, ctx) {
     const token = ++renderToken;
     model.reportDate = state.reportDate;
     applyDeltaBaseline(model, store, pickBaseline); // re-pick baseline for the current report date
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-07-23.6');
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-07-23.7');
     const buildSpec = pickFn(specMod, ['buildSpec', 'build', 'makeSpec', 'toSpec']);
-    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-07-23.6');
+    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-07-23.7');
     const renderFn = pickFn(rendMod, ['renderSpec', 'renderSlides', 'renderHtml', 'render']);
 
     if (!buildSpec || !renderFn) {
@@ -680,7 +688,7 @@ export async function render(container, ctx) {
     el('summary', { class: 'card__title', style: 'cursor:pointer', text: STR.review.labelsCardTitle }),
   ]);
   (async () => {
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-07-23.6');
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-07-23.7');
     const LABEL_NAMES = specMod && specMod.LABEL_NAMES;
     const DEFAULT_LABELS = (specMod && specMod.DEFAULT_LABELS) || {};
     if (!LABEL_NAMES || typeof LABEL_NAMES !== 'object') {
@@ -751,6 +759,25 @@ export async function render(container, ctx) {
     });
   }
 
+  // Second, INDEPENDENT baseline disclosure (2026-07-28). 'مكتملة' changed meaning that
+  // day — a REJECTED result is the lab's final outcome, so rejected rows now count as
+  // completed. Every number already in snapshotHistory was recorded under the OLD rule
+  // and history is never rewritten, so against such a baseline part of the completed
+  // delta is DEFINITIONAL, not progress (on live data the whole +15 is). pickDeltaBaseline
+  // flags it (definitionShift:true) and applyDeltaBaseline forwards it above.
+  // Unlike anchorFallbackNote this fires in EVERY mode — the first report after the change
+  // is a daily run, which is exactly the case the weekly-only guard would have missed —
+  // and it is independent of anchored/legacy, so both notes can show together.
+  function definitionShiftNote() {
+    const db = model.deltaBaseline;
+    if (!db || !db.definitionShift) return null;
+    return el('p', {
+      class: 'small muted',
+      style: 'margin:10px 0 0',
+      text: 'تغيّر تعريف «المكتملة» في هذا التقرير ليشمل النتائج المرفوضة، لذا جزء من فرق المكتملة تعريفي وليس تقدماً',
+    });
+  }
+
   function buildDeltaBanner() {
     const deltas = (kpi && kpi.deltas) || {};
     // Prefer the deltaMode-picked baseline date; fall back to the legacy snapshot's asOf.
@@ -766,6 +793,8 @@ export async function render(container, ctx) {
       return Number.isFinite(n) && n !== 0;
     });
     const note = anchorFallbackNote();
+    const defNote = definitionShiftNote(); // shown in BOTH branches: a definitional +N can
+    // even net out to 'لا تغييرات' while hiding real movement of the same size.
     if (!active.length) {
       const txt = asOfAr ? `لا تغييرات منذ التقرير السابق (${asOfAr})` : 'لا تغييرات منذ التقرير السابق';
       return el('div', { class: 'card', style: 'padding:14px 16px' }, [
@@ -774,6 +803,7 @@ export async function render(container, ctx) {
           el('span', { text: txt, style: 'color:var(--slate-600);font-weight:600;font-size:.92rem' }),
         ]),
         note,
+        defNote,
       ]);
     }
     // Sign glyphs match build-spec's fmtDelta exactly (ASCII '+' / U+2212 '−') so the
@@ -796,6 +826,7 @@ export async function render(container, ctx) {
       el('div', { class: 'small muted', style: 'margin-bottom:12px', text: asOfAr ? `مقارنة بتقرير ${asOfAr}` : 'مقارنة بالتقرير السابق' }),
       el('div', { style: 'display:flex;flex-wrap:wrap;gap:8px' }, chips),
       note,
+      defNote,
     ]);
   }
 

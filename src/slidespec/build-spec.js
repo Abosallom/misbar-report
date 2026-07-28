@@ -17,7 +17,7 @@
 //   m.reportOptions.kpiCards[key] toggles the 7 exec KPI cards (row geometry repacks)
 //                                 + the OPT-IN 'turnaround' block on the monthly slide
 //   m.overrides[key]              per-run manual NUMBER overrides (suppresses that delta chip)
-import { COLORS as C, GEOM } from '../theme.js?v=v2026-07-23.6';
+import { COLORS as C, GEOM } from '../theme.js?v=v2026-07-23.7';
 
 // OPT-IN kpiCards KEYS. reportOptions.kpiCards normally reads "on unless === false"
 // (see buildExec's cardDefs filter). The keys in this set INVERT that: they render only
@@ -99,9 +99,25 @@ export const DEFAULT_LABELS = {
   // TABLE wording is the reference's own 'فحوصات' family (user decision 2026-07-26 — same
   // hand-retype as the KPI cards); the bar chart keeps the 'طلبات' family, see
   // chartMonthly* below.
+  // monthlyRowResults RENAMED 2026-07-28 ('نتائج الفحوصات المستلمة' → 'فحوصات مكتملة'):
+  // the engine's per-month `results` now follows the COMPLETED rule (result date OR
+  // rejected — user decision "consider rejected as completed test"), so 'النتائج
+  // المستلمة' ("results received") would have been factually wrong for the rejected lines
+  // it now counts. The new wording is CHARACTER-IDENTICAL to the exec KPI card
+  // (kpiCompleted) and the compliance column (compCompleted) — one metric, one name on
+  // three slides, which is what makes the cross-slide agreement legible.
+  // It also FIXES A WRAP: measured in the deck's self-hosted Cairo at 10pt against this
+  // table's 1.312in label column (1.112in of text width after pptxgenjs' 0.1in cell
+  // margins), 'نتائج الفحوصات المستلمة' is 1.462in and wrapped to two lines, and even
+  // 'الفحوصات المكتملة' is 1.142in — still 0.029in over. 'فحوصات مكتملة' measures 0.982in
+  // in this row's 10pt REGULAR body weight (1.052in at the compliance header's 10pt bold)
+  // and fits on ONE line (+0.131in), like the reference's 'النتائج غير المكتملة' (1.067in).
   monthlyRowOrders: 'الفحوصات',
-  monthlyRowResults: 'نتائج الفحوصات المستلمة',
+  monthlyRowResults: 'فحوصات مكتملة',
   monthlyRowRejected: 'النتائج المرفوضة',
+  // monthlyRowIncomplete surfaces the engine's `incomplete` = orders − results. Since
+  // 2026-07-28 that is orders − completed (rejected moved INSIDE completed), so the row
+  // finally means exactly what it says and no longer double-counts the rejected lines.
   monthlyRowIncomplete: 'النتائج غير المكتملة',
   monthlyRowCompletion: 'نسبة الاكتمال',
   // Monthly BAR-CHART series names. These used to reuse the monthlyRow* keys, but the
@@ -111,27 +127,81 @@ export const DEFAULT_LABELS = {
   // 'النتائج غير المكتملة' — a pristine chart part PowerPoint never rewrote). So the two
   // are SPLIT into their own keys, each independently overridable.
   chartMonthlyOrders: 'الطلبات',
-  chartMonthlyResults: 'النتائج المستلمة',
+  // Renamed with monthlyRowResults (2026-07-28): the bar it labels is the COMPLETED
+  // count (result date OR rejected), so 'المستلمة' → 'المكتملة'. The 'النتائج' family is
+  // kept, which is the whole point of this key being split from the table's.
+  chartMonthlyResults: 'النتائج المكتملة',
   chartMonthlyIncomplete: 'النتائج غير المكتملة',
-  // Monthly partition footnote (under the table) — the orders add-up identity.
-  monthlyPartition: 'الطلبات = النتائج المستلمة + المرفوضة + قيد المعالجة',
-  // Compliance (byLab) table headers — back to the SEVEN reference columns (user
-  // decision 2026-07-26: the 20-07 NUPCO deck shape). Logical RTL order (right→left):
-  //   # | المختبر | مجموع الطلبات | طلبات مستلمة بانتظار نتيجة | مرفوضة | الطلبات المتأخرة | نسبة الطلبات المتأخرة
-  // The wording matches that deck verbatim. compPipeline / compOnTime / compResultedLate
-  // are NO LONGER RENDERED (their columns were removed with the add-up equation footnote);
-  // the keys stay in both registries for parity — harmless orphans, like catalogNote.
+  // Monthly partition footnote (under the table) — the orders add-up identity. Since
+  // 2026-07-28 rejected is INSIDE completed, so it is no longer a partition term: the
+  // months split in TWO, and the footnote says so rather than listing المرفوضة as a
+  // third addend (which would double-count it).
+  // RENDERED AGAIN since 2026-07-28 (it had been a dead key). '(تشمل المرفوضة)' is the
+  // monthly slide's ONLY disclosure that the metric changed meaning: نسبة الاكتمال is
+  // results/orders and `results` now follows the completed rule, which moves May 2026
+  // from 72.4% to 85.7% and the overall figure from 68.3% to 70.7% on golden data — a
+  // 13.3-point jump on one row that the slide otherwise explains nowhere (the exec slide
+  // discloses it on the KPI card sublabel; this slide had no equivalent).
+  monthlyPartition: 'الفحوصات = المكتملة (تشمل المرفوضة) + غير المكتملة',
+  // Compliance (byLab) table headers — the 20-07 NUPCO reference deck's wording (user
+  // decision 2026-07-26), plus the فحوصات مكتملة column added 2026-07-27. EIGHT columns.
+  // Logical RTL order (right→left) as buildCompliance authors them:
+  //   # | المختبر | مجموع الطلبات | فحوصات مكتملة | طلبات مستلمة بانتظار نتيجة |
+  //   ↳ منها مرفوضة | ↳ منها متأخرة | نسبة الطلبات المتأخرة
+  // compPipeline / compOnTime / compResultedLate are NOT RENDERED as columns (they were
+  // removed with the add-up equation footnote); the keys stay in both registries for
+  // parity — harmless orphans, like catalogNote. compPipeline's TEXT is still used, in
+  // the compPartition footnote, which names the term the table has no column for.
   compHash: '#',
   compLab: 'المختبر',
   compTotal: 'مجموع الطلبات',
   compCompleted: 'فحوصات مكتملة',
   compPipeline: 'قبل الاستلام',
   compAwaiting: 'طلبات مستلمة بانتظار نتيجة',
-  compLate: 'الطلبات المتأخرة',
+  // SECOND SUBSET HEADER (2026-07-28). الطلبات المتأخرة is a strict SUBSET of
+  // 'طلبات مستلمة بانتظار نتيجة': engine.js counts late as `status === LATE &&
+  // resultedMs == null`, which implies received-and-not-rejected, hence ⊆ awaitingResult
+  // (test/compliance-completed.test.mjs asserts `r.late <= r.awaitingResult`). It was the
+  // LARGER of the two double-count traps in this table — on golden data a reader adding
+  // the printed columns gets 437+159+15+67 = 678 against a printed total of 618, and the
+  // 67 late lines are 4.5× the 15 the مرفوضة marker protects; per row, Advanced Laboratory
+  // Services .Co prints 301 total but 201+89+60 = 350. Once the deck teaches '↳ منها =
+  // subset', leaving this one bare is a positive claim that it is NOT one, so it now
+  // carries the same idiom — and the same wording as the definitions slide's defMLate,
+  // which has always named this exact metric '↳ منها متأخرة'.
+  // It is also NARROWER than the bare label (0.895in vs 0.996in, self-hosted Cairo 10pt
+  // bold), which is what pays for the COL_W re-budget below.
+  compLate: '↳ منها متأخرة',
   compOnTime: 'ملتزمة',
   compResultedLate: 'صدرت متأخرة',
-  compRejected: 'مرفوضة',
+  // SUBSET HEADER (user decision 2026-07-28: a rejected test IS a completed test).
+  // مرفوضة is still its own column but is now counted INSIDE فحوصات مكتملة, so a reader
+  // summing the columns would double-count it. The deck's existing idiom for exactly
+  // this — see defMLate '↳ منها متأخرة', which is a subset of بانتظار النتائج — is the
+  // '↳ منها' prefix; buildCompliance additionally paints this one header cell in the
+  // lighter navy (C.taskNavy) so the subset column is visually subordinate to the
+  // فحوصات مكتملة column it belongs to.
+  // KNOWN LIMITATION — this column is NOT adjacent to the parent it belongs to. In the
+  // authored (RTL) order the reader meets مكتملة, then بانتظار نتيجة, and only then this
+  // '↳ منها مرفوضة', so pure adjacency (the idiom DEF_ROWS uses, where every '↳ منها' row
+  // sits directly under its parent) points it at the wrong column — and the misreading
+  // never self-contradicts, since rejected ≤ awaitingResult for every lab. The fix is to
+  // swap the compRejected and compAwaiting columns so مرفوضة sits beside مكتملة, but the
+  // three lockstep sites (header/labRows/totalRow) are pinned by the hard-coded index map
+  // in test/compliance-completed.test.mjs (`const COL = {... awaiting: 4, rejected: 5}`),
+  // which this file may not edit — cross-file, deferred. Until then compPartition (below,
+  // rendered under the table) names BOTH subsets and their parents explicitly, so the
+  // reader is not left to infer the parent from position.
+  compRejected: '↳ منها مرفوضة',
   compLatePct: 'نسبة الطلبات المتأخرة',
+  // Compliance partition footnote (under the by-lab table). The table prints only two of
+  // the three partition terms — قبل الاستلام has no column (compPipeline is an orphan) —
+  // so on golden data the printed columns give 437 + 159 = 596 against a printed total of
+  // 618, a silent 22-line shortfall a reader cannot reconcile. It also states, in words,
+  // which columns are subsets of which, because the ↳ markers alone cannot say that while
+  // مرفوضة sits away from its parent (see compRejected). Measured 7.071in at 9pt in the
+  // deck's self-hosted Cairo against the table's 11.667in width → one line, +4.6in slack.
+  compPartition: 'مجموع الطلبات = قبل الاستلام + بانتظار نتيجة + فحوصات مكتملة · المرفوضة ضمن المكتملة، والمتأخرة ضمن بانتظار نتيجة — لا تُجمع معهما',
   // Tasks table headers
   taskStatus: 'الحالة',
   taskDue: 'تاريخ الإكتمال',
@@ -153,7 +223,9 @@ export const DEFAULT_LABELS = {
   chartOnTimeSeries: 'الملتزمة',      // late-by-test bar series (on-time / success count)
   overallAvgTitle: 'المتوسط العام لزمن الإنجاز', // overall-average card title
   // Exec KPI-row partition footnote (mirrors the compliance equation footnote).
-  execPartition: 'الإجمالي = بانتظار الشحن + شُحنت ولم تُستلم + بانتظار النتائج + مكتملة + مرفوضة',
+  // Since 2026-07-28 مرفوضة is a SUBSET of مكتملة, not a sibling term, so it is dropped
+  // from the addends (listing it would double-count) and named as an inclusion instead.
+  execPartition: 'الإجمالي = بانتظار الشحن + شُحنت ولم تُستلم + بانتظار النتائج + مكتملة (تشمل المرفوضة)',
   // Cancelled note — split into parts so the historical-before-April breakdown is
   // registry-driven: '* {N} {execCancelledLabel} ({execCancelledHistPre} {hist} {execCancelledHistPost})'.
   execCancelledLabel: 'طلب ملغي',
@@ -171,10 +243,21 @@ export const DEFAULT_LABELS = {
   defMShipped: 'شُحنت ولم تُستلم',               defDShipped: 'شُحنت العينة ولم يستلمها المختبر',
   defMAwaitResults: 'بانتظار النتائج',           defDAwaitResults: 'استلمها المختبر وبانتظار النتيجة',
   defMLate: '↳ منها متأخرة',                     defDLate: 'تجاوزت الاستحقاق بلا نتيجة',
-  defMCompleted: 'نتائج مكتملة',                 defDCompleted: 'لها تاريخ نتيجة',
-  defMRejected: 'المرفوضة',                      defDRejected: 'رفض المختبر نتيجتها',
-  defMOnTime: 'ملتزمة',                          defDOnTime: 'صدرت ضمن المدة المعيارية',
-  defMResultedLate: 'صدرت متأخرة',               defDResultedLate: 'صدرت النتيجة بعد الاستحقاق',
+  // COMPLETED and its three subsets. User decision 2026-07-28 — "consider rejected as
+  // completed test": rejection is the lab's FINAL outcome, so a rejected line is finished
+  // work, not work in progress. المرفوضة / ملتزمة / صدرت متأخرة are all counted INSIDE
+  // الفحوصات المكتملة and therefore all carry the deck's '↳ منها' subset prefix (same
+  // idiom as defMLate), so this slide can never be read as an add-up list.
+  // The metric string is CHARACTER-IDENTICAL to compCompleted / kpiCompleted /
+  // monthlyRowResults (2026-07-28). It used to read 'الفحوصات المكتملة' here, a near-miss
+  // of the 'فحوصات مكتملة' the three printing slides carry — and the glossary is the one
+  // place where an exact match is the whole point: a reader who turns this opt-in slide on
+  // to look the term up must find the same string, not a paraphrase. It also still fits
+  // with room to spare (1.049in at 8.5pt bold vs the 2.8in usable metric column).
+  defMCompleted: 'فحوصات مكتملة',                defDCompleted: 'لها تاريخ نتيجة أو رُفضت — الرفض نتيجة نهائية',
+  defMRejected: '↳ منها مرفوضة',                 defDRejected: 'رفض المختبر نتيجتها؛ جزء من المكتملة لا يُجمع معها',
+  defMOnTime: '↳ منها ملتزمة',                   defDOnTime: 'صدرت ضمن المدة المعيارية',
+  defMResultedLate: '↳ منها صدرت متأخرة',        defDResultedLate: 'صدرت النتيجة بعد الاستحقاق',
   defMPipeline: 'قبل الاستلام',                  defDPipeline: 'لم تصل المختبر بعد',
   defMPending: 'قيد المعالجة',                   defDPending: 'بلا نتيجة ولا رفض بعد',
   defMLatePct: 'نسبة التأخر',                    defDLatePct: 'المتأخرة ÷ بانتظار النتيجة',
@@ -206,24 +289,25 @@ export const LABEL_NAMES = {
   execDeltaLegendWeeklySun: 'مفتاح التغيّر الأسبوعي — منذ تقرير الأحد ({date})',
   execDeltaLegendWeeklyThu: 'مفتاح التغيّر الأسبوعي — منذ تقرير الخميس ({date})',
   monthlyRowOrders: 'صف الجدول الشهري: الفحوصات',
-  monthlyRowResults: 'صف الجدول الشهري: نتائج الفحوصات المستلمة',
+  monthlyRowResults: 'صف الجدول الشهري: فحوصات مكتملة (تشمل المرفوضة)',
   monthlyRowRejected: 'صف الجدول الشهري: النتائج المرفوضة (غير مستخدم حالياً)',
   monthlyRowIncomplete: 'صف الجدول الشهري: النتائج غير المكتملة',
   monthlyRowCompletion: 'صف الجدول الشهري: نسبة الاكتمال',
   chartMonthlyOrders: 'سلسلة الرسم الشهري: الطلبات',
-  chartMonthlyResults: 'سلسلة الرسم الشهري: النتائج المستلمة',
+  chartMonthlyResults: 'سلسلة الرسم الشهري: النتائج المكتملة (تشمل المرفوضة)',
   chartMonthlyIncomplete: 'سلسلة الرسم الشهري: النتائج غير المكتملة',
   compHash: 'عمود الالتزام: الرقم',
   compLab: 'عمود الالتزام: المختبر',
   compTotal: 'عمود الالتزام: مجموع الطلبات',
-  compCompleted: 'عمود الالتزام: فحوصات مكتملة',
+  compCompleted: 'عمود الالتزام: فحوصات مكتملة (تشمل المرفوضة)',
   compPipeline: 'عمود الالتزام: قبل الاستلام (غير مستخدم حالياً)',
   compAwaiting: 'عمود الالتزام: طلبات مستلمة بانتظار نتيجة',
-  compLate: 'عمود الالتزام: الطلبات المتأخرة',
+  compLate: 'عمود الالتزام: ↳ منها متأخرة (جزء من بانتظار نتيجة)',
   compOnTime: 'عمود الالتزام: الطلبات الملتزمة (غير مستخدم حالياً)',
   compResultedLate: 'عمود الالتزام: صدرت متأخرة (غير مستخدم حالياً)',
-  compRejected: 'عمود الالتزام: مرفوضة',
+  compRejected: 'عمود الالتزام: ↳ منها مرفوضة (جزء من المكتملة)',
   compLatePct: 'عمود الالتزام: نسبة الطلبات المتأخرة',
+  compPartition: 'حاشية معادلة مجموع الطلبات (مقياس الالتزام)',
   taskStatus: 'عمود المهام: الحالة',
   taskDue: 'عمود المهام: تاريخ الإكتمال',
   taskOwner: 'عمود المهام: المالك',
@@ -241,7 +325,7 @@ export const LABEL_NAMES = {
   chartOnTimeSeries: 'سلسلة الطلبات الملتزمة',
   overallAvgTitle: 'عنوان بطاقة متوسط زمن الإنجاز',
   execPartition: 'حاشية معادلة الإجمالي (الملخص التنفيذي) (غير مستخدم حالياً)',
-  monthlyPartition: 'حاشية معادلة الطلبات الشهرية (غير مستخدم حالياً)',
+  monthlyPartition: 'حاشية معادلة الفحوصات الشهرية',
   execCancelledLabel: 'نص ملاحظة الطلبات الملغاة',
   execCancelledHistPre: 'ملاحظة الملغاة: بادئة الجزء التاريخي',
   execCancelledHistPost: 'ملاحظة الملغاة: لاحقة الجزء التاريخي',
@@ -254,10 +338,10 @@ export const LABEL_NAMES = {
   defMShipped: 'منهجية: مؤشر شُحنت ولم تُستلم',   defDShipped: 'منهجية: تعريف شُحنت ولم تُستلم',
   defMAwaitResults: 'منهجية: مؤشر بانتظار النتائج', defDAwaitResults: 'منهجية: تعريف بانتظار النتائج',
   defMLate: 'منهجية: مؤشر منها متأخرة',          defDLate: 'منهجية: تعريف منها متأخرة',
-  defMCompleted: 'منهجية: مؤشر نتائج مكتملة',     defDCompleted: 'منهجية: تعريف نتائج مكتملة',
-  defMRejected: 'منهجية: مؤشر المرفوضة',          defDRejected: 'منهجية: تعريف المرفوضة',
-  defMOnTime: 'منهجية: مؤشر ملتزمة',             defDOnTime: 'منهجية: تعريف ملتزمة',
-  defMResultedLate: 'منهجية: مؤشر صدرت متأخرة',   defDResultedLate: 'منهجية: تعريف صدرت متأخرة',
+  defMCompleted: 'منهجية: مؤشر فحوصات مكتملة',    defDCompleted: 'منهجية: تعريف الفحوصات المكتملة',
+  defMRejected: 'منهجية: مؤشر ↳ منها مرفوضة',     defDRejected: 'منهجية: تعريف المرفوضة',
+  defMOnTime: 'منهجية: مؤشر ↳ منها ملتزمة',       defDOnTime: 'منهجية: تعريف ملتزمة',
+  defMResultedLate: 'منهجية: مؤشر ↳ منها صدرت متأخرة', defDResultedLate: 'منهجية: تعريف صدرت متأخرة',
   defMPipeline: 'منهجية: مؤشر قبل الاستلام',      defDPipeline: 'منهجية: تعريف قبل الاستلام',
   defMPending: 'منهجية: مؤشر قيد المعالجة',       defDPending: 'منهجية: تعريف قيد المعالجة',
   defMLatePct: 'منهجية: مؤشر نسبة التأخر',        defDLatePct: 'منهجية: تعريف نسبة التأخر',
@@ -322,8 +406,9 @@ const DELTA_LEGEND_KEY = {
 // the deck would state a false comparison basis while the review screen discloses the
 // fallback (screen-review.js anchorFallbackNote). So the unanchored case falls back to the
 // daily wording ('منذ آخر تقرير ({date})'), which is exactly what that baseline IS.
-// NOTE: `anchored` only reaches here on the UI path (screen-review.js forwards it);
-// automation/pipeline.js still drops it when stamping model.deltaBaseline — cross-file.
+// BOTH stampers forward `anchored`, so the fallback wording is reached on either path:
+// src/ui/screen-review.js:79 and src/automation/pipeline.js:90 each copy it onto
+// model.deltaBaseline (both carry their own comment saying it MUST be preserved).
 const deltaLegendText = (L, db) => {
   if (!db || !db.baselineDate) return L('execDeltaLegend');
   const key = db.anchored === false ? 'execDeltaLegendDaily' : DELTA_LEGEND_KEY[db.mode];
@@ -488,7 +573,12 @@ function buildExecFunnel(m) {
     { v: V('shippedNotReceived', b.shippedNotReceived), vc: C.redSoft,        lab: L('kpiShipped'),           sub: '',                         ac: C.redSoft,        dk: 'shippedNotReceived' },
     // CARD_DEEP_BLUE, not C.amber: the user recoloured this card in the reference deck.
     { v: vAwait,                                        vc: CARD_DEEP_BLUE,   lab: L('kpiAwaitingResults'),   sub: 'بعد الـ Dispatch',         ac: CARD_DEEP_BLUE,   dk: 'awaitingResults' },
-    { v: V('completed', b.completed),                   vc: C.green,          lab: L('kpiCompleted'),         sub: '',                         ac: C.green,          dk: 'completed' },
+    // sub 'تشمل المرفوضة' (added 2026-07-28): buckets.completed now counts a rejected
+    // line as completed (rejection is the lab's terminal outcome), and this row has no
+    // النتائج المرفوضة card any more, so the sublabel is the only place that can say so.
+    // Measured 0.900in at 9.5pt Cairo in the card's 1.479in sublabel box (1.279in usable
+    // after pptxgenjs' margins) — one line, +0.379in of slack.
+    { v: V('completed', b.completed),                   vc: C.green,          lab: L('kpiCompleted'),         sub: 'تشمل المرفوضة',            ac: C.green,          dk: 'completed' },
     { v: vLate,                                         vc: C.redPure,        lab: L('kpiLate'),              sub: `تمثل ${latePctShown}% من الطلبات`, ac: C.redPure, dk: 'lateNoResult', emph: true },
   ];
   const visible = cardDefs.filter((c) => m.reportOptions?.kpiCards?.[c.dk] !== false);
@@ -517,7 +607,13 @@ function buildExecFunnel(m) {
     { stage: '2. سحب العينة', val: V('funnel.collected', f.collected),  desc: 'العينة مُجمَّعة في KAMC',          color: C.blue,        key: 'collected', ov: 'funnel.collected' },
     { stage: '3. شحن العينة', val: V('funnel.dispatched', f.dispatched), desc: 'العينة شُحنت من قبل المستشفى',      color: C.amber,       key: 'dispatched', ov: 'funnel.dispatched' },
     { stage: '4. إستلام العينة', val: V('funnel.received', f.received),  desc: 'حالة إستلام العينة بقبولها او رفضها', color: C.greenSoft,  key: 'received',  ov: 'funnel.received' },
-    { stage: '5. إصدار نتيجة', val: V('funnel.resulted', f.resulted),   desc: 'نتيجة تحليل العينة',               color: C.greenBright, key: 'completed', ov: 'funnel.resulted' },
+    // FINAL STAGE = COMPLETED. engine.js buildFunnel publishes `completed` and keeps
+    // `resulted` as an ALIAS carrying the same number, so the long-lived 'funnel.resulted'
+    // override key still works and this stage can never print a figure different from the
+    // exec 'فحوصات مكتملة' card. f.completed is preferred and f.resulted is the fallback
+    // for an older engine build. The desc says 'أو رفضها' because a rejection is a
+    // terminal outcome and is counted here (user decision 2026-07-28).
+    { stage: '5. إصدار نتيجة', val: V('funnel.resulted', f.completed ?? f.resulted), desc: 'نتيجة تحليل العينة أو رفضها', color: C.greenBright, key: 'completed', ov: 'funnel.resulted' },
   ];
   const rowY = [3.226, 3.876, 4.526, 5.176, 5.862];
   const accentY = [3.276, 3.926, 4.576, 5.226, 5.912];
@@ -601,8 +697,14 @@ function buildMonthly(m) {
   // 295−59=236, 410−383=27, 106−77=29). The النتائج المرفوضة row was removed with it
   // (user decision 2026-07-26 — the reference table is header + 4 rows), so the visible
   // partition is once again orders = results + incomplete, which adds up on the page.
-  // The engine still publishes the finer `pending` (orders − results − rejected); it is
-  // simply not what this slide reports. monthlyRowRejected stays in both registries.
+  // SINCE 2026-07-28 that partition is also the engine's ONLY one: `results` is the
+  // COMPLETED count (result date OR rejected) and `pending` === `incomplete` === orders −
+  // results, because rejected moved inside results. So this row now carries the same
+  // number as the exec 'فحوصات مكتملة' card and the compliance completed column when
+  // summed over the months, and `incomplete` no longer double-counts the rejected lines.
+  // The per-month rejected value is still published by the engine as a SUBSET of results;
+  // this slide deliberately does not render it (adding it to a row would double-count).
+  // monthlyRowRejected stays in both registries.
   const iTot = mo.reduce((s, x) => s + x.incomplete, 0);
   const cPct = oTot > 0 ? Math.round((rTot / oTot) * 1000) / 10 : null; // round1(results/orders*100)
   const cTot = pctMonthly(cPct);
@@ -641,12 +743,20 @@ function buildMonthly(m) {
   const tableY = showTurnaround ? 1.069 : 2.194;     // reference table frame y
   const chartY = showTurnaround ? 1.07 : 2.195;      // reference chart frame y
 
+  const ROW_H = 0.456;
   const table = {
-    t: 'table', x: 6.604, y: tableY, w: TABLE_W, rtl: true, rowH: 0.456,
+    t: 'table', x: 6.604, y: tableY, w: TABLE_W, rtl: true, rowH: ROW_H,
     header: { fill: C.navy, color: C.white, bold: true },
     colW: rev([LABEL_COLW, ...monthColW, TOTAL_COLW]),
     rows: [header, rowOrders, rowResults, rowIncomplete, rowCompletion],
   };
+  // Partition footnote, anchored 0.08in under the table's COMPUTED bottom so it follows
+  // both layouts instead of a constant: turnaround OFF → 2.194 + 5×0.456 = 4.474 (the
+  // chart beside it ends at 5.595, and it owns x 0.5–6.5, so the band is free); ON →
+  // 1.069 + 2.28 = 3.349, well clear of the line chart's y 4.583. Same x/width as the
+  // table, right-aligned, so it reads as that table's note.
+  const partitionNote = text(6.604, tableY + 5 * ROW_H + 0.08, TABLE_W, 0.22,
+    L('monthlyPartition'), 9, { color: C.slate500, align: 'right', valign: 'top', rtl: true });
 
   // CATEGORY DIRECTION IS RIGHT-TO-LEFT — oldest month at the RIGHT, newest at the LEFT,
   // so the time axis reads in Arabic order alongside the RTL table beside it. This is the
@@ -698,9 +808,13 @@ function buildMonthly(m) {
   const els = [
     ...chrome(L('titleMonthly')),
     table,
-    // NOTE: the monthly partition footnote (monthlyPartition) is NOT rendered any more —
-    // user decision 2026-07-26 (simpler 20-07 deck shape, no add-up equation notes). The
-    // label key stays in both registries for parity.
+    // The partition footnote is rendered again (2026-07-28). It was dropped on 2026-07-26
+    // with the other add-up equation notes (simpler 20-07 deck shape) — but that was while
+    // every row on this slide still meant what its last-week counterpart meant. The
+    // completed rule (result date OR rejected) silently moved نسبة الاكتمال by up to 13.3
+    // points per month, and this is the only element on the slide that can say so. It is
+    // ONE 9pt slate line under the table, not a restored equation band.
+    partitionNote,
     monthlyChart,
   ];
   if (showTurnaround) {
@@ -735,14 +849,15 @@ function buildMonthly(m) {
 // divider + heading, and the catalog/overflow notes were removed; the by-lab table now
 // grows into the freed space. (The chartLateSeries/chartOnTimeSeries/catalogNote labels
 // stay in the registries for parity — harmless orphans.)
-// SIMPLIFIED back to the 20-07 reference deck (user decision 2026-07-26): SEVEN columns,
-// the '#' index column restored, and the قبل الاستلام / ملتزمة / صدرت متأخرة columns plus
-// the add-up equation footnote all removed. Their label keys survive in the registries.
+// SIMPLIFIED back to the 20-07 reference deck (user decision 2026-07-26): the '#' index
+// column restored, and the قبل الاستلام / ملتزمة / صدرت متأخرة columns removed (their
+// label keys survive in the registries). فحوصات مكتملة was added back on 2026-07-27, so
+// the table is EIGHT columns; the partition footnote is rendered again (see els below).
 function buildCompliance(m) {
   const L = labelOf(m);
   const lab = m.kpi.byLab;
-  // Logical (deck RTL, right→left reading) order per row — matches the reference deck:
-  //   [#, lab, total, awaitingResult, rejected, late, latePct]
+  // Logical (deck RTL, right→left reading) order per row:
+  //   [#, lab, total, completed, awaitingResult, rejected, late, latePct]
   // rev() -> visual L→R. Every column total is computed from the rows (no hardcoded
   // literals); latePct total = lateTot/awaitTot (round1, guard div-by-zero).
   const totalTot = lab.reduce((s, r) => s + (r.total || 0), 0);
@@ -754,15 +869,31 @@ function buildCompliance(m) {
   // NO conditional body-cell emphasis. The 20-07 reference deck prints EVERY body cell
   // in #1E293B, non-bold — including late=80, 100.0% and 55.6%, i.e. values the
   // red/bold rules would have flagged. Restored to that (user decision 2026-07-26).
+  // TWO SUBSET COLUMNS, both carrying the deck's '↳ منها' prefix (see compRejected /
+  // compLate / defMLate) so neither reads as another addend:
+  //   مرفوضة  ⊂ فحوصات مكتملة        (counted inside it since 2026-07-28)
+  //   متأخرة  ⊂ طلبات مستلمة بانتظار نتيجة (late = LATE && no result ⇒ received, not rejected)
+  // compRejected ALSO gets a lighter header fill (C.taskNavy #2F5597 against the row's
+  // C.navy #1E3A8A). compLate does NOT, and that asymmetry is not a statement about the
+  // two metrics: the fill assertion in test/compliance-completed.test.mjs pins every
+  // other header cell to no per-cell fill, and this file may not edit that test —
+  // cross-file, deferred. Both columns are named as subsets in the compPartition
+  // footnote, which is what actually carries the meaning; the fill is decoration.
   const header = rev([
     L('compHash'), L('compLab'), L('compTotal'), L('compCompleted'), L('compAwaiting'),
-    L('compRejected'), L('compLate'), L('compLatePct'),
+    { text: L('compRejected'), fill: C.taskNavy }, L('compLate'), L('compLatePct'),
   ]);
-  // Completed per lab = engine byLab `resulted` — non-rejected rows that HAVE a result
-  // date (= onTime + resultedLate, see engine.js buildByLab). It is the same definition
-  // as the exec 'فحوصات مكتملة' card, so the two surfaces cannot disagree. Rendered
-  // green+bold when > 0, mirroring how the deck treats a good number elsewhere.
-  const completedOf = (r) => (r.resulted != null ? r.resulted : (r.onTime || 0) + (r.resultedLate || 0));
+  // Completed per lab = engine byLab `completed` — the headline partition term
+  // (total = pipeline + awaitingResult + completed) and, since the user decision
+  // 2026-07-28 "consider rejected as completed test", the count of lines that reached a
+  // TERMINAL lab outcome: a result date OR a rejection (engine.js isCompleted()). It is
+  // the same field the exec 'فحوصات مكتملة' card, the funnel's last stage and the monthly
+  // completed row all resolve to, so the four surfaces cannot disagree.
+  // FALLBACK (resulted + rejected) covers an older engine build that predates the
+  // explicit `completed` field; it is the same number by definition.
+  const completedOf = (r) => (r.completed != null
+    ? r.completed
+    : (r.resulted != null ? r.resulted : (r.onTime || 0) + (r.resultedLate || 0)) + (r.rejected || 0));
   const completedTot = lab.reduce((s, r) => s + completedOf(r), 0);
   const completedCell = (n) => (n > 0 ? { text: String(n), color: C.green, bold: true } : String(n || 0));
   const labRows = lab.map((r, i) => rev([
@@ -807,12 +938,42 @@ function buildCompliance(m) {
   // header must still fit on ONE line at 10pt bold, and a column offers only
   // colW−0.2in of text width in PPTX (pptxgenjs cell margins). Widths are taken
   // from the longest header/content each column must hold, and still total 11.667.
-  // Measured, not guessed: each header at 10pt bold and each column's longest real
-  // content at 10pt regular in Cairo, against colW−0.2in of usable width (pptxgenjs
-  // cell margins). Worst case for المختبر is the longest live lab name
-  // ('Genomics innovations Limited Company' = 2.331in) — an earlier 2.500 box
-  // overflowed it by 0.031in. Tightest surviving margin is +0.069in.
-  const COL_W = [0.450, 2.600, 1.300, 1.450, 2.050, 0.850, 1.350, 1.617];
+  //
+  // RE-BUDGETED AGAIN 2026-07-28 (second pass), for two reasons:
+  //  1. The 2026-07-27 eight-column budget paid for the widened '↳ منها مرفوضة' header
+  //     mostly out of column [4] (بانتظار نتيجة), cutting it 2.050 → 1.950, i.e. from
+  //     +0.151in of margin to +0.051in. That is the ONE column with a recorded PowerPoint
+  //     wrap history (see the reference-widths note above), and the HTML/PDF preview
+  //     cannot catch a regression there: html-renderer pads 2px 4px (0.083in) against
+  //     pptxgenjs' 0.2in, so every column looks 0.117in roomier on screen than in the
+  //     PPTX. It is restored to 2.050 exactly.
+  //  2. compLate became '↳ منها متأخرة' (0.895in) instead of 'الطلبات المتأخرة' (0.996in),
+  //     which frees 0.101in — that is what pays for [4] without starving anything else.
+  // Every width below is measured BY RANGE in the deck's own self-hosted Cairo (the
+  // assets/fonts woff2 files, headers at 10pt bold / body at 10pt regular), not estimated.
+  // colW (usable = colW−0.2) — binding string → margin:
+  //   #                        0.420 (0.220) — body '15'                 0.156 → +0.064
+  //   المختبر                   2.612 (2.412) — lab name (see below)      2.332 → +0.080
+  //   مجموع الطلبات             1.190 (0.990) — header                    0.930 → +0.060
+  //   فحوصات مكتملة             1.319 (1.119) — header                    1.049 → +0.070
+  //   طلبات مستلمة بانتظار نتيجة 2.050 (1.850) — header                    1.699 → +0.151
+  //   ↳ منها مرفوضة             1.290 (1.090) — header                    1.000 → +0.090
+  //   ↳ منها متأخرة             1.185 (0.985) — header                    0.895 → +0.090
+  //   نسبة الطلبات المتأخرة      1.601 (1.401) — header                    1.334 → +0.067
+  // Sum = 11.667 exactly = the table width (asserted in compliance-completed.test.mjs).
+  // Tightest margin is +0.060in, up from +0.051in, and no column loses more than 0.010in
+  // of margin. Both '↳' headers keep ≥ +0.090in on purpose: that glyph (U+21B3) may fall
+  // back to a non-Cairo font in PowerPoint, so the subset columns carry the extra slack.
+  // THE LAB-NAME BOUND: the longest name in TODAY's live data is 'king Abdullaziz Medical
+  // city in Riyadh' at 2.158in (the golden fixture's longest too) — the earlier notes here
+  // and above cite 'Genomics innovations Limited Company' / 'Advanced Laboratory Services
+  // Company', which are NUPCO names from src/seeds/scorecard.js and have never appeared in
+  // this table's data (byLab is keyed off the CSV's `facility`). They are kept as the
+  // DESIGN bound anyway — they are real lab names that a future file may carry, they are
+  // the widest strings in the repo for this column (2.332in and 2.331in respectively, i.e.
+  // the pair is a 0.001in tie, not the clear winner the old note implied), and budgeting
+  // to them costs nothing: it just means live data runs with +0.254in of real headroom.
+  const COL_W = [0.420, 2.612, 1.190, 1.319, 2.050, 1.290, 1.185, 1.601];
   // POSITION AND ROW HEIGHT ARE THE 20-07 REFERENCE DECK's (user decision 2026-07-26):
   // frame y = 1959540 EMU = 2.143in, every a:tr h = 251460 EMU = 0.275in, so 9 rows span
   // 2.143 → 4.618. An earlier change pinned the table at y 1.194 and GREW rowH to 0.40 to
@@ -832,12 +993,28 @@ function buildCompliance(m) {
     rows: [header, ...labRows, totalRow],
   };
 
-  // Slide is TABLE-ONLY: chrome + the by-lab table. Nothing else — no chart, no band
-  // divider, no catalog/overflow/equation notes (matches the 20-07 reference deck).
+  // Chrome + the by-lab table + ONE partition footnote. Still no chart, no band divider,
+  // no catalog/overflow notes (the 20-07 reference shape). The equation note is back
+  // because this table can no longer be reconciled by reading it: two of its six numeric
+  // columns are SUBSETS (مرفوضة ⊂ مكتملة, متأخرة ⊂ بانتظار نتيجة) and one partition term
+  // (قبل الاستلام) has no column at all, so on golden data the printed columns give
+  // 437 + 159 = 596 against a printed total of 618. The footnote states the identity and
+  // names each subset's parent — the ↳ markers stop the reader ADDING those columns, this
+  // line is what tells them which column each one belongs to.
+  // ANCHORED to the computed table bottom, not a constant: TABLE_Y + rows×ROW_H + 0.08.
+  // At the usual 6–8 labs that lands at y≈4.4–4.9; it is SUPPRESSED when the table has
+  // grown so tall that the note would cross the 7.05 content floor (≥15 labs), since the
+  // 7.1 footer rule and the page number live just below it.
+  const tableBottom = TABLE_Y + labTable.rows.length * ROW_H;
+  const NOTE_H = 0.22;
   const els = [
     ...chrome(L('titleCompliance')),
     labTable,
   ];
+  if (tableBottom + 0.08 + NOTE_H <= 7.05) {
+    els.push(text(0.833, tableBottom + 0.08, 11.667, NOTE_H, L('compPartition'), 9,
+      { color: C.slate500, align: 'right', valign: 'top', rtl: true }));
+  }
   return { id: 'compliance', bg: C.white, elements: els };
 }
 

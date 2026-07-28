@@ -12,6 +12,27 @@
 //                        cancelled(m) = countedFromCsv(m) + manual[m].
 //   tatFallbackFromCsv = true ; prevCompleted = 375 (legacy baseline; the engine
 //                        folds it into deltas.completed when no snapshot.numbers).
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// DEFINITION CHANGE 2026-07-28 — "consider rejected as completed test"
+//   OLD: completed = 422  (non-cancelled rows WITH a Result report date only)
+//   NEW: completed = 437  (non-cancelled AND (has a result date OR rejected))
+//   DELTA: exactly +15 — the 15 rejected rows in this fixture ({05:14, 06:1}),
+//          every one of which has a BLANK result date, so there is no overlap and
+//          no double count. 422 + 15 = 437.
+//   REASON: the user's decision — rejection is a lab's FINAL outcome for a test,
+//          so a rejected line is finished work, not work in progress.
+//   THIS IS A DELIBERATE RE-BASELINE OF THE PUBLISHED 09-07 DECK, NOT A
+//   REGRESSION. The published deck printed 422 under the old (2026-07-19)
+//   dated-only rule; the same rows now publish 437.
+//   Fields re-baselined below: funnel.resulted/funnel.completed, buckets.completed,
+//   monthly.results/incomplete/completionPct (+ monthlyTotals), byLab.completed
+//   (new column) + byLabTotals.completed, GOLDEN_PREV_COMPLETED.
+//   Fields deliberately UNCHANGED: byLab.resulted / onTime / resultedLate (still
+//   the dated-only split, now subsets of completed), buckets.rejected (15, now a
+//   SUBSET of completed), turnaround.measuredCount (422 — a rejected row has no
+//   result timestamp to measure), byTest, totals, cancelledNote.
+// ─────────────────────────────────────────────────────────────────────────────
 
 export const GOLDEN_ASOF = '2026-07-09';
 
@@ -21,40 +42,52 @@ export const GOLDEN_CANCELLED_BY_MONTH = {
   '2026-01': 8, '2026-02': 1, '2026-03': 30, '2026-04': 4,
 };
 
-export const GOLDEN_PREV_COMPLETED = 422; // == current completed (dated-only rule) → main golden run expects zero deltas
+// == current completed (rejected-as-completed rule, 2026-07-28) → the main golden
+// run still expects zero deltas. Was 422 under the dated-only rule.
+export const GOLDEN_PREV_COMPLETED = 437;
 
 export const GOLDEN_EXPECTED = {
   totals: { lines: 628, cancelledInData: 10, total: 618 },
 
-  funnel: { created: 618, collected: 612, dispatched: 608, received: 596, resulted: 422 }, // dated-only rule (2026-07-19): rejected no longer counted
+  // Final stage = COMPLETED (result date OR rejected), 2026-07-28: 422 → 437.
+  // `resulted` is the legacy alias of `completed` and carries the SAME number, so
+  // the funnel's last stage can never disagree with the exec KPI card.
+  funnel: { created: 618, collected: 612, dispatched: 608, received: 596, resulted: 437, completed: 437 },
 
   buckets: {
     awaitingDispatch: 10,
     shippedNotReceived: 12,
     awaitingResults: 159,
-    completed: 422,
-    rejected: 15, // surfaced as own value (2026-07-19); {05:14, 06:1}
+    // 422 (dated) + 15 (rejected) = 437 — rejected is a terminal outcome (2026-07-28).
+    // PARTITION: 10 + 12 + 159 + 437 = 618 = totals.total.
+    completed: 437,
+    rejected: 15, // own value; now a SUBSET of completed. {05:14, 06:1}
     lateNoResult: 67,
     latePct: 42.1,
   },
 
-  // order-month, excl. cancelled; cancelled = merged max(stored, computed-in-data)
-  // rejected is per order-month (own value). PARTITION: orders = results + rejected
-  // + pending (pending = orders−results−rejected). incomplete (= orders−results) is
-  // LEGACY and double-counts rejected (May 29 vs pending 15, Jun 70 vs pending 69).
+  // order-month, excl. cancelled; cancelled = additive (in-data + manual constant).
+  // `results` = the COMPLETED rule (result date OR rejected), 2026-07-28 — May
+  // 76→90, Jun 340→341, total 422→437. PARTITION: orders = results + pending.
+  // `rejected` stays as its own per-month value but is a SUBSET of results, so it
+  // is no longer a partition term. `pending` and `incomplete` are now identical
+  // (both orders − results); incomplete no longer double-counts rejected, hence
+  // May 29→15, Jun 70→69, total 196→181. completionPct = results/orders → May
+  // 72.4→85.7, Jun 82.9→83.2, total 68.3→70.7.
   monthly: [
     { month: '2026-01', orders: 0, results: 0, rejected: 0, pending: 0, incomplete: 0, completionPct: null, cancelled: 8 },
     { month: '2026-02', orders: 0, results: 0, rejected: 0, pending: 0, incomplete: 0, completionPct: null, cancelled: 1 },
     { month: '2026-03', orders: 0, results: 0, rejected: 0, pending: 0, incomplete: 0, completionPct: null, cancelled: 30 },
     { month: '2026-04', orders: 3, results: 3, rejected: 0, pending: 0, incomplete: 0, completionPct: 100, cancelled: 4 },
-    { month: '2026-05', orders: 105, results: 76, rejected: 14, pending: 15, incomplete: 29, completionPct: 72.4, cancelled: 6 },
-    { month: '2026-06', orders: 410, results: 340, rejected: 1, pending: 69, incomplete: 70, completionPct: 82.9, cancelled: 4 },
+    { month: '2026-05', orders: 105, results: 90, rejected: 14, pending: 15, incomplete: 15, completionPct: 85.7, cancelled: 6 },
+    { month: '2026-06', orders: 410, results: 341, rejected: 1, pending: 69, incomplete: 69, completionPct: 83.2, cancelled: 4 },
     { month: '2026-07', orders: 100, results: 3, rejected: 0, pending: 97, incomplete: 97, completionPct: 3.0, cancelled: 0 },
   ],
-  monthlyTotals: { orders: 618, results: 422, rejected: 15, pending: 181, incomplete: 196, completionPct: 68.3 },
+  monthlyTotals: { orders: 618, results: 437, rejected: 15, pending: 181, incomplete: 181, completionPct: 70.7 },
   cancelledNote: 53,
 
-  // resulted rows excl. Rejected (n = 422); 1-decimal report rounding
+  // resulted rows excl. Rejected (n = 422 — NOT completed 437: a rejected row has
+  // no result timestamp, so it cannot contribute a duration); 1-decimal rounding
   turnaround: {
     overallActual: 12.0,
     overallExpected: 7.0,
@@ -68,21 +101,26 @@ export const GOLDEN_EXPECTED = {
   },
 
   // facility-normalized, excl. cancelled; sorted total-desc (workbook table order).
-  // TRUE PARTITION: total = pipeline + awaitingResult + onTime + resultedLate + rejected.
+  // HEADLINE PARTITION (2026-07-28): total = pipeline + awaitingResult + completed.
   //   pipeline     = no received date yet (pre-receipt); sums to 22 (= total 618 − received 596).
+  //   completed    = resulted + rejected (result date OR rejected); sums to 437 — the
+  //                  NEW column, and the same number as buckets.completed / funnel.
+  // FINER SPLIT of completed (all SUBSETS — never add these next to completed):
   //   resulted     = onTime + resultedLate (non-rejected rows with a result); sums to 422.
   //   resultedLate = resulted − onTime (issued after due + No-Match resulted); sums to 252.
+  //   rejected per lab: Advanced 14, Fal 1, others 0 (sums to 15). onTime sums to 170.
+  //   The old 5-way identity (pipeline + awaitingResult + onTime + resultedLate +
+  //   rejected = total) is still exactly true — completed just groups its last three.
   // latePct = late / awaitingResult (0 when awaitingResult = 0); late is a subset of awaitingResult.
-  // rejected per lab (own value): Advanced 14, Fal 1, others 0. onTime sums to 170.
   byLab: [
-    { lab: 'Advanced Laboratory Services .Co', total: 301, pipeline: 11, awaitingResult: 89, onTime: 29, resulted: 187, resultedLate: 158, rejected: 14, late: 60, latePct: 67.4 },
-    { lab: 'Fal Specialized Medical Lab', total: 151, pipeline: 6, awaitingResult: 21, onTime: 75, resulted: 123, resultedLate: 48, rejected: 1, late: 2, latePct: 9.5 },
-    { lab: 'king Abdullaziz Medical city in Riyadh', total: 113, pipeline: 1, awaitingResult: 35, onTime: 42, resulted: 77, resultedLate: 35, rejected: 0, late: 3, latePct: 8.6 },
-    { lab: 'Eurofins clinical', total: 27, pipeline: 3, awaitingResult: 0, onTime: 20, resulted: 24, resultedLate: 4, rejected: 0, late: 0, latePct: 0 },
-    { lab: 'Saudi Diagnostics Limited Company', total: 19, pipeline: 1, awaitingResult: 7, onTime: 4, resulted: 11, resultedLate: 7, rejected: 0, late: 2, latePct: 28.6 },
-    { lab: 'Anwa Medical Company', total: 7, pipeline: 0, awaitingResult: 7, onTime: 0, resulted: 0, resultedLate: 0, rejected: 0, late: 0, latePct: 0 },
+    { lab: 'Advanced Laboratory Services .Co', total: 301, pipeline: 11, awaitingResult: 89, completed: 201, onTime: 29, resulted: 187, resultedLate: 158, rejected: 14, late: 60, latePct: 67.4 },
+    { lab: 'Fal Specialized Medical Lab', total: 151, pipeline: 6, awaitingResult: 21, completed: 124, onTime: 75, resulted: 123, resultedLate: 48, rejected: 1, late: 2, latePct: 9.5 },
+    { lab: 'king Abdullaziz Medical city in Riyadh', total: 113, pipeline: 1, awaitingResult: 35, completed: 77, onTime: 42, resulted: 77, resultedLate: 35, rejected: 0, late: 3, latePct: 8.6 },
+    { lab: 'Eurofins clinical', total: 27, pipeline: 3, awaitingResult: 0, completed: 24, onTime: 20, resulted: 24, resultedLate: 4, rejected: 0, late: 0, latePct: 0 },
+    { lab: 'Saudi Diagnostics Limited Company', total: 19, pipeline: 1, awaitingResult: 7, completed: 11, onTime: 4, resulted: 11, resultedLate: 7, rejected: 0, late: 2, latePct: 28.6 },
+    { lab: 'Anwa Medical Company', total: 7, pipeline: 0, awaitingResult: 7, completed: 0, onTime: 0, resulted: 0, resultedLate: 0, rejected: 0, late: 0, latePct: 0 },
   ],
-  byLabTotals: { total: 618, pipeline: 22, awaitingResult: 159, onTime: 170, resulted: 422, resultedLate: 252, rejected: 15, late: 67, latePct: 42.1 },
+  byLabTotals: { total: 618, pipeline: 22, awaitingResult: 159, completed: 437, onTime: 170, resulted: 422, resultedLate: 252, rejected: 15, late: 67, latePct: 42.1 },
 
   // curated catalog restricted; a row appears when late>0 OR onTime>0. Sorted
   // late-ascending (ties: reverse catalog order); onTime rides that order.
@@ -112,8 +150,8 @@ export const GOLDEN_EXPECTED = {
   unmatchedTests: [], // every test in the data resolves in the TAT lookup
 
   // Full deltas set (E6). The golden run's baseline is the legacy prevCompleted
-  // (422 == current completed) folded into numbers.completed; every key resolves
-  // to a non-increase, so all nine deltas are 0.
+  // (437 == current completed under the 2026-07-28 rule; was 422) folded into
+  // numbers.completed; every key resolves to a non-increase, so all deltas are 0.
   deltas: {
     total: 0,
     collected: 0,

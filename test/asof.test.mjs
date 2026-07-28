@@ -60,6 +60,9 @@ const SKIP_CSV = { skip: !csvRows };
 test('CROWN identity: as-of @ 2026-07-09 == engine\'s own 10 numbers (GOLDEN_ORDERS)', () => {
   // GOLDEN_ORDERS is the true 07-09 snapshot: no timestamp is later than the
   // report date, so as-of state == current state and every key must match exactly.
+  // NOTE the comparison is against the ENGINE's live output — never a hardcoded
+  // completed — so the as-of `completed` rule and the engine's cannot drift apart:
+  // change one definition without the other and this test fails.
   const eng = engineNumbers(GOLDEN_ORDERS, GOLDEN_ASOF);
   const { numbers } = computeNumbersAsOf({ rows: GOLDEN_ORDERS, tatTests: TAT_LOOKUP, asOfIso: GOLDEN_ASOF });
   for (const k of NUMBER_KEYS) {
@@ -70,14 +73,38 @@ test('CROWN identity: as-of @ 2026-07-09 == engine\'s own 10 numbers (GOLDEN_ORD
   assert.deepEqual(numbers, SNAPSHOT_SEED.numbers);
 });
 
-test('CROWN identity: approx flags total (cancelled-in-range) and rejected (no reject timestamp)', () => {
+test('COMPLETED CONTAINS REJECTED: completed == resulted + rejected on the golden data', () => {
+  // 2026-07-28 rule: a rejection is the lab's FINAL outcome, so a rejected row is
+  // completed work. Derived from the fixture, not hardcoded: in GOLDEN_ORDERS every
+  // rejected row has a BLANK result date, so the two sets are disjoint and completed
+  // must be exactly their sum — proving rejected is counted, and counted ONCE.
+  const nonCancelled = GOLDEN_ORDERS.filter((r) => r.rawStatus !== 'Order Cancelled');
+  const hasResult = (r) => r.resulted != null && String(r.resulted).trim() !== '';
+  const resultedCount = nonCancelled.filter(hasResult).length;
+  const rejectedRows = nonCancelled.filter((r) => r.rawStatus === 'Result Rejected');
+  assert.equal(rejectedRows.filter(hasResult).length, 0, 'fixture assumption: rejected rows carry no result date');
+
+  const { numbers } = computeNumbersAsOf({ rows: GOLDEN_ORDERS, tatTests: TAT_LOOKUP, asOfIso: GOLDEN_ASOF });
+  assert.equal(numbers.rejected, rejectedRows.length);
+  assert.equal(numbers.completed, resultedCount + numbers.rejected);
+  // rejected is a SUBSET of completed, never an addition on top of it.
+  assert.ok(numbers.completed >= numbers.rejected);
+  // The shipped baseline seed speaks the same definition (no silent 15-row gap).
+  assert.equal(SNAPSHOT_SEED.numbers.completed, resultedCount + SNAPSHOT_SEED.numbers.rejected);
+});
+
+test('CROWN identity: approx flags total (cancelled-in-range), rejected + completed (no reject timestamp)', () => {
   const { approx } = computeNumbersAsOf({ rows: GOLDEN_ORDERS, tatTests: TAT_LOOKUP, asOfIso: GOLDEN_ASOF });
-  // Both are principled approximations: cancellation & rejection carry no timestamp.
+  // All principled approximations: cancellation & rejection carry no timestamp.
   assert.equal(approx.total, true);
   assert.equal(approx.rejected, true);
-  // The other 8 keys are exact (timestamp-driven) — never flagged.
+  // completed CONTAINS rejected since 2026-07-28, so it inherits that approximation
+  // — the two are always flagged together, never one without the other.
+  assert.equal(approx.completed, true);
+  // The other 7 keys are exact (timestamp-driven) — never flagged.
+  const APPROX_KEYS = ['total', 'rejected', 'completed'];
   for (const k of NUMBER_KEYS) {
-    if (k !== 'total' && k !== 'rejected') assert.equal(approx[k], undefined, `${k} must not be approx`);
+    if (!APPROX_KEYS.includes(k)) assert.equal(approx[k], undefined, `${k} must not be approx`);
   }
 });
 
@@ -161,6 +188,63 @@ test('hand-check: a single line moves through the buckets as its timestamps pass
   });
 });
 
+test('hand-check: a REJECTED line counts as completed from its dated day onward', () => {
+  // 2026-07-28 rule: rejection is the lab's final outcome → completed work. The row
+  // is dated by the SAME rule the rejected bucket uses (result date when present,
+  // else orderDate), so completed and rejected can never disagree about the day.
+  const ZERO = {
+    total: 0, collected: 0, dispatched: 0, received: 0, completed: 0, rejected: 0,
+    awaitingDispatch: 0, shippedNotReceived: 0, awaitingResults: 0, lateNoResult: 0,
+  };
+  const at = (row, iso) => computeNumbersAsOf({ rows: [row], tatTests: {}, asOfIso: iso });
+
+  // (a) rejected with NO result date → dated by the LAST milestone it is known to
+  // have reached, which here is RECEIPT (2026-06-03), not the order day: a rejection
+  // cannot precede the sample physically arriving at the lab, so dating it at the
+  // order would report the lab as finished before it had the specimen.
+  const noDate = {
+    orderDate: '2026-06-01', collected: '2026-06-01 08:00:00', dispatched: '2026-06-02 09:00:00',
+    received: '2026-06-03 10:00:00', resulted: '',
+    rawStatus: 'Result Rejected', facility: 'Lab X', testName: 'ANY TEST', tatDaysCsv: 2,
+  };
+  assert.deepEqual(at(noDate, '2026-05-31').numbers, ZERO); // before the order exists
+  // On the ORDER day the rejection is not dated yet, so the row is still in the
+  // pipeline — awaiting dispatch, and NOT yet completed.
+  assert.deepEqual(at(noDate, '2026-06-01').numbers, {
+    ...ZERO, total: 1, collected: 1, awaitingDispatch: 1,
+  });
+  // On the RECEIPT day the rejection is dated: it leaves the pipeline and becomes
+  // completed, counted once, on the same day in both keys.
+  assert.deepEqual(at(noDate, '2026-06-03').numbers, {
+    ...ZERO, total: 1, collected: 1, dispatched: 1, received: 1, completed: 1, rejected: 1,
+  });
+  // Later — never awaiting a result, never LATE (rejected is excluded from both),
+  // and never counted twice in completed.
+  assert.deepEqual(at(noDate, '2026-06-20').numbers, {
+    ...ZERO, total: 1, collected: 1, dispatched: 1, received: 1, completed: 1, rejected: 1,
+  });
+  // The orderDate fallback is disclosed on BOTH keys it affects.
+  assert.deepEqual(at(noDate, '2026-06-20').approx, { rejected: true, completed: true });
+
+  // (b) rejected WITH a result date → dated by the result date (2026-06-10), and
+  // counted ONCE: the row satisfies both the resulted and rejected tests.
+  const dated = { ...noDate, resulted: '2026-06-10 11:00:00' };
+  // Before the result date the row is genuinely still awaiting a result — and late,
+  // since its due date (received + 2 business days) has passed. A row rejected LATER
+  // must not be retro-actively removed from the day it really was late.
+  assert.deepEqual(at(dated, '2026-06-09').numbers, {
+    ...ZERO, total: 1, collected: 1, dispatched: 1, received: 1,
+    awaitingResults: 1, lateNoResult: 1, // not completed yet
+  });
+  const after = at(dated, '2026-06-10');
+  assert.deepEqual(after.numbers, {
+    ...ZERO, total: 1, collected: 1, dispatched: 1, received: 1, completed: 1, rejected: 1,
+  });
+  assert.equal(after.numbers.completed, 1, 'a rejected row WITH a result date is counted once, not twice');
+  assert.equal(after.approx.completed, undefined); // exact: no orderDate fallback used
+  assert.equal(after.approx.rejected, undefined);
+});
+
 // =============================================================================
 // 4. buildWeekNumbers
 // =============================================================================
@@ -195,9 +279,10 @@ test('buildWeekNumbers: a published snapshot is preferred over the computed valu
   for (const w of week) {
     if (w.date !== '2026-07-05') assert.equal(w.source, 'computed', `${w.date} should be computed`);
   }
-  // Computed rows over the golden data carry the approx flags (cancelled + rejected).
+  // Computed rows over the golden data carry the approx flags (cancelled + rejected,
+  // and completed with it since completed now contains rejected).
   const computedDay = week.find((w) => w.date === '2026-07-09');
-  assert.deepEqual(computedDay.approx, { total: true, rejected: true });
+  assert.deepEqual(computedDay.approx, { total: true, rejected: true, completed: true });
 });
 
 test('buildWeekNumbers: pure — identical inputs yield identical output (no Date.now)', () => {

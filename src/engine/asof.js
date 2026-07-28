@@ -22,11 +22,47 @@
 //               cancelled status ∩ orderDate ≤ asOf. Flagged when any cancelled
 //               row falls in range (it may not have been cancelled yet back then).
 //   • rejected — rejection has no timestamp; a rejected row is dated by its
-//               resulted/report datetime when present, else by orderDate ≤ asOf.
-//               Flagged when any counted rejected row used the orderDate fallback.
+//               resulted/report datetime when present, else by the LAST milestone
+//               the row is known to have reached (received, else dispatched, else
+//               orderDate) ≤ asOf. Flagged when any counted rejected row used that
+//               milestone fallback.
+//   • completed — since 2026-07-28 completed CONTAINS rejected (a rejection is a
+//               lab's FINAL outcome, i.e. finished work), so it inherits the
+//               rejected key's approximation: flagged on exactly the same
+//               condition (a counted rejected row dated by the milestone fallback).
+//
+// PER-KEY as-of rule (the 10 numbers), all over NON-CANCELLED rows:
+//   total              orderDate ≤ asOf
+//   collected          collected ≤ asOf
+//   dispatched         dispatched ≤ asOf
+//   received           received ≤ asOf
+//   completed          resulted ≤ asOf  OR  (rejected AND its dated day ≤ asOf)
+//   rejected           rawStatus 'Result Rejected' AND dated day ≤ asOf, where the
+//                      dated day = resulted day when present, else the LAST
+//                      milestone the row is known to have reached: received, else
+//                      dispatched, else orderDate
+//   awaitingDispatch   orderDate ≤ asOf AND NOT dispatched ≤ asOf
+//   shippedNotReceived dispatched ≤ asOf AND NOT received ≤ asOf
+//   awaitingResults    received ≤ asOf AND NOT resulted ≤ asOf AND NOT rejected
+//   lateNoResult       awaitingResults ∩ StdTAT resolved ∩ due day < asOf day
+// completed and rejected share ONE dated-day computation per row (below), so the
+// two can never disagree about when a rejected row entered the picture, and a
+// rejected row that DOES carry a result date is counted once, not twice.
+//
+// WHY THE LAST MILESTONE, NOT THE FIRST — a rejection cannot precede receipt.
+// Dating an undated rejection by its ORDER day reported the row as finished while
+// the very same row was still counted in awaitingDispatch or shippedNotReceived
+// (neither excludes rejected, mirroring the engine), breaking the stage partition
+//   total = awaitingDispatch + shippedNotReceived + awaitingResults + completed
+// on 6 days of the golden range (e.g. 2026-05-19: completed 14 for rows received
+// only on 2026-05-20). Harmless while `rejected` was a key no surface summed;
+// since completed CONTAINS rejected it would inflate the headline مكتملة and the
+// history panel's نسبة الاكتمال. Dating by the last reached milestone is the
+// earliest defensible day and restores the partition, while still resolving to
+// SOME day for every row so the CROWN identity at a saturated as-of is unchanged.
 
-import { parseDateTime, toEpochDay, workday, MS_PER_DAY } from './workday.js?v=v2026-07-23.6';
-import { buildTatIndex, resolveTat } from './tat.js?v=v2026-07-23.6';
+import { parseDateTime, toEpochDay, workday, MS_PER_DAY } from './workday.js?v=v2026-07-23.7';
+import { buildTatIndex, resolveTat } from './tat.js?v=v2026-07-23.7';
 
 // engine.js's cascade keys off these exact rawStatus literals (not exported).
 const RAW_CANCELLED = 'Order Cancelled';
@@ -130,38 +166,55 @@ export function computeNumbersAsOf({ rows, tatTests, asOfIso, opts = {} } = {}) 
     if (dispatchedByAsOf) dispatched++;
     if (receivedByAsOf) received++;
 
-    // completed (engine buildBuckets: resultedMs != null): resulted day ≤ asOf.
-    if (resultedByAsOf) completed++;
-
     // rejected (engine: nonCancelled ∩ rawStatus 'Result Rejected'). No rejection
-    // timestamp → date by resulted/report datetime when present, else orderDate.
+    // timestamp → date by resulted/report datetime when present, else by the LAST
+    // milestone the row is known to have reached (received → dispatched → order).
+    // A rejection cannot precede receipt, so the first milestone would date it
+    // before the sample physically moved — see the header note on the partition.
+    // Computed BEFORE completed because completed now consumes this same flag.
+    let rejectedByAsOf = false;
     if (isRejected) {
-      let inRange;
       if (resultedD != null) {
-        inRange = resultedD <= asOfDay;
+        rejectedByAsOf = resultedD <= asOfDay;
       } else {
-        inRange = orderByAsOf;
-        if (orderByAsOf) rejectedFallbackUsed = true;
+        const datedD = receivedD != null ? receivedD : (dispatchedD != null ? dispatchedD : orderD);
+        rejectedByAsOf = datedD != null && datedD <= asOfDay;
+        if (rejectedByAsOf) rejectedFallbackUsed = true;
       }
-      if (inRange) rejected++;
+      if (rejectedByAsOf) rejected++;
     }
 
-    // awaitingDispatch (engine: dispatchedMs == null && hasCreated). NB: engine
-    // does NOT exclude rejected here — mirror that (no isRejected guard).
-    if (orderByAsOf && !dispatchedByAsOf) awaitingDispatch++;
+    // completed (engine buildBuckets, 2026-07-28 rule): a lab's FINAL outcome —
+    // resulted day ≤ asOf OR the row is rejected and its dated day ≤ asOf. The
+    // OR counts a rejected row that also carries a result date exactly ONCE, so
+    // rejected is a SUBSET of completed here, never an addition on top of it.
+    if (resultedByAsOf || rejectedByAsOf) completed++;
 
-    // shippedNotReceived (engine: dispatchedMs != null && receivedMs == null).
-    // Engine does NOT exclude rejected here either — mirror that.
-    if (dispatchedByAsOf && !receivedByAsOf) shippedNotReceived++;
+    // awaitingDispatch / shippedNotReceived — the pre-completion buckets. The engine
+    // guards both with !rejected (a rejection is completed work, so it must leave the
+    // pipeline), and the identity total = awaitingDispatch + shippedNotReceived +
+    // awaitingResults + completed depends on it.
+    //
+    // Time-shifted, the guard is `rejectedByAsOf`, NOT `isRejected`: a row that is
+    // rejected TODAY was still genuinely awaiting dispatch on a date before its
+    // rejection was dated. Guarding on isRejected would drop it out of every bucket in
+    // that window and break the identity from the other side (total 1, buckets 0).
+    // Guarding on rejectedByAsOf keeps every row in exactly ONE bucket on every date.
+    if (orderByAsOf && !dispatchedByAsOf && !rejectedByAsOf) awaitingDispatch++;
+
+    if (dispatchedByAsOf && !receivedByAsOf && !rejectedByAsOf) shippedNotReceived++;
 
     // awaitingResults (engine: receivedMs != null && resultedMs == null && !rejected).
-    if (receivedByAsOf && !resultedByAsOf && !isRejected) awaitingResults++;
+    if (receivedByAsOf && !resultedByAsOf && !rejectedByAsOf) awaitingResults++;
 
     // lateNoResult (engine: status === LATE && resultedMs == null). LATE =
     // non-cancelled, non-rejected, received, StdTAT resolved, and DueDate strictly
     // before the as-of day (delay = asOfDay − due > 0). Due = WORKDAY(received, tat)
     // with the engine's exact StdTAT resolution (lookup, then CSV fallback).
-    if (!isRejected && receivedByAsOf && !resultedByAsOf) {
+    // Same time-shifted guard as awaitingResults: a row rejected LATER was genuinely
+    // late-without-a-result on the earlier date, and lateNoResult is a subset of
+    // awaitingResults, so the two guards must agree or the subset breaks.
+    if (!rejectedByAsOf && receivedByAsOf && !resultedByAsOf) {
       const { tat } = resolveTat(row, tatIndex, opts);
       if (tat != null) {
         const dueMs = workday(receivedD, tat); // workday floors start internally
@@ -176,7 +229,9 @@ export function computeNumbersAsOf({ rows, tatTests, asOfIso, opts = {} } = {}) 
   };
   const approx = {};
   if (cancelledInRange) approx.total = true;
-  if (rejectedFallbackUsed) approx.rejected = true;
+  // completed CONTAINS rejected, so the rejected dating approximation is now a
+  // completed approximation too — flagged together, never one without the other.
+  if (rejectedFallbackUsed) { approx.rejected = true; approx.completed = true; }
   return { numbers, approx };
 }
 

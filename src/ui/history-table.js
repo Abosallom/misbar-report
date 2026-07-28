@@ -16,8 +16,24 @@
 // as-of the sampled date from raw order timestamps). Both engine imports are GUARDED —
 // with the module absent the panel degrades to published-history rows only, the chart
 // is hidden, and it never crashes. Pure presentation; it mutates nothing it is handed.
-import { el } from './components.js?v=v2026-07-23.6';
-import { formatDateAr } from '../i18n/ar.js?v=v2026-07-23.6';
+//
+// ONE COLUMN, ONE DEFINITION (2026-07-28). `completed` changed meaning on
+// COMPLETED_DEF_SINCE: a REJECTED result is a lab's final outcome, so مكتملة now
+// COUNTS rejected rows. Every entry already sitting in settings.snapshotHistory was
+// published under the OLD rule, while computeNumbersAsOf speaks the NEW one — and the
+// app is not run every day, so published and computed samples INTERLEAVE inside one
+// range. Preferring the published entry for a PRE-CHANGE date therefore made the
+// مكتملة column zigzag between two definitions: a cumulative count appeared to FALL
+// (e.g. 374 → 365 → 411 across three consecutive days), and نسبة الاكتمال zigzagged
+// with it. So for a sample date before COMPLETED_DEF_SINCE the COMPUTED row wins
+// whenever the engine is present — the whole row, not just مكتملة, so the row stays
+// internally consistent (a published total next to a computed completed could make
+// نسبة الاكتمال nonsense). The published entry is still shown when nothing can be
+// computed, marked `staleDef` so the footnote says the number is old-definition.
+// Stored history itself is NEVER rewritten here — this module only reads it.
+import { el } from './components.js?v=v2026-07-23.7';
+import { formatDateAr } from '../i18n/ar.js?v=v2026-07-23.7';
+import { COMPLETED_DEF_SINCE } from '../model/delta-baseline.js?v=v2026-07-23.7';
 
 /* Relative imports carry ?v=… — the orchestrator re-stamps this token. */
 const V = '?v=v2026-07-22.13';
@@ -36,12 +52,19 @@ function daysToIso(n) {
 }
 
 // The five headline count columns (in RTL header order) that also get a delta.
+// `good` is the direction that is GOOD news for that column and is used ONLY to
+// colour the tiny sample-over-sample delta: +1 = a rise is progress, −1 = a fall is
+// progress, 0 = no claim either way. Painting every delta green (what this file used
+// to do) asserted "progress" even for a FALL in a cumulative count — the exact way an
+// impossible مكتملة drop read as an improvement — and for a RISE in the late backlog.
+// NB مرفوضة is a SUBSET of مكتملة since 2026-07-28, so a rejection raises both; it is
+// still bad news on its own column, hence good:-1 there and +1 on مكتملة.
 const NUM_COLS = [
-  { key: 'total', label: 'الإجمالي' },
-  { key: 'completed', label: 'مكتملة' },
-  { key: 'awaitingResults', label: 'بانتظار النتائج' },
-  { key: 'lateNoResult', label: 'متأخرة بلا نتيجة' },
-  { key: 'rejected', label: 'مرفوضة' },
+  { key: 'total', label: 'الإجمالي', good: 0 },
+  { key: 'completed', label: 'مكتملة', good: 1 },
+  { key: 'awaitingResults', label: 'بانتظار النتائج', good: -1 },
+  { key: 'lateNoResult', label: 'متأخرة بلا نتيجة', good: -1 },
+  { key: 'rejected', label: 'مرفوضة', good: -1 },
 ];
 const HEAD_TAIL = ['المصدر', ...NUM_COLS.map((c) => c.label), 'نسبة الاكتمال'];
 const headRow = (dateHead) => [dateHead || 'التاريخ', ...HEAD_TAIL];
@@ -81,6 +104,15 @@ const RANGE_NOTE = {
 const monthNote = (anchor) => (anchor
   ? `عيّنات أسبوعية بحسب يوم ${anchor.label} (آخر ٥ مرات)؛ الرسم بنقاط يومية.`
   : RANGE_NOTE.month);
+// Definition footnote, shown only when a rendered sample predates COMPLETED_DEF_SINCE.
+// `restated` = those rows were recomputed under the new rule (the normal case, engine
+// present); `stale` = a published pre-change row is still on screen under the OLD rule
+// because nothing could be computed for it.
+const DEF_NOTE_RESTATED = (d) => `أرقام «مكتملة» للتواريخ السابقة لـ ${d} معروضة وفق التعريف الجديد (تشمل النتائج المرفوضة) لتكون السلسلة قابلة للمقارنة، وقد تختلف عن الرقم المنشور حينها.`;
+const DEF_NOTE_STALE = (d) => `تغيّر تعريف «مكتملة» في ${d} ليشمل النتائج المرفوضة؛ الصفوف المنشورة قبل هذا التاريخ ما زالت بالتعريف القديم، فلا تُقارن مباشرة بما بعدها.`;
+// مرفوضة sits next to مكتملة and is a SUBSET of it — say so under every table so the
+// two columns can never be read as two separate quantities to be added together.
+const SUBSET_NOTE = 'الرفض نتيجة نهائية للمختبر، لذلك عمود «مرفوضة» محتسب ضمن «مكتملة» ومعروض للتفصيل فقط — لا يُضاف فوقها.';
 const CHART_CAP = 40; // hard cap on chart samples (computeNumbersAsOf is O(rows) each)
 
 /* ---- styles (inline so the module stays drop-in; all colours are themed tokens
@@ -89,8 +121,13 @@ const TABLE_STYLE = 'width:100%;border-collapse:collapse;font-size:.82rem';
 const TH_STYLE = 'text-align:center;font-weight:700;color:var(--slate-600);padding:6px 7px;border-bottom:1px solid var(--border-dark);white-space:nowrap;font-size:.7rem';
 const TD_STYLE = 'text-align:center;padding:6px 7px;border-bottom:1px solid var(--border);vertical-align:top';
 const NUM_V_STYLE = 'font-weight:700;color:var(--text);line-height:1.1';
-// Tiny sample-over-sample delta — same green language as the deck chips (themed token).
-const DELTA_STYLE = 'font-size:.62rem;font-weight:800;color:var(--green);line-height:1.15;margin-top:1px';
+// Tiny sample-over-sample delta — same chip language as the deck (themed tokens), but
+// the COLOUR follows the column's own polarity (NUM_COLS.good) instead of being green
+// for everything: green only when the move is good news, red when it is bad news, and
+// a neutral slate when the column makes no such claim (الإجمالي).
+const DELTA_BASE = 'font-size:.62rem;font-weight:800;line-height:1.15;margin-top:1px;color:';
+const deltaStyle = (delta, good) => DELTA_BASE
+  + (!good ? 'var(--slate-600)' : (delta * good > 0 ? 'var(--green)' : 'var(--red)'));
 const BADGE_BASE = 'display:inline-block;font-size:.66rem;font-weight:700;padding:1px 8px;border-radius:999px;white-space:nowrap;border:1px solid';
 const BADGE_PUBLISHED = BADGE_BASE + ';background:var(--good-bg,#DCFCE7);color:var(--good-text,#166534);border-color:rgba(22,163,74,.35)';
 const BADGE_COMPUTED = BADGE_BASE + ';background:var(--bg-light);color:var(--slate-600);border-color:var(--border-dark)';
@@ -114,18 +151,27 @@ function deltaOf(cur, prev, key) {
   return null;
 }
 
-function sourceBadge(source) {
-  const published = source === 'published';
+// The badge says where the row's numbers came from — and, for the two kinds of row the
+// definition change touches, WHICH definition of مكتملة they speak, so the tooltip is
+// never just provenance when provenance is not the whole story.
+function sourceBadge(sample) {
+  const published = sample && sample.source === 'published';
+  let title = published ? 'من تقرير منشور' : 'محسوب من بيانات الطلبات كما كانت في ذلك اليوم';
+  if (sample && sample.restated) {
+    title = 'أُعيد احتساب هذا اليوم من بيانات الطلبات وفق التعريف الجديد لـ«مكتملة» (تشمل المرفوضة)، بدل الرقم المنشور حينها بالتعريف القديم';
+  } else if (sample && sample.staleDef) {
+    title = 'من تقرير منشور — رقم «مكتملة» فيه بالتعريف القديم (لا يشمل المرفوضة)';
+  }
   return el('span', {
     style: published ? BADGE_PUBLISHED : BADGE_COMPUTED,
-    title: published ? 'من تقرير منشور' : 'محسوب من بيانات الطلبات كما كانت في ذلك اليوم',
+    title,
     text: published ? 'منشور' : 'محسوب',
   });
 }
-function numCell(value, delta) {
+function numCell(value, delta, good) {
   const kids = [el('div', { style: NUM_V_STYLE, text: fmtNum(value) })];
   if (delta != null && delta !== 0) {
-    kids.push(el('div', { dir: 'ltr', style: DELTA_STYLE, text: (delta > 0 ? '+' : '−') + Math.abs(delta) }));
+    kids.push(el('div', { dir: 'ltr', style: deltaStyle(delta, good), text: (delta > 0 ? '+' : '−') + Math.abs(delta) }));
   }
   return el('td', { dir: 'ltr', style: TD_STYLE }, kids);
 }
@@ -224,19 +270,32 @@ function computeFirstDay(rows, history, endDay, parseFn, toDayFn) {
   if (min == null) min = endDay - 30; // no signal at all → a month back
   return Math.min(min, endDay);
 }
-// One sample: published snapshot preferred, else computed as-of (when the engine is
-// present). Returns null when neither is available (degraded → row is dropped).
+/** True for a sample date recorded before مكتملة changed meaning (see file header). */
+const isPreDefChange = (date) => isIso(date) && date < COMPLETED_DEF_SINCE;
+
+// One sample. A published snapshot is preferred — EXCEPT for a date before
+// COMPLETED_DEF_SINCE, whose stored مكتملة speaks the old definition: preferring it
+// would splice a second definition into the middle of the column (see the header),
+// so the computed row wins there and is marked `restated`. The published entry is the
+// fallback for such a date when nothing can be computed, marked `staleDef`. Returns
+// null when neither source is available (degraded → row is dropped).
 function numbersForDate(date, ctx) {
   const published = ctx.history && ctx.history[date];
-  if (isObj(published)) return { date, numbers: published, source: 'published' };
+  const hasPublished = isObj(published);
+  const preDef = isPreDefChange(date);
+  if (hasPublished && !preDef) return { date, numbers: published, source: 'published' };
   if (ctx.computeAsOf) {
     try {
       const { numbers, approx } = ctx.computeAsOf({ rows: ctx.rows, tatTests: ctx.tatTests, asOfIso: date, opts: {} });
       const e = { date, numbers, source: 'computed' };
+      if (hasPublished) e.restated = true; // a published entry existed but spoke the old definition
       if (approx && Object.keys(approx).length > 0) e.approx = approx;
       return e;
     } catch (err) { console.warn('[history] computeNumbersAsOf failed for', date, err); }
   }
+  // Nothing computable: show the published row rather than dropping it, but say that
+  // its مكتملة is not comparable with the rows after the change.
+  if (hasPublished) return { date, numbers: published, source: 'published', staleDef: true };
   return null;
 }
 const resolveSamples = (dates, ctx) => dates.map((d) => numbersForDate(d, ctx)).filter(Boolean);
@@ -299,8 +358,8 @@ function renderTable(samples, dateHead) {
       el('td', { style: TD_STYLE + ';font-weight:700;white-space:nowrap' }, [
         el('span', { dir: 'ltr', text: formatDateAr(cur.date) || String(cur.date || '') }),
       ]),
-      el('td', { style: TD_STYLE }, [sourceBadge(cur.source)]),
-      ...NUM_COLS.map((c) => numCell(nums[c.key], deltaOf(nums, pn, c.key))),
+      el('td', { style: TD_STYLE }, [sourceBadge(cur)]),
+      ...NUM_COLS.map((c) => numCell(nums[c.key], deltaOf(nums, pn, c.key), c.good)),
       el('td', { dir: 'ltr', style: TD_STYLE }, [
         el('div', { style: NUM_V_STYLE, text: rate == null ? '—' : rate.toFixed(1) + '%' }),
       ]),
@@ -399,6 +458,18 @@ function renderRangeContent(bundle, range) {
     frag.appendChild(el('p', { class: 'small muted', style: 'margin:0', text: 'لا توجد بيانات ضمن هذا النطاق.' }));
     return frag;
   }
+  // مكتملة changed meaning on COMPLETED_DEF_SINCE. Whenever a rendered sample predates
+  // it, say which definition the column speaks — above the chart and the table, because
+  // it governs how every مكتملة value and نسبة الاكتمال below is to be read.
+  const preDef = table.filter((d) => d && isPreDefChange(d.date));
+  if (preDef.length) {
+    const since = formatDateAr(COMPLETED_DEF_SINCE) || COMPLETED_DEF_SINCE;
+    const stale = preDef.some((d) => d.staleDef);
+    frag.appendChild(el('p', {
+      class: 'small muted', style: 'margin:-6px 0 12px',
+      text: stale ? DEF_NOTE_STALE(since) : DEF_NOTE_RESTATED(since),
+    }));
+  }
   if (!degraded) {
     const svg = buildTrendChart(chart.length ? chart : table);
     if (svg) {
@@ -411,6 +482,7 @@ function renderRangeContent(bundle, range) {
     frag.appendChild(el('p', { class: 'small muted', style: 'margin:0 0 12px', text: 'الرسم البياني غير متاح (تعذّر حساب الأيام غير المنشورة).' }));
   }
   frag.appendChild(renderTable(table, anchor ? `التاريخ (${anchor.label})` : null));
+  frag.appendChild(el('p', { class: 'small muted', style: 'margin:8px 0 0', text: SUBSET_NOTE }));
   if (degraded) {
     frag.appendChild(el('p', { class: 'small muted', style: 'margin:10px 0 0', text: 'يتم عرض التقارير المنشورة فقط (تعذّر حساب الأيام غير المنشورة).' }));
   }
@@ -449,8 +521,8 @@ export function buildHistoryPanel({ rows, tatTests, history, endIso, deltaMode, 
 
   (async () => {
     const [asofMod, wdMod] = await Promise.all([
-      tryImport('../engine/asof.js?v=v2026-07-23.6' + V),
-      tryImport('../engine/workday.js?v=v2026-07-23.6' + V),
+      tryImport('../engine/asof.js?v=v2026-07-23.7' + V),
+      tryImport('../engine/workday.js?v=v2026-07-23.7' + V),
     ]);
     const computeAsOf = asofMod && typeof asofMod.computeNumbersAsOf === 'function' ? asofMod.computeNumbersAsOf : null;
     const degraded = !computeAsOf;
@@ -462,7 +534,13 @@ export function buildHistoryPanel({ rows, tatTests, history, endIso, deltaMode, 
       // No valid anchor date → published-only listing, no pills/chart.
       const hist = isObj(history) ? history : {};
       const table = Object.keys(hist).filter((d) => isIso(d) && isObj(hist[d])).sort()
-        .map((d) => ({ date: d, numbers: hist[d], source: 'published' }));
+        .map((d) => {
+          const e = { date: d, numbers: hist[d], source: 'published' };
+          // No anchor date → nothing is computed here, so a pre-change entry stays on
+          // the OLD definition of مكتملة; flag it so the footnote says exactly that.
+          if (isPreDefChange(d)) e.staleDef = true;
+          return e;
+        });
       body.appendChild(renderRangeContent({ table, chart: [], degraded: true }, 'all'));
       return;
     }

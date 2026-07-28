@@ -76,15 +76,17 @@ test('first run seeds from the frozen seeds and persists', () => {
   );
   assert.equal(cancelledSum, 43);
 
-  // snapshot full number set: completed 422 (dated-only rule).
-  assert.equal(s.snapshot.numbers.completed, 422);
+  // snapshot full number set: completed 437 (2026-07-28 rule — 422 dated + 15
+  // rejected), read from the seed so the two can never drift apart.
+  assert.equal(s.snapshot.numbers.completed, 437);
+  assert.equal(s.snapshot.numbers.completed, SNAPSHOT_SEED.numbers.completed);
   assert.equal(s.snapshot.asOf, SNAPSHOT_SEED.asOf);
 
   assert.equal(store.isEphemeral(), false);
   // Actually persisted to storage.
   assert.ok(mock.getItem(SETTINGS_KEY) != null, 'seed doc persisted');
   const stored = JSON.parse(mock.getItem(SETTINGS_KEY));
-  assert.equal(stored.snapshot.numbers.completed, 422);
+  assert.equal(stored.snapshot.numbers.completed, SNAPSHOT_SEED.numbers.completed);
 });
 
 test('displayNames seeds empty and historicalConstants matches seed', () => {

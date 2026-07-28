@@ -56,14 +56,20 @@ const isLateNoResult = (e) => e.cachedLate && e.resultedMs == null;
 
 // ---------------------------------------------------------------------------
 // 1. STAGE PARTITION — تقسيم المراحل يساوي الإجمالي
-//    total = awaitingDispatch + shippedNotReceived + awaitingResults + completed + rejected
+//    total = awaitingDispatch + shippedNotReceived + awaitingResults + completed
+//
+// DEFINITION CHANGE 2026-07-28 ("consider rejected as completed test"): `completed`
+// is now non-cancelled AND (a Result report date OR rejected), because rejection is
+// a lab's FINAL outcome. `rejected` is still published as its own value but is a
+// SUBSET of completed, so it is NO LONGER a partition term — the old five-way sum
+// (…+ completed + rejected) would double-count the 15 rejected rows.
 // ---------------------------------------------------------------------------
-test('STAGE PARTITION — الإجمالي = بانتظار الإرسال + مُرسل غير مُستلم + بانتظار النتائج + مكتمل + مرفوض / total splits exactly into the five disjoint buckets', () => {
+test('STAGE PARTITION — الإجمالي = بانتظار الإرسال + مُرسل غير مُستلم + بانتظار النتائج + مكتمل / total splits exactly into the four disjoint buckets (rejected is inside completed)', () => {
   const ind = {
     awaitingDispatch: count(NC, (e) => e.dispatchedMs == null && created(e)),
     shippedNotReceived: count(NC, (e) => e.dispatchedMs != null && e.receivedMs == null),
     awaitingResults: count(NC, (e) => e.receivedMs != null && e.resultedMs == null && !e.rejected),
-    completed: count(NC, (e) => e.resultedMs != null),
+    completed: count(NC, (e) => e.resultedMs != null || e.rejected),
     rejected: count(NC, (e) => e.rejected),
   };
   const total = NC.length;
@@ -74,40 +80,58 @@ test('STAGE PARTITION — الإجمالي = بانتظار الإرسال + م�
   }
   assert.equal(out.totals.total, total,
     'إجمالي غير الملغاة لا يطابق / non-cancelled total disagrees with independent recount');
-  const sum = ind.awaitingDispatch + ind.shippedNotReceived + ind.awaitingResults + ind.completed + ind.rejected;
+  const sum = ind.awaitingDispatch + ind.shippedNotReceived + ind.awaitingResults + ind.completed;
   assert.equal(sum, total,
     'تقسيم المراحل لا يجمع إلى الإجمالي (مراحل متداخلة) / STAGE PARTITION broken: buckets do not sum to total (overlap/gap)');
+
+  // rejected ⊂ completed, and completed = dated ∪ rejected counted ONCE.
+  const indDated = count(NC, (e) => e.resultedMs != null);
+  const indBoth = count(NC, (e) => e.resultedMs != null && e.rejected);
+  assert.ok(ind.rejected <= ind.completed,
+    '"مرفوض" يجب أن يكون ضمن "مكتمل" / rejected must be a SUBSET of completed');
+  assert.equal(out.buckets.completed, indDated + ind.rejected - indBoth,
+    '"مكتمل" لا يساوي (له تاريخ نتيجة ∪ مرفوض) بدون ازدواج / completed !== |dated ∪ rejected| (double count)');
+  // Golden data property the +15 delta rests on: no rejected row carries a result date.
+  assert.equal(indBoth, 0, 'صف مرفوض يحمل تاريخ نتيجة / a rejected row carries a result date');
+  assert.equal(out.buckets.completed - indDated, 15,
+    'فرق التعريف الجديد ليس 15 صفاً مرفوضاً / the definition change must add exactly the 15 rejected rows');
 });
 
 // ---------------------------------------------------------------------------
-// 2. FUNNEL MONOTONIC + resulted === buckets.completed
+// 2. FUNNEL MONOTONIC + final stage === buckets.completed
+//    The final stage is COMPLETED (result date OR rejected) since 2026-07-28;
+//    `funnel.resulted` is kept as an alias carrying the identical number.
 // ---------------------------------------------------------------------------
-test('FUNNEL — القمع متناقص و"مُنجز" يساوي "مكتمل" / funnel is monotonic non-increasing and resulted === completed', () => {
+test('FUNNEL — القمع متناقص ومرحلته الأخيرة تساوي "مكتمل" / funnel is monotonic non-increasing and its final stage === completed', () => {
   const f = {
     created: count(NC, created),
     collected: count(NC, (e) => e.collectedMs != null),
     dispatched: count(NC, (e) => e.dispatchedMs != null),
     received: count(NC, (e) => e.receivedMs != null),
-    resulted: count(NC, (e) => e.resultedMs != null),
+    resulted: count(NC, (e) => e.resultedMs != null || e.rejected),
+    completed: count(NC, (e) => e.resultedMs != null || e.rejected),
   };
   for (const k of Object.keys(f)) {
     assert.equal(out.funnel[k], f[k],
       `مرحلة القمع "${k}" لا تطابق الحساب المستقل / funnel stage "${k}" disagrees with independent recount`);
   }
-  const seq = [out.funnel.created, out.funnel.collected, out.funnel.dispatched, out.funnel.received, out.funnel.resulted];
+  const seq = [out.funnel.created, out.funnel.collected, out.funnel.dispatched, out.funnel.received, out.funnel.completed];
   for (let i = 1; i < seq.length; i++) {
     assert.ok(seq[i] <= seq[i - 1],
       `القمع غير متناقص عند الخطوة ${i} (${seq[i - 1]} ثم ${seq[i]}) / funnel not monotonic at step ${i} (${seq[i - 1]} then ${seq[i]})`);
   }
-  assert.equal(out.funnel.resulted, out.buckets.completed,
-    '"مُنجز" في القمع لا يساوي "مكتمل" في المراحل / funnel.resulted !== buckets.completed');
+  assert.equal(out.funnel.completed, out.buckets.completed,
+    '"مُنجز" في القمع لا يساوي "مكتمل" في المراحل / funnel.completed !== buckets.completed');
+  assert.equal(out.funnel.resulted, out.funnel.completed,
+    'الاسم القديم funnel.resulted لا يطابق funnel.completed / legacy funnel.resulted alias diverged');
 });
 
 // ---------------------------------------------------------------------------
-// 3. MONTHLY — orders = results + rejected + pending ; Σorders = total ; Σresults = completed
-//    (`pending` may still be landing from a parallel worker — tolerated below)
+// 3. MONTHLY — orders = results + pending ; Σorders = total ; Σresults = completed
+//    `results` follows the COMPLETED rule (result date OR rejected) since
+//    2026-07-28, so `rejected` is a SUBSET of it and pending = orders − results.
 // ---------------------------------------------------------------------------
-test('MONTHLY — الطلبات = النتائج + المرفوضة + المعلّقة ولكل الأشهر / per-month orders = results + rejected + pending, and the column sums tie back', () => {
+test('MONTHLY — الطلبات = النتائج + المعلّقة لكل الأشهر / per-month orders = results + pending, and the column sums tie back', () => {
   const byMonth = new Map();
   for (const e of NC) {
     if (!created(e)) continue;
@@ -115,7 +139,7 @@ test('MONTHLY — الطلبات = النتائج + المرفوضة + المع�
     if (!byMonth.has(m)) byMonth.set(m, { orders: 0, results: 0, rejected: 0 });
     const g = byMonth.get(m);
     g.orders++;
-    if (e.resultedMs != null) g.results++;
+    if (e.resultedMs != null || e.rejected) g.results++; // completed rule
     if (e.rejected) g.rejected++;
   }
 
@@ -130,16 +154,16 @@ test('MONTHLY — الطلبات = النتائج + المرفوضة + المع�
     assert.equal(em.rejected, ind.rejected,
       `مرفوضات الشهر ${em.month} لا تطابق الحساب المستقل / monthly rejected for ${em.month} disagree with independent recount`);
 
-    // `pending` field is landing from a parallel worker — tolerate its absence by
-    // deriving it, and pin the engine's value when it IS present.
-    const derivedPending = em.orders - em.results - em.rejected;
-    if ('pending' in em) {
-      assert.equal(em.pending, derivedPending,
-        `معلّق الشهر ${em.month} لا يساوي (طلبات − نتائج − مرفوضة) / monthly pending for ${em.month} !== orders − results − rejected`);
-    }
-    const pending = 'pending' in em ? em.pending : derivedPending;
-    assert.equal(em.orders, em.results + em.rejected + pending,
-      `هوية الشهر ${em.month}: الطلبات ≠ النتائج + المرفوضة + المعلّقة / MONTHLY identity ${em.month}: orders !== results + rejected + pending`);
+    // rejected is INSIDE results now — subtracting it again would be a double count.
+    assert.ok(em.rejected <= em.results,
+      `مرفوضات الشهر ${em.month} يجب أن تكون ضمن نتائجه / monthly rejected for ${em.month} must be a SUBSET of results`);
+    const derivedPending = em.orders - em.results;
+    assert.equal(em.pending, derivedPending,
+      `معلّق الشهر ${em.month} لا يساوي (طلبات − نتائج) / monthly pending for ${em.month} !== orders − results`);
+    assert.equal(em.incomplete, derivedPending,
+      `غير المكتمل للشهر ${em.month} لا يساوي (طلبات − نتائج) / monthly incomplete for ${em.month} !== orders − results`);
+    assert.equal(em.orders, em.results + em.pending,
+      `هوية الشهر ${em.month}: الطلبات ≠ النتائج + المعلّقة / MONTHLY identity ${em.month}: orders !== results + pending`);
 
     sumOrders += em.orders;
     sumResults += em.results;
@@ -153,14 +177,22 @@ test('MONTHLY — الطلبات = النتائج + المرفوضة + المع�
 
 // ---------------------------------------------------------------------------
 // 4. BYLAB — per-lab partition + column sums equal the stage buckets
-//    total = pipeline + awaitingResult + onTime + resultedLate + rejected
+//    HEADLINE: total = pipeline + awaitingResult + completed   (2026-07-28)
+//    FINER   : total = pipeline + awaitingResult + onTime + resultedLate + rejected
 // ---------------------------------------------------------------------------
 test('BYLAB — تقسيم كل مختبر ومجاميع الأعمدة تساوي المراحل / per-lab partition holds and byLab column sums equal the stage buckets', () => {
   // Per-lab partition (engine rows must each sum to their own total).
-  const S = { total: 0, pipeline: 0, awaitingResult: 0, onTime: 0, resultedLate: 0, rejected: 0, late: 0 };
+  const S = {
+    total: 0, pipeline: 0, awaitingResult: 0, completed: 0,
+    onTime: 0, resultedLate: 0, rejected: 0, late: 0,
+  };
   for (const l of out.byLab) {
+    assert.equal(l.pipeline + l.awaitingResult + l.completed, l.total,
+      `تقسيم المختبر "${l.lab}" لا يجمع إلى إجماليه / by-lab HEADLINE partition for "${l.lab}" does not sum to its total`);
     assert.equal(l.pipeline + l.awaitingResult + l.onTime + l.resultedLate + l.rejected, l.total,
-      `تقسيم المختبر "${l.lab}" لا يجمع إلى إجماليه / by-lab partition for "${l.lab}" does not sum to its total`);
+      `تقسيم المختبر "${l.lab}" التفصيلي لا يجمع إلى إجماليه / by-lab finer partition for "${l.lab}" does not sum to its total`);
+    assert.equal(l.completed, l.onTime + l.resultedLate + l.rejected,
+      `"مكتمل" للمختبر "${l.lab}" ≠ (في الوقت + متأخر مُنجز + مرفوض) / completed for "${l.lab}" !== onTime + resultedLate + rejected`);
     for (const k of Object.keys(S)) S[k] += l[k];
   }
 
@@ -189,8 +221,16 @@ test('BYLAB — تقسيم كل مختبر ومجاميع الأعمدة تسا�
     'مجموع "بانتظار النتيجة" ≠ "بانتظار النتائج" في المراحل / Σ byLab awaitingResult !== buckets.awaitingResults');
   assert.equal(S.rejected, out.buckets.rejected,
     'مجموع "مرفوض" في المختبرات ≠ "مرفوض" في المراحل / Σ byLab rejected !== buckets.rejected');
-  assert.equal(S.onTime + S.resultedLate, out.buckets.completed,
-    'مجموع (في الوقت + متأخر مُنجز) ≠ "مكتمل" / Σ byLab (onTime + resultedLate) !== buckets.completed');
+  assert.equal(S.completed, out.buckets.completed,
+    'مجموع "مكتمل" في المختبرات ≠ "مكتمل" في المراحل / Σ byLab completed !== buckets.completed');
+  assert.equal(S.onTime + S.resultedLate + S.rejected, out.buckets.completed,
+    'مجموع (في الوقت + متأخر مُنجز + مرفوض) ≠ "مكتمل" / Σ byLab (onTime + resultedLate + rejected) !== buckets.completed');
+  // Cross-surface: the compliance column, the monthly results row and the funnel's
+  // final stage must all print the SAME "مكتمل" number as the exec KPI card.
+  assert.equal(S.completed, out.funnel.completed,
+    'عمود "مكتمل" ≠ المرحلة الأخيرة في القمع / Σ byLab completed !== funnel.completed');
+  assert.equal(S.completed, out.monthly.reduce((s, m) => s + m.results, 0),
+    'عمود "مكتمل" ≠ مجموع صف النتائج الشهري / Σ byLab completed !== Σ monthly results');
   assert.equal(S.late, out.buckets.lateNoResult,
     'مجموع "متأخر بلا نتيجة" في المختبرات ≠ "متأخر بلا نتيجة" في المراحل / Σ byLab late !== buckets.lateNoResult');
 });

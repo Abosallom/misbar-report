@@ -2,15 +2,15 @@
 // The file-producing core now lives in automation/pipeline.js (produceReportFiles) so
 // an unattended run makes byte-identical files; this screen drives it and paints the
 // very same progress bar, file rows and live slide thumbnails it always has.
-import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-07-23.6';
-import { el, progressBar, toast } from './components.js?v=v2026-07-23.6';
-import { resetRunData } from '../state.js?v=v2026-07-23.6';
-import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-07-23.6';
-import { autoDraft } from '../model/drafts.js?v=v2026-07-23.6';
-import { buildLateLabsSection, triggerDownload } from './late-labs-section.js?v=v2026-07-23.6';
+import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-07-23.7';
+import { el, progressBar, toast } from './components.js?v=v2026-07-23.7';
+import { resetRunData } from '../state.js?v=v2026-07-23.7';
+import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-07-23.7';
+import { autoDraft } from '../model/drafts.js?v=v2026-07-23.7';
+import { buildLateLabsSection, triggerDownload } from './late-labs-section.js?v=v2026-07-23.7';
 import {
   applyDeltaBaseline, buildFileDefs, produceReportFiles, recordRunSnapshot,
-} from '../automation/pipeline.js?v=v2026-07-23.6';
+} from '../automation/pipeline.js?v=v2026-07-23.7';
 
 async function tryImport(path) { try { return await import(path); } catch { return null; } }
 const isMobile = () => /iP(hone|ad|od)|Android/i.test(navigator.userAgent);
@@ -94,6 +94,17 @@ function makeThumbStrip() {
 
 // Share-ready summary card shown after success. Numbers mirror build-spec's
 // valueOf: override wins when finite, else the computed KPI value.
+//
+// SUBSETS, NOT ADDENDS (user decision 2026-07-28, "consider rejected as completed
+// test"). This text is pasted into WhatsApp, where a reader adds the bullets up, so
+// it uses the SAME disclosure the deck uses: a partition term is a '•' bullet, and a
+// term that is counted INSIDE the bullet above it is an '↳ منها …' line.
+//   • مرفوضة ⊂ مكتملة   — buckets.completed = resulted + rejected (engine.js isCompleted)
+//   • متأخرة ⊂ بانتظار النتائج — lateNoResult = LATE ∧ no result date, and LATE already
+//     requires received ∧ !rejected, which is exactly awaitingResults (hence latePct).
+// 'فحوصات مكتملة' is the deck-wide name for this number (build-spec DEFAULT_LABELS
+// .kpiCompleted / compCompleted / monthlyRowResults) — the shared summary must not
+// call the printed metric something else.
 function buildShareCard(model, date, fileCount) {
   const V = (key, computed) => (Number.isFinite(model.overrides && model.overrides[key]) ? model.overrides[key] : computed);
   const k = model.kpi || {};
@@ -109,10 +120,10 @@ function buildShareCard(model, date, fileCount) {
   const text =
     `تقرير مسبار اليومي — ${formatDateAr(date) || date}\n` +
     `• إجمالي الطلبات: ${total}\n` +
-    `• نتائج مكتملة: ${completed} (${pct}%)\n` +
+    `• فحوصات مكتملة (تشمل المرفوضة): ${completed} (${pct}%)\n` +
+    `↳ منها مرفوضة: ${rejected}\n` +
     `• بانتظار النتائج: ${awaiting}\n` +
-    `• متأخرة: ${late}\n` +
-    `• مرفوضة: ${rejected}\n` +
+    `↳ منها متأخرة: ${late}\n` +
     `• ملغاة: ${cancelled}\n` +
     `الملفات: ${fileCount} (نسختا PPTX و PDF داخلية ونوبكو)`;
 
@@ -158,7 +169,7 @@ export async function render(container, ctx) {
   // generated files' exec legend/chips match the review preview. recordSnapshot (below)
   // appends this run to snapshotHistory on success. Guarded → legacy engine deltas if the
   // module isn't present at runtime.
-  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-07-23.6');
+  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-07-23.7');
   const pickBaseline = dbMod && dbMod.pickDeltaBaseline;
   const recordSnapshot = dbMod && dbMod.recordSnapshot;
   applyDeltaBaseline(model, store, pickBaseline);

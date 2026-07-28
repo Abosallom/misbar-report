@@ -89,29 +89,31 @@ test('monthly + cancelledNote', () => {
   assert.equal(out.cancelledNote, GOLDEN_EXPECTED.cancelledNote);
 });
 
-test('monthly partition: orders = results + rejected + pending (per month AND total)', () => {
+test('monthly partition: orders = results + pending, results follows the completed rule (per month AND total)', () => {
+  // 2026-07-28 "rejected counts as completed": each month's `results` is the
+  // COMPLETED count (result date OR rejected), so `rejected` is a SUBSET of it and
+  // the partition is two-way. pending === incomplete now (both orders − results).
   const out = compute(GOLDEN_ORDERS, TAT_LOOKUP, goldenOpts());
-  const acc = { orders: 0, results: 0, rejected: 0, pending: 0 };
+  const acc = { orders: 0, results: 0, rejected: 0, pending: 0, incomplete: 0 };
   for (const m of out.monthly) {
-    // Every month's three disjoint states partition its orders exactly.
-    assert.equal(
-      m.results + m.rejected + m.pending,
-      m.orders,
-      `partition holds for ${m.month}`,
-    );
-    // incomplete stays LEGACY (= orders − results) and double-counts rejected.
-    assert.equal(m.incomplete, m.orders - m.results, `legacy incomplete for ${m.month}`);
+    assert.equal(m.results + m.pending, m.orders, `partition holds for ${m.month}`);
+    assert.equal(m.incomplete, m.orders - m.results, `incomplete for ${m.month}`);
+    assert.equal(m.pending, m.incomplete, `pending === incomplete for ${m.month}`);
+    // rejected inside results — never a sibling term (would double-count).
+    assert.ok(m.rejected <= m.results, `rejected must be a subset of results (${m.month})`);
     for (const k of Object.keys(acc)) acc[k] += m[k];
   }
-  // Totals partition too, and total pending = 181.
-  assert.equal(acc.results + acc.rejected + acc.pending, acc.orders);
+  // Totals partition too.
+  assert.equal(acc.results + acc.pending, acc.orders);
   assert.equal(acc.orders, 618);
+  assert.equal(acc.results, 437); // 422 dated + 15 rejected
   assert.equal(acc.pending, 181);
-  // May is where the incoherence was visible: pending 15 vs legacy incomplete 29.
+  assert.equal(acc.incomplete, 181); // was 196 under the old rule (double-counted rejected)
+  // May carries 14 of the 15 rejected rows — the month where the change is visible.
   const may = out.monthly.find((m) => m.month === '2026-05');
   assert.deepEqual(
     { orders: may.orders, results: may.results, rejected: may.rejected, pending: may.pending, incomplete: may.incomplete },
-    { orders: 105, results: 76, rejected: 14, pending: 15, incomplete: 29 },
+    { orders: 105, results: 90, rejected: 14, pending: 15, incomplete: 15 }, // results was 76, incomplete was 29
   );
 });
 
@@ -119,6 +121,7 @@ test('turnaround (order-month; expected = calendar span of WORKDAY window)', () 
   const out = compute(GOLDEN_ORDERS, TAT_LOOKUP, goldenOpts());
   assert.equal(out.turnaround.overallActual, 12.0);
   assert.equal(out.turnaround.overallExpected, 7.0);
+  // 422, NOT completed (437): a rejected line has no result timestamp to measure.
   assert.equal(out.turnaround.measuredCount, 422);
   assert.deepEqual(out.turnaround.perMonth, GOLDEN_EXPECTED.turnaround.perMonth);
 });
@@ -130,35 +133,97 @@ test('byLab + byTest (curated catalog, sum 56)', () => {
   assert.equal(out.byTest.reduce((s, t) => s + t.late, 0), 56);
 });
 
-test('byLab partition: total = pipeline + awaitingResult + onTime + resultedLate + rejected (per lab AND totals)', () => {
+test('byLab partition: total = pipeline + awaitingResult + completed (per lab AND totals)', () => {
   const out = compute(GOLDEN_ORDERS, TAT_LOOKUP, goldenOpts());
-  const acc = { total: 0, pipeline: 0, awaitingResult: 0, onTime: 0, resulted: 0, resultedLate: 0, rejected: 0 };
+  const acc = {
+    total: 0, pipeline: 0, awaitingResult: 0, completed: 0,
+    onTime: 0, resulted: 0, resultedLate: 0, rejected: 0,
+  };
   for (const l of out.byLab) {
-    // Every row's disjoint states partition its total exactly.
+    // HEADLINE identity (2026-07-28): three disjoint states partition the total.
+    assert.equal(
+      l.pipeline + l.awaitingResult + l.completed,
+      l.total,
+      `headline partition holds for ${l.lab}`,
+    );
+    // completed = resulted + rejected, and rejected is INSIDE it (no double count).
+    assert.equal(l.completed, l.resulted + l.rejected, `completed = resulted + rejected for ${l.lab}`);
+    assert.ok(l.rejected <= l.completed, `rejected must be a subset of completed (${l.lab})`);
+    // The finer 5-way split is still exactly true — completed groups its last three.
     assert.equal(
       l.pipeline + l.awaitingResult + l.onTime + l.resultedLate + l.rejected,
       l.total,
-      `partition holds for ${l.lab}`,
+      `finer partition holds for ${l.lab}`,
     );
     // resulted is the onTime + resultedLate subtotal.
     assert.equal(l.resulted, l.onTime + l.resultedLate, `resulted subtotal for ${l.lab}`);
     for (const k of Object.keys(acc)) acc[k] += l[k];
   }
   // Totals partition too.
+  assert.equal(acc.pipeline + acc.awaitingResult + acc.completed, acc.total);
   assert.equal(acc.pipeline + acc.awaitingResult + acc.onTime + acc.resultedLate + acc.rejected, acc.total);
   assert.equal(acc.total, 618);
   assert.equal(acc.pipeline, 22); // = total 618 − received 596 (all pre-receipt lines)
-  assert.equal(acc.resulted, 422); // matches completed / funnel.resulted
+  assert.equal(acc.completed, 437); // matches buckets.completed / funnel.completed
+  assert.equal(acc.resulted, 422); // dated-only subtotal (was the old completed)
   assert.equal(acc.resultedLate, 252);
-  // Spot values for the top lab (Advanced), where the incoherence was most visible.
+  assert.equal(acc.rejected, 15); // 437 − 422 = exactly the rejected rows
+  // Spot values for the top lab (Advanced), which carries 14 of the 15 rejected rows.
   const adv = out.byLab.find((l) => l.lab.startsWith('Advanced'));
   assert.deepEqual(
     {
       total: adv.total, pipeline: adv.pipeline, awaitingResult: adv.awaitingResult,
-      onTime: adv.onTime, resulted: adv.resulted, resultedLate: adv.resultedLate, rejected: adv.rejected,
+      completed: adv.completed, onTime: adv.onTime, resulted: adv.resulted,
+      resultedLate: adv.resultedLate, rejected: adv.rejected,
     },
-    { total: 301, pipeline: 11, awaitingResult: 89, onTime: 29, resulted: 187, resultedLate: 158, rejected: 14 },
+    {
+      total: 301, pipeline: 11, awaitingResult: 89, completed: 201,
+      onTime: 29, resulted: 187, resultedLate: 158, rejected: 14,
+    },
   );
+});
+
+test('COMPLETED means the same thing on every surface (exec KPI, compliance, monthly, funnel)', () => {
+  // The user-visible invariant of the 2026-07-28 change: one definition, one number.
+  const out = compute(GOLDEN_ORDERS, TAT_LOOKUP, goldenOpts());
+  const perLab = out.byLab.reduce((s, l) => s + l.completed, 0);
+  const perMonth = out.monthly.reduce((s, m) => s + m.results, 0);
+  assert.equal(out.buckets.completed, 437, 'exec KPI card');
+  assert.equal(perLab, out.buckets.completed, 'compliance column Σ vs exec card');
+  assert.equal(perMonth, out.buckets.completed, 'monthly results row Σ vs exec card');
+  assert.equal(out.funnel.completed, out.buckets.completed, 'funnel final stage vs exec card');
+  assert.equal(out.funnel.resulted, out.funnel.completed, 'legacy funnel.resulted alias');
+
+  // Rejected is reported, and it is INSIDE completed — the whole point of the change.
+  assert.equal(out.buckets.rejected, 15);
+  assert.equal(out.buckets.completed - out.buckets.rejected, 422, 'completed − rejected = dated-only');
+  // Stage partition with rejected folded in: no bucket is counted twice.
+  const b = out.buckets;
+  assert.equal(
+    b.awaitingDispatch + b.shippedNotReceived + b.awaitingResults + b.completed,
+    out.totals.total,
+    'total = awaitingDispatch + shippedNotReceived + awaitingResults + completed',
+  );
+});
+
+test('a rejected row that DOES carry a result date is counted ONCE, not twice', () => {
+  // completed uses OR, not addition, so the surfaces stay equal even on data where
+  // the "rejected rows have a blank result date" property of today's CSVs breaks.
+  const donor = GOLDEN_ORDERS.find((r) => r.rawStatus !== 'Order Cancelled' && r.resulted);
+  const synthetic = [...GOLDEN_ORDERS, { ...donor, rawStatus: 'Result Rejected' }];
+  const out = compute(synthetic, TAT_LOOKUP, goldenOpts());
+  assert.equal(out.buckets.completed, 438, 'one extra completed line, not two');
+  assert.equal(out.buckets.rejected, 16);
+  const perLab = out.byLab.reduce((s, l) => s + l.completed, 0);
+  assert.equal(perLab, out.buckets.completed, 'compliance Σ still equals the exec card');
+  assert.equal(out.funnel.completed, out.buckets.completed, 'funnel still equals the exec card');
+  assert.equal(
+    out.monthly.reduce((s, m) => s + m.results, 0), out.buckets.completed,
+    'monthly Σ still equals the exec card',
+  );
+  for (const l of out.byLab) {
+    assert.equal(l.pipeline + l.awaitingResult + l.completed, l.total, `partition holds for ${l.lab}`);
+  }
 });
 
 test('onTime "success" metric: byLab column sums to 170; byTest catalog sums to 58', () => {
@@ -182,16 +247,17 @@ test('dedupe is a no-op on the clean golden data', () => {
 });
 
 // ---- deltas (E6: full 9-key set, increase-only) -----------------------------
-test('deltas: full snapshot.numbers baseline → only completed rises (+47)', () => {
+test('deltas: full snapshot.numbers baseline → only completed rises (+62)', () => {
   // prev = the seed set except completed=375; every other current value equals
-  // its prev, so only completed produces a positive delta (422 − 375 = 47).
+  // its prev, so only completed produces a positive delta (437 − 375 = 62).
+  // Was 47 when completed was the dated-only 422 (2026-07-28 definition change).
   const prevNumbers = { ...SNAPSHOT_SEED.numbers, completed: 375 };
   const out = compute(GOLDEN_ORDERS, TAT_LOOKUP, {
     asOf: goldenOpts().asOf,
     cancelledByMonth: goldenOpts().cancelledByMonth,
     snapshot: { asOf: '2026-07-01', numbers: prevNumbers },
   });
-  assert.deepEqual(out.deltas, { ...ZERO_DELTAS, completed: 47 });
+  assert.deepEqual(out.deltas, { ...ZERO_DELTAS, completed: 62 });
 });
 
 test('deltas: no snapshot → every delta is 0', () => {
@@ -203,8 +269,8 @@ test('deltas: no snapshot → every delta is 0', () => {
 
 test('deltas: a lower prev rejected → positive rejected delta', () => {
   // prev rejected below current (15) → deltas.rejected = 15 − 10 = 5; completed
-  // held at current (422) so it stays 0; every other key equals its seed.
-  const prevNumbers = { ...SNAPSHOT_SEED.numbers, completed: 422, rejected: 10 };
+  // held at current (437) so it stays 0; every other key equals its seed.
+  const prevNumbers = { ...SNAPSHOT_SEED.numbers, completed: 437, rejected: 10 };
   const out = compute(GOLDEN_ORDERS, TAT_LOOKUP, {
     asOf: goldenOpts().asOf,
     cancelledByMonth: goldenOpts().cancelledByMonth,

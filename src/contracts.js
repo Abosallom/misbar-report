@@ -46,12 +46,12 @@
  * Output of engine/engine.js compute(rows, tatLookup, opts). Pure data.
  * @typedef {Object} EngineOutput
  * @property {{lines:number, cancelledInData:number, total:number}} totals - total = lines - cancelledInData
- * @property {{created:number, collected:number, dispatched:number, received:number, resulted:number}} funnel - all excl. cancelled
- * @property {{awaitingDispatch:number, shippedNotReceived:number, awaitingResults:number, completed:number, rejected:number, lateNoResult:number, latePct:number}} buckets
- * @property {{month:string, orders:number, results:number, rejected:number, pending:number, incomplete:number, completionPct:number|null, cancelled:number}[]} monthly - month='YYYY-MM'; includes historical months merged from settings. PARTITION: orders = results + rejected + pending (pending = orders−results−rejected, the canonical field); incomplete (= orders−results) is LEGACY and double-counts rejected
+ * @property {{created:number, collected:number, dispatched:number, received:number, resulted:number, completed:number}} funnel - all excl. cancelled. FINAL STAGE = COMPLETED (user decision 2026-07-28: a result date OR a rejection, both terminal lab outcomes). `completed` is the canonical field; `resulted` is a LEGACY ALIAS carrying the SAME number (the long-lived override key 'funnel.resulted' reads it), NOT the dated-only count — never add the two
+ * @property {{awaitingDispatch:number, shippedNotReceived:number, awaitingResults:number, completed:number, rejected:number, lateNoResult:number, latePct:number}} buckets - PARTITION: totals.total = awaitingDispatch + shippedNotReceived + awaitingResults + completed; completed follows the COMPLETED rule (result date OR rejected); `rejected` is still published as its own value but is a SUBSET of completed — never added alongside it; lateNoResult is a subset of awaitingResults
+ * @property {{month:string, orders:number, results:number, rejected:number, pending:number, incomplete:number, completionPct:number|null, cancelled:number}[]} monthly - month='YYYY-MM'; includes historical months merged from settings. PARTITION: orders = results + pending; `results` follows the COMPLETED rule (result date OR rejected) since 2026-07-28, so `rejected` is a SUBSET of results and NOT a partition term; pending === incomplete (both = orders − results) — `incomplete` is kept only as the legacy key name
  * @property {number} cancelledNote - sum of merged cancelledByMonth (the "* N طلب ملغي" note)
  * @property {{overallActual:number, overallExpected:number, perMonth:{month:string, actual:number|null, expected:number|null}[]}} turnaround - days, 1-decimal semantics per report
- * @property {{lab:string, total:number, pipeline:number, awaitingResult:number, onTime:number, resulted:number, resultedLate:number, rejected:number, late:number, latePct:number}[]} byLab - TRUE PARTITION: total = pipeline + awaitingResult + onTime + resultedLate + rejected; pipeline = no received date; onTime = resulted within due (day-granular); resultedLate = resulted−onTime (incl. No-Match resulted); resulted = onTime+resultedLate subtotal; late (late-no-result) is a subset of awaitingResult
+ * @property {{lab:string, total:number, pipeline:number, awaitingResult:number, completed:number, onTime:number, resulted:number, resultedLate:number, rejected:number, late:number, latePct:number}[]} byLab - HEADLINE PARTITION: total = pipeline + awaitingResult + completed, with completed = onTime + resultedLate + rejected = resulted + rejected as the finer split beneath it (those four are all SUBSETS of completed — never added alongside it); pipeline = no received date (and not rejected); awaitingResult = received, no result yet, not rejected; onTime = resulted within due (day-granular); resultedLate = resulted−onTime (incl. No-Match resulted); resulted = onTime+resultedLate subtotal (non-rejected rows WITH a result date); late (late-no-result) is a subset of awaitingResult
  * @property {{testName:string, late:number, onTime:number}[]} byTest - catalog tests with late>0 OR onTime>0; late = late-no-result, onTime = resulted within due (day-granular); sorted late asc, catalog-idx desc
  * @property {string[]} unmatchedTests - test names absent from TAT lookup
  * @property {number} excludedNoTat - rows dropped by opts.excludeNoTat (0 when option off)
@@ -60,7 +60,10 @@
  *             awaitingResults:number, lateNoResult:number}} deltas
  *   - INCREASE vs the previous report's snapshot numbers (0 when equal/lower or no
  *     snapshot). Per the workbook's E6 prompt: a green "+N" chip renders ONLY for
- *     deltas > 0, recomputed each run, never accumulated.
+ *     deltas > 0, recomputed each run, never accumulated. This IS the whole key
+ *     set (engine.js currentNumbers); `completed` speaks the COMPLETED rule above
+ *     (result date OR rejected) and `rejected` rides along as its own value —
+ *     a SUBSET of completed, so the two chips must never be summed.
  */
 
 /**
@@ -81,6 +84,8 @@
  *   'funnel.collected','funnel.dispatched','funnel.received','funnel.resulted',
  *   'cancelledNote','turnaround.actual','turnaround.expected'. build-spec renders
  *   override ?? computed; an overridden key suppresses its delta chip.
+ *   NOTE: 'funnel.resulted' is the (unrenamed) key of the funnel's COMPLETED final
+ *   stage, so it and 'completed' address the same figure on two slides.
  * @property {Settings['reportOptions']} [reportOptions] - presentation options (see Settings)
  */
 
@@ -115,16 +120,22 @@
  * @property {{cancelledByMonth:Object<string,number>}} historicalConstants
  *   - key 'YYYY-MM'; MANUAL additions per the workbook C6 prompt:
  *     cancelled(m) = countedFromCsv(m) + cancelledByMonth[m] (additive, not max).
- * @property {{asOf:string, numbers:Object<string,number>}} snapshot
+ * @property {{asOf:string, numbers:Object<string,number>, defVersion?:number}} snapshot
  *   - the previous report's published numbers (keys = deltas keys above);
  *     written after each successful generation. Legacy {prevCompleted} docs are
  *     migrated on load (numbers.completed = prevCompleted). Acts as the fallback
  *     baseline when snapshotHistory has no entry before the report date.
+ *     Optional `defVersion` (SIBLING of numbers, never inside it — see
+ *     seeds/defaults.js SNAPSHOT_SEED) stamps WHICH definition `numbers` speaks:
+ *     2 = completed includes rejected (2026-07-28 rule). Unstamped baselines are
+ *     dated by model/delta-baseline.js instead.
  * @property {Object<string,Object<string,number>>} snapshotHistory
  *   - rolling per-date history of published report numbers, key 'YYYY-MM-DD' →
  *     the same number set snapshot.numbers holds. Trimmed to the most recent 45
  *     dates (model/delta-baseline.js recordSnapshot). Feeds pickDeltaBaseline,
- *     which selects the comparison baseline per reportOptions.deltaMode.
+ *     which selects the comparison baseline per reportOptions.deltaMode. An entry
+ *     may carry an optional numeric `defVersion` LEAF alongside its numbers (same
+ *     meaning as snapshot.defVersion); with no stamp the entry's own date decides.
  * @property {{baseUrl:string, accessToken:string, panelId:number, enabled:boolean}} grafana
  *   - live data source (Grafana PUBLIC-dashboard query API). baseUrl like
  *     'https://elab.seha.sa/hpapm'. Empty/disabled → CSV drop only. The access
