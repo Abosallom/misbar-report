@@ -13,6 +13,10 @@ import {
   AUTOMATION_SEED,
 } from '../src/seeds/defaults.js';
 import * as store from '../src/store.js';
+// The delta-mode enum has exactly ONE owner (model/delta-baseline.js). The seed is
+// pinned against DEFAULT_DELTA_MODE below so a future default change cannot land in
+// the model without the stored seed following it.
+import { DEFAULT_DELTA_MODE, DELTA_MODES } from '../src/model/delta-baseline.js';
 
 // ---- localStorage mocks -----------------------------------------------------
 function makeMock() {
@@ -714,12 +718,14 @@ test('importSettings whitelists reportOptions keys, coerces flags, drops unknown
   assert.equal(ro.unknownSub, undefined); // unknown top-level reportOptions key dropped
 });
 
-// ---- reportOptions.deltaMode: the two weekday-anchored weekly options --------
-test('first run seeds deltaMode daily and the definitions slide OFF (simple 6-slide deck)', () => {
+// ---- reportOptions.deltaMode: week-to-date (the default since 2026-08-04) ----
+test('first run seeds deltaMode week and the definitions slide OFF (simple 6-slide deck)', () => {
   fresh();
   const ro = store.loadSettings().reportOptions;
-  assert.equal(ro.deltaMode, 'daily');
+  assert.equal(ro.deltaMode, 'week');
   assert.equal(ro.deltaMode, REPORT_OPTIONS_SEED.deltaMode);
+  // PARITY PIN: the seed is not allowed to drift from the model's declared default.
+  assert.equal(REPORT_OPTIONS_SEED.deltaMode, DEFAULT_DELTA_MODE);
   // The delivered deck is cover · exec · monthly · compliance · action · thanks.
   assert.equal(ro.slides.definitions, false);
   assert.equal(ro.slides.execFunnel, true);
@@ -728,20 +734,26 @@ test('first run seeds deltaMode daily and the definitions slide OFF (simple 6-sl
   assert.equal(ro.slides.action, true);
 });
 
-test("a stored legacy 'weekly' deltaMode migrates to 'weekly-sun' on load", () => {
-  const mock = fresh();
-  mock.setItem(
-    SETTINGS_KEY,
-    JSON.stringify({
-      schemaVersion: store.SCHEMA_VERSION,
-      reportOptions: { ...REPORT_OPTIONS_SEED, deltaMode: 'weekly' },
-    }),
-  );
-  assert.equal(store.loadSettings().reportOptions.deltaMode, 'weekly-sun');
+test("the retired weekly deltaMode values migrate to 'week' on load", () => {
+  // 'weekly' (pre-split), 'weekly-sun' and 'weekly-thu' (the weekday-anchored round) all
+  // meant "compare against a week ago"; week-to-date is what that now IS, so an existing
+  // install keeps a weekly comparison instead of being reset.
+  for (const legacy of ['weekly', 'weekly-sun', 'weekly-thu']) {
+    const mock = fresh();
+    mock.setItem(
+      SETTINGS_KEY,
+      JSON.stringify({
+        schemaVersion: store.SCHEMA_VERSION,
+        reportOptions: { ...REPORT_OPTIONS_SEED, deltaMode: legacy },
+      }),
+    );
+    assert.equal(store.loadSettings().reportOptions.deltaMode, 'week', `${legacy} → week`);
+  }
 });
 
-test('the three deltaMode values survive a load; anything else resets to the seed', () => {
-  for (const mode of ['daily', 'weekly-sun', 'weekly-thu']) {
+test('the two deltaMode values survive a load; anything else resets to the seed', () => {
+  assert.deepEqual(DELTA_MODES, ['daily', 'week']);
+  for (const mode of DELTA_MODES) {
     const mock = fresh();
     mock.setItem(
       SETTINGS_KEY,
@@ -749,13 +761,15 @@ test('the three deltaMode values survive a load; anything else resets to the see
     );
     assert.equal(store.loadSettings().reportOptions.deltaMode, mode, `${mode} preserved`);
   }
-  for (const bad of ['weekly-mon', 'WEEKLY', '', 7, null]) {
+  // 'toString' is the prototype-key probe: a plain-object alias map would resolve it to
+  // an inherited function and persist garbage as a mode.
+  for (const bad of ['weekly-mon', 'WEEK', '', 7, null, 'toString', 'constructor']) {
     const mock = fresh();
     mock.setItem(
       SETTINGS_KEY,
       JSON.stringify({ schemaVersion: store.SCHEMA_VERSION, reportOptions: { ...REPORT_OPTIONS_SEED, deltaMode: bad } }),
     );
-    assert.equal(store.loadSettings().reportOptions.deltaMode, 'daily', `${String(bad)} → seed`);
+    assert.equal(store.loadSettings().reportOptions.deltaMode, 'week', `${String(bad)} → seed`);
   }
 });
 
@@ -784,22 +798,81 @@ test('the new definitions default only fills an ABSENT key — a stored value is
   assert.equal(s.reportOptions.slides.execFunnel, true); // other user values untouched
 });
 
-test('importSettings validates deltaMode, aliases legacy weekly, round-trips both weekly options', () => {
+test('importSettings validates deltaMode, aliases the retired weekly values, round-trips daily', () => {
   fresh();
   store.loadSettings();
   assert.throws(
     () => store.importSettings(JSON.stringify({ schemaVersion: 3, reportOptions: { deltaMode: 'weekly-mon' } })),
     /deltaMode/,
+    'a value that was never a mode is still rejected outright',
   );
-  // Legacy backup → canonical 'weekly-sun'.
-  store.importSettings(JSON.stringify({ schemaVersion: 3, reportOptions: { deltaMode: 'weekly' } }));
-  assert.equal(store.loadSettings().reportOptions.deltaMode, 'weekly-sun');
-  // Thursday option round-trips verbatim.
-  store.importSettings(JSON.stringify({ schemaVersion: 3, reportOptions: { deltaMode: 'weekly-thu' } }));
-  assert.equal(store.loadSettings().reportOptions.deltaMode, 'weekly-thu');
-  // And an export of that doc re-imports unchanged.
+  // Every retired weekly value lands as canonical 'week'.
+  for (const legacy of ['weekly', 'weekly-sun', 'weekly-thu']) {
+    store.importSettings(JSON.stringify({ schemaVersion: 3, reportOptions: { deltaMode: legacy } }));
+    assert.equal(store.loadSettings().reportOptions.deltaMode, 'week', `${legacy} imports as week`);
+  }
+  // A PRE-v7 backup's 'daily' is the old unchosen default, not a choice — the import
+  // fixup drops it so the migrated week default stands (see the dedicated pre-v7 test
+  // below; a deliberate post-v7 'daily' travels in a v7 backup and imports verbatim).
+  store.importSettings(JSON.stringify({ schemaVersion: 3, reportOptions: { deltaMode: 'daily' } }));
+  assert.equal(store.loadSettings().reportOptions.deltaMode, 'week');
+  // And an export of the doc re-imports unchanged.
   const { blob } = store.exportSettings();
   assert.ok(blob);
+});
+
+// ---- reportOptions.autoDownloadFiles (R2) -----------------------------------
+// Governs the MANUAL generate flow only: ON = the 4 files download by themselves after
+// توليد التقارير (the shipped desktop behaviour), OFF = the operator picks them from the
+// per-file buttons. STRICTLY independent from automation.autoDownload, which belongs to
+// the unattended run — a presentation checkbox must never arm a background download.
+test('autoDownloadFiles defaults to TRUE (absent = the shipped behaviour) and is seeded', () => {
+  fresh();
+  assert.equal(REPORT_OPTIONS_SEED.autoDownloadFiles, true, 'the seed ships the current behaviour');
+  assert.equal(store.loadSettings().reportOptions.autoDownloadFiles, true);
+  // A doc written before the flag existed backfills to ON, so nobody silently loses
+  // their downloads on upgrade.
+  const mock = fresh();
+  const { autoDownloadFiles, ...noFlag } = REPORT_OPTIONS_SEED;
+  mock.setItem(
+    SETTINGS_KEY,
+    JSON.stringify({ schemaVersion: store.SCHEMA_VERSION, reportOptions: noFlag }),
+  );
+  assert.equal(store.loadSettings().reportOptions.autoDownloadFiles, true, 'absent → ON');
+});
+
+test('a stored autoDownloadFiles:false survives load and a save round-trip', () => {
+  const mock = fresh();
+  mock.setItem(
+    SETTINGS_KEY,
+    JSON.stringify({
+      schemaVersion: store.SCHEMA_VERSION,
+      reportOptions: { ...REPORT_OPTIONS_SEED, autoDownloadFiles: false },
+    }),
+  );
+  const s = store.loadSettings();
+  assert.equal(s.reportOptions.autoDownloadFiles, false, 'the backfill must never flip a stored boolean');
+  store.saveSettings(s);
+  assert.equal(store.loadSettings().reportOptions.autoDownloadFiles, false, 'still off after a save/reload');
+  assert.equal(JSON.parse(mock.getItem(SETTINGS_KEY)).reportOptions.autoDownloadFiles, false, 'persisted');
+});
+
+test('importSettings coerces autoDownloadFiles and still drops unknown reportOptions keys', () => {
+  fresh();
+  store.loadSettings();
+  store.importSettings(JSON.stringify({
+    schemaVersion: store.SCHEMA_VERSION,
+    reportOptions: { autoDownloadFiles: 0, mysteryFlag: true },
+  }));
+  const ro = store.loadSettings().reportOptions;
+  assert.equal(ro.autoDownloadFiles, false, '0 coerces to false like every other imported flag');
+  assert.equal(ro.mysteryFlag, undefined, 'unknown reportOptions keys are still discarded');
+  // …and a truthy import turns it back on.
+  store.importSettings(JSON.stringify({
+    schemaVersion: store.SCHEMA_VERSION,
+    reportOptions: { autoDownloadFiles: 1 },
+  }));
+  assert.equal(store.loadSettings().reportOptions.autoDownloadFiles, true);
 });
 
 // ---- automation block (v4) --------------------------------------------------
@@ -1013,9 +1086,9 @@ test('v4 stored doc migrates to v5: the definitions default is reset once, then 
   assert.equal(s.schemaVersion, store.SCHEMA_VERSION, 'migrated to the current schema');
   assert.equal(s.reportOptions.slides.definitions, false, 'definitions default reset exactly once');
   assert.equal(s.reportOptions.slides.execFunnel, true, 'other slide choices untouched');
-  // The v4→v5 step must also run the standard backfill pass: the legacy bare
-  // 'weekly' has to land on the canonical weekday-anchored mode.
-  assert.equal(s.reportOptions.deltaMode, 'weekly-sun', 'legacy weekly canonicalized');
+  // The chain must also run the standard backfill pass, and then the v6→v7 step: the
+  // legacy bare 'weekly' lands on the canonical week-to-date mode either way.
+  assert.equal(s.reportOptions.deltaMode, 'week', 'legacy weekly canonicalized');
 
   // Switching it back on afterwards is a real choice and must survive reloads.
   s.reportOptions.slides.definitions = true;
@@ -1039,13 +1112,13 @@ const LOG_B = { openOn: '2026-06-20', closedOn: '2026-07-02' };
 test('first run seeds an EMPTY taskLog (the pre-ship exclusion mechanism)', () => {
   fresh();
   const s = store.loadSettings();
-  assert.equal(s.schemaVersion, 6, 'schema v6');
-  assert.equal(store.SCHEMA_VERSION, 6);
+  assert.equal(s.schemaVersion, 7, 'schema v7');
+  assert.equal(store.SCHEMA_VERSION, 7);
   assert.ok(s.taskLog && typeof s.taskLog === 'object' && !Array.isArray(s.taskLog));
   assert.deepEqual(s.taskLog, {}, 'empty on first run — no closed task has an open appearance yet');
 });
 
-test('v5 stored doc migrates to v6 and gains an empty taskLog, other fields preserved', () => {
+test('v5 stored doc migrates to v7 and gains an empty taskLog, other fields preserved', () => {
   const mock = fresh();
   mock.setItem(
     SETTINGS_KEY,
@@ -1060,7 +1133,7 @@ test('v5 stored doc migrates to v6 and gains an empty taskLog, other fields pres
     }),
   );
   const s = store.loadSettings();
-  assert.equal(s.schemaVersion, 6, 'migrated');
+  assert.equal(s.schemaVersion, 7, 'migrated');
   assert.deepEqual(s.taskLog, {}, 'backfilled empty');
   assert.equal(s.tatLookup.CBC, 2, 'tatLookup preserved');
   assert.deepEqual(s.displayNames, { A: 'a' });
@@ -1068,12 +1141,14 @@ test('v5 stored doc migrates to v6 and gains an empty taskLog, other fields pres
   assert.deepEqual(s.snapshotHistory, { '2026-07-08': { completed: 5 } });
   assert.equal(s.reportOptions.slides.execFunnel, false, 'user slide choice untouched');
   assert.equal(s.automation.enabled, true, 'automation untouched');
+  // The chain passes through v6→v7, which forces the new week-to-date default once.
+  assert.equal(s.reportOptions.deltaMode, 'week', 'v6→v7 forces the new default');
   // Persisted, not just returned.
-  assert.equal(JSON.parse(mock.getItem(SETTINGS_KEY)).schemaVersion, 6);
+  assert.equal(JSON.parse(mock.getItem(SETTINGS_KEY)).schemaVersion, 7);
 });
 
-test('v1/v2/v3/v4 stored docs chain all the way to v6 and gain the taskLog', () => {
-  for (const v of [1, 2, 3, 4]) {
+test('v1..v5 stored docs chain all the way to v7 and land on the week default', () => {
+  for (const v of [1, 2, 3, 4, 5]) {
     const mock = fresh();
     mock.setItem(SETTINGS_KEY, JSON.stringify({
       schemaVersion: v,
@@ -1081,19 +1156,66 @@ test('v1/v2/v3/v4 stored docs chain all the way to v6 and gain the taskLog', () 
       snapshot: { asOf: '2026-07-01', prevCompleted: 11 },
     }));
     const s = store.loadSettings();
-    assert.equal(s.schemaVersion, 6, `v${v} → v6`);
+    assert.equal(s.schemaVersion, 7, `v${v} → v7`);
     assert.deepEqual(s.taskLog, {}, `v${v} chain backfills taskLog`);
     assert.equal(s.tatLookup.CBC, 2, `v${v} keeps user data`);
+    assert.equal(s.reportOptions.deltaMode, 'week', `v${v} chain lands on the week default`);
+    assert.equal(s.reportOptions.autoDownloadFiles, true, `v${v} chain keeps auto-download ON`);
     // The rest of the chain still runs (v1's snapshot widening, v4→v5 definitions reset).
     assert.equal(s.snapshot.numbers.completed, 11, `v${v} snapshot widened`);
     assert.ok(s.automation && s.reportOptions && s.snapshotHistory);
   }
 });
 
-test('a stored taskLog survives a same-version load and a save round-trip', () => {
+/* ------------------------------------------------------------------ *
+ * v6 → v7: the week-to-date default has to REACH existing installs.
+ * The ordinary backfill only fills ABSENT keys, so every install created
+ * before 2026-08-04 carries a persisted deltaMode ('daily' or one of the
+ * retired weekly values) that no backfill would ever touch — the default
+ * change would be a no-op on exactly the installs that matter. So the
+ * migration FORCES it once, precedent migrateV4toV5 (definitions slide).
+ * It runs once: choosing 'daily' afterwards sticks, because a same-version
+ * load never rewrites a stored value again.
+ * ------------------------------------------------------------------ */
+test("v6 → v7 forces a stored 'daily' to 'week' exactly once, then a manual 'daily' sticks", () => {
   const mock = fresh();
   mock.setItem(SETTINGS_KEY, JSON.stringify({
     schemaVersion: 6,
+    tatLookup: { 'CBC': 2 },
+    reportOptions: { excludeNoTat: false, slides: {}, kpiCards: {}, labels: {}, deltaMode: 'daily' },
+    taskLog: { 'int|أ': { openOn: '2026-07-01', closedOn: null } },
+  }));
+  const s = store.loadSettings();
+  assert.equal(s.schemaVersion, 7, 'stamped v7');
+  assert.equal(s.reportOptions.deltaMode, 'week', 'the new default reached the existing install');
+  assert.equal(s.tatLookup.CBC, 2, 'user data untouched');
+  assert.deepEqual(s.taskLog, { 'int|أ': { openOn: '2026-07-01', closedOn: null } }, 'taskLog untouched');
+  assert.equal(JSON.parse(mock.getItem(SETTINGS_KEY)).reportOptions.deltaMode, 'week', 'persisted');
+
+  // The user goes back to daily: it must SURVIVE every later load.
+  s.reportOptions.deltaMode = 'daily';
+  store.saveSettings(s);
+  assert.equal(store.loadSettings().reportOptions.deltaMode, 'daily', 'the manual choice sticks');
+  assert.equal(store.loadSettings().reportOptions.deltaMode, 'daily', 'and stays stuck on a second load');
+});
+
+test("v6 → v7 also migrates the retired weekly values to 'week'", () => {
+  for (const legacy of ['weekly', 'weekly-sun', 'weekly-thu']) {
+    const mock = fresh();
+    mock.setItem(SETTINGS_KEY, JSON.stringify({
+      schemaVersion: 6,
+      reportOptions: { excludeNoTat: false, slides: {}, kpiCards: {}, labels: {}, deltaMode: legacy },
+    }));
+    const s = store.loadSettings();
+    assert.equal(s.schemaVersion, 7);
+    assert.equal(s.reportOptions.deltaMode, 'week', `${legacy} → week`);
+  }
+});
+
+test('a stored taskLog survives a same-version load and a save round-trip', () => {
+  const mock = fresh();
+  mock.setItem(SETTINGS_KEY, JSON.stringify({
+    schemaVersion: 7,
     taskLog: { 'int|أ': { ...LOG_A }, 'ext|ب': { ...LOG_B } },
   }));
   const s = store.loadSettings();
@@ -1127,7 +1249,7 @@ test('importSettings rejects every malformed taskLog shape (and an oversized one
   ];
   for (const taskLog of bad) {
     assert.throws(
-      () => store.importSettings(JSON.stringify({ schemaVersion: 6, taskLog })),
+      () => store.importSettings(JSON.stringify({ schemaVersion: 7, taskLog })),
       /taskLog/,
       `should reject ${JSON.stringify(taskLog)}`,
     );
@@ -1136,25 +1258,25 @@ test('importSettings rejects every malformed taskLog shape (and an oversized one
   const huge = {};
   for (let i = 0; i < 301; i += 1) huge[`int|k${i}`] = { openOn: '2026-07-01', closedOn: null };
   assert.throws(
-    () => store.importSettings(JSON.stringify({ schemaVersion: 6, taskLog: huge })),
+    () => store.importSettings(JSON.stringify({ schemaVersion: 7, taskLog: huge })),
     /taskLog/,
     'over the 300-entry cap',
   );
   // …and exactly 300 is fine.
   delete huge['int|k300'];
-  assert.doesNotThrow(() => store.importSettings(JSON.stringify({ schemaVersion: 6, taskLog: huge })));
+  assert.doesNotThrow(() => store.importSettings(JSON.stringify({ schemaVersion: 7, taskLog: huge })));
   assert.equal(Object.keys(store.loadSettings().taskLog).length, 300);
 });
 
 test('importSettings round-trips a valid taskLog with a per-key union', () => {
   const mock = fresh();
   mock.setItem(SETTINGS_KEY, JSON.stringify({
-    schemaVersion: 6,
+    schemaVersion: 7,
     taskLog: { 'int|أ': { ...LOG_A }, 'ext|ب': { ...LOG_B } },
   }));
   store.loadSettings();
   store.importSettings(JSON.stringify({
-    schemaVersion: 6,
+    schemaVersion: 7,
     taskLog: {
       'ext|ب': { openOn: '2026-06-20', closedOn: null },  // import wins on the shared key
       'ext|ج': { openOn: '2026-07-05', closedOn: null },  // new key
@@ -1172,7 +1294,7 @@ test('pickImportKeys sanitizes taskLog entries down to {openOn, closedOn}', () =
   fresh();
   store.loadSettings();
   store.importSettings(JSON.stringify({
-    schemaVersion: 6,
+    schemaVersion: 7,
     taskLog: { 'int|أ': { openOn: '2026-07-01', closedOn: null, note: 'junk', shownOn: 3 } },
   }));
   assert.deepEqual(store.loadSettings().taskLog, { 'int|أ': { openOn: '2026-07-01', closedOn: null } });
@@ -1181,7 +1303,7 @@ test('pickImportKeys sanitizes taskLog entries down to {openOn, closedOn}', () =
 test('export → import → export is identity for the taskLog', async () => {
   const mock = fresh();
   mock.setItem(SETTINGS_KEY, JSON.stringify({
-    schemaVersion: 6,
+    schemaVersion: 7,
     taskLog: { 'int|أ': { ...LOG_A }, 'ext|ب': { ...LOG_B } },
   }));
   store.loadSettings();
@@ -1198,8 +1320,8 @@ test('export → import → export is identity for the taskLog', async () => {
 test('importSettings accepts v4 and v5 backups (version-gate fix)', () => {
   // PRE-EXISTING BUG, fixed with this feature: validateImport gated on {1,2,3,current},
   // so every schema bump silently orphaned the previous version's backups — v4 was
-  // already unimportable and v5 would have joined it. IMPORTABLE_VERSIONS = {1..5, current}.
-  for (const v of [1, 2, 3, 4, 5, 6]) {
+  // already unimportable and v5 would have joined it. IMPORTABLE_VERSIONS = {1..6, current}.
+  for (const v of [1, 2, 3, 4, 5, 6, 7]) {
     fresh();
     store.loadSettings();
     assert.doesNotThrow(
@@ -1207,7 +1329,7 @@ test('importSettings accepts v4 and v5 backups (version-gate fix)', () => {
       `v${v} backup must import`,
     );
     assert.equal(store.loadSettings().displayNames[`v${v}`], 'x', `v${v} content landed`);
-    assert.equal(store.loadSettings().schemaVersion, 6, 'and the doc is stamped current');
+    assert.equal(store.loadSettings().schemaVersion, 7, 'and the doc is stamped current');
   }
   assert.throws(
     () => store.importSettings(JSON.stringify({ schemaVersion: 0 })),
@@ -1217,4 +1339,27 @@ test('importSettings accepts v4 and v5 backups (version-gate fix)', () => {
     () => store.importSettings(JSON.stringify({ schemaVersion: 99 })),
     /إصدار المخطط غير مدعوم|schemaVersion/,
   );
+});
+
+test('importing a pre-v7 backup does not undo the week-default migration', () => {
+  fresh();
+  // Device is migrated: deltaMode 'week'. A v6 backup carries the old default 'daily'
+  // — a value nobody chose (migrateV6toV7's premise). The import must drop it so the
+  // device's migrated 'week' stands; saveSettings stamps schemaVersion 7, so nothing
+  // would ever re-run the migration otherwise.
+  store.loadSettings();
+  store.importSettings(JSON.stringify({
+    schemaVersion: 6,
+    reportOptions: { excludeNoTat: true, slides: {}, kpiCards: {}, labels: {}, deltaMode: 'daily' },
+  }));
+  const s = store.loadSettings();
+  assert.equal(s.reportOptions.deltaMode, 'week', 'pre-v7 deltaMode dropped, migrated default stands');
+  assert.equal(s.reportOptions.excludeNoTat, true, 'the rest of the backup imported normally');
+
+  // A CURRENT (v7) backup carrying a deliberate 'daily' imports untouched.
+  store.importSettings(JSON.stringify({
+    schemaVersion: store.SCHEMA_VERSION,
+    reportOptions: { excludeNoTat: false, slides: {}, kpiCards: {}, labels: {}, deltaMode: 'daily' },
+  }));
+  assert.equal(store.loadSettings().reportOptions.deltaMode, 'daily', 'post-v7 choice imports verbatim');
 });

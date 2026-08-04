@@ -15,19 +15,19 @@
 // throws on write; on failure we fall back to an in-memory doc and expose
 // isEphemeral() so the UI can warn the user their edits will not persist.
 
-import { SETTINGS_KEY } from './contracts.js?v=v2026-08-04.1';
-import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-08-04.1';
-import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-08-04.1';
+import { SETTINGS_KEY } from './contracts.js?v=v2026-08-04.2';
+import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-08-04.2';
+import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-08-04.2';
 import {
   HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED, GRAFANA_SEED, REPORT_OPTIONS_SEED,
   SNAPSHOT_HISTORY_SEED, AUTOMATION_SEED, TASK_LOG_SEED,
-} from './seeds/defaults.js?v=v2026-08-04.1';
-import { DELTA_MODES } from './model/delta-baseline.js?v=v2026-08-04.1';
+} from './seeds/defaults.js?v=v2026-08-04.2';
+import { DELTA_MODES, canonicalDeltaMode } from './model/delta-baseline.js?v=v2026-08-04.2';
 import {
   sanitizeTaskLog, recordShownTasks, TASK_LOG_LIMIT, TASK_KEY_MAX,
-} from './model/task-lifecycle.js?v=v2026-08-04.1';
+} from './model/task-lifecycle.js?v=v2026-08-04.2';
 
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 // taskLog key = 'ext'|'int' (3) + '|' (1) + up to TASK_KEY_MAX chars of task text.
 // A little headroom above that so a key is rejected only when it is genuinely
@@ -40,20 +40,12 @@ const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 // Local 24-hour 'HH:MM' — the shape of automation.dailyTime.
 const DAILY_TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
-/**
- * Canonical reportOptions.deltaMode, or null when the value is not a mode at all.
- * DELTA_MODES (model/delta-baseline.js) is the single source of the valid list:
- * 'daily' | 'weekly-sun' | 'weekly-thu'. The bare 'weekly' stored before the
- * Sunday/Thursday split MIGRATES to 'weekly-sun' rather than being discarded, so an
- * existing install keeps a weekly comparison. Anything else → null: the backfill
- * resets it to the seed, an import rejects it.
- * @param {*} v
- * @returns {string|null}
- */
-function canonicalDeltaMode(v) {
-  if (v === 'weekly') return 'weekly-sun'; // legacy alias
-  return DELTA_MODES.includes(v) ? v : null;
-}
+// canonicalDeltaMode is IMPORTED from model/delta-baseline.js (above), which owns the
+// enum, the retired-value aliases and the null-for-anything-else rule. This file used
+// to keep its own copy of that logic, which meant every mode change had to be made
+// twice, in lockstep, or the store would reject a value the picker accepts.
+// Contract used here: 'daily' | 'week' back, null when the value is not a mode at all
+// (the backfill then resets it to the seed and an import rejects it).
 
 // The automation boolean switches (v4). Every one defaults to false; dailyTime and
 // labRecipients are the only non-boolean members of the block.
@@ -115,8 +107,15 @@ function backfillReportOptions(doc) {
     if (typeof ro.kpiCards[k] !== 'boolean') ro.kpiCards[k] = seed.kpiCards[k];
   }
   if (!isPlainObject(ro.labels)) ro.labels = {};
-  // deltaMode gained in v3, weekday-anchored since the Sun/Thu split: a stored
-  // 'weekly' migrates to 'weekly-sun', anything unrecognized resets to the seed.
+  // Manual-generate auto-download (v7). Fills only a MISSING key, like every flag
+  // above, so a user who switched it OFF keeps it off across loads. Absent → the seed
+  // (true = the behaviour shipped to date). Unrelated to automation.autoDownload,
+  // which lives in the automation block and governs the unattended run.
+  if (typeof ro.autoDownloadFiles !== 'boolean') ro.autoDownloadFiles = seed.autoDownloadFiles;
+  // deltaMode gained in v3; the retired weekly values ('weekly', 'weekly-sun',
+  // 'weekly-thu') migrate to 'week' through canonicalDeltaMode, anything
+  // unrecognized resets to the seed. NOTE this backfill cannot change the DEFAULT for
+  // an install that already stored 'daily' — that is migrateV6toV7's job.
   ro.deltaMode = canonicalDeltaMode(ro.deltaMode) || seed.deltaMode;
 }
 
@@ -370,10 +369,64 @@ function migrateV2toV6(doc) {
   return migrateV5toV6(doc);
 }
 
-/** v1 → v6: chain every transform so the oldest docs land on the current schema. */
+/** v1 → v6: chain every transform so old docs land on v6. */
 function migrateV1toV6(doc) {
   migrateV1toV5(doc);
   return migrateV5toV6(doc);
+}
+
+/**
+ * v6 → v7: make week-to-date the delta comparison window.
+ *
+ * deltaMode shipped defaulting to 'daily' and every saveSettings has persisted that
+ * value since v3, so an install that has ever run the app holds a stored 'daily' —
+ * a DEFAULT nobody chose. The user asked for week-to-date "instead of daily"
+ * (2026-08-04), and backfillReportOptions only fills an ABSENT key: without this
+ * one-time force the new default would reach nobody who already uses the app, i.e.
+ * exactly the installs the request is about. Direct precedent: migrateV4toV5, which
+ * reset slides.definitions the same way and for the same reason.
+ *
+ * It runs ONCE. Choosing 'daily' in Settings afterwards sticks, because no later load
+ * ever touches a stored value again (the backfill only canonicalizes it).
+ * The retired 'weekly-sun' / 'weekly-thu' values need no work here — canonicalDeltaMode
+ * aliases them to 'week', which is where this migration puts everyone anyway.
+ */
+function migrateV6toV7(doc) {
+  migrateSnapshotShape(doc); // same softening/backfill pass every other step runs
+  const ro = isPlainObject(doc.reportOptions) ? doc.reportOptions : (doc.reportOptions = {});
+  ro.deltaMode = 'week';
+  doc.schemaVersion = 7;
+  return doc;
+}
+
+/** v5 → v7: run the v5→v6 transform, then v6→v7. */
+function migrateV5toV7(doc) {
+  migrateV5toV6(doc);
+  return migrateV6toV7(doc);
+}
+
+/** v4 → v7: run the v4→v6 chain, then v6→v7. */
+function migrateV4toV7(doc) {
+  migrateV4toV6(doc);
+  return migrateV6toV7(doc);
+}
+
+/** v3 → v7: run the v3→v6 chain, then v6→v7. */
+function migrateV3toV7(doc) {
+  migrateV3toV6(doc);
+  return migrateV6toV7(doc);
+}
+
+/** v2 → v7: run the v2→v6 chain, then v6→v7. */
+function migrateV2toV7(doc) {
+  migrateV2toV6(doc);
+  return migrateV6toV7(doc);
+}
+
+/** v1 → v7: chain every transform so the oldest docs land on the current schema. */
+function migrateV1toV7(doc) {
+  migrateV1toV6(doc);
+  return migrateV6toV7(doc);
 }
 
 /** Version-check + migrate/reset. Unknown versions reset to seeds. */
@@ -383,11 +436,12 @@ function migrate(doc) {
     return persist(buildSeedDoc());
   }
   if (doc.schemaVersion === SCHEMA_VERSION) return migrateSnapshotShape(doc);
-  if (doc.schemaVersion === 5) return persist(migrateV5toV6(doc));
-  if (doc.schemaVersion === 4) return persist(migrateV4toV6(doc));
-  if (doc.schemaVersion === 3) return persist(migrateV3toV6(doc));
-  if (doc.schemaVersion === 2) return persist(migrateV2toV6(doc));
-  if (doc.schemaVersion === 1) return persist(migrateV1toV6(doc));
+  if (doc.schemaVersion === 6) return persist(migrateV6toV7(doc));
+  if (doc.schemaVersion === 5) return persist(migrateV5toV7(doc));
+  if (doc.schemaVersion === 4) return persist(migrateV4toV7(doc));
+  if (doc.schemaVersion === 3) return persist(migrateV3toV7(doc));
+  if (doc.schemaVersion === 2) return persist(migrateV2toV7(doc));
+  if (doc.schemaVersion === 1) return persist(migrateV1toV7(doc));
   // Future schema bumps add forward-migration cases above this line.
   console.warn(
     `[misbar/store] unsupported schemaVersion ${doc.schemaVersion} ` +
@@ -539,7 +593,7 @@ export function exportSettings() {
 // Schema versions an import accepts: every version migrate() can transform, plus
 // the current one. Extend this WITH the migration dispatcher — a version that can
 // be loaded from storage but not imported orphans that generation's backups.
-const IMPORTABLE_VERSIONS = new Set([1, 2, 3, 4, 5, SCHEMA_VERSION]);
+const IMPORTABLE_VERSIONS = new Set([1, 2, 3, 4, 5, 6, SCHEMA_VERSION]);
 
 function validateImport(doc) {
   if (!isPlainObject(doc)) {
@@ -677,11 +731,20 @@ function validateImport(doc) {
     if (!isPlainObject(ro)) {
       throw new Error('حقل reportOptions غير صالح: يجب أن يكون كائناً.');
     }
-    // excludeNoTat and the slide/card flags are coerce-tolerant (normalized to
-    // booleans in pickImportKeys); only the container shapes are enforced here.
+    // excludeNoTat, autoDownloadFiles (v7) and the slide/card flags are all
+    // coerce-tolerant (normalized to booleans in pickImportKeys); only the container
+    // shapes and deltaMode's enum are enforced here. The line between the two: these
+    // are PRESENTATION preferences, so a truthy value from a hand-edited backup is
+    // normalized; the automation switches, which can start an unattended run on their
+    // own, are validated strictly and rejected (see the automation block below).
     if ('deltaMode' in ro && canonicalDeltaMode(ro.deltaMode) == null) {
+      // The accepted list is BUILT FROM THE ENUM, never re-typed: this message named
+      // 'weekly-sun'/'weekly-thu' long enough that it could have outlived them and told
+      // the user to supply a value the store no longer accepts. Retired aliases are
+      // deliberately left out — they still import (canonicalDeltaMode maps them), they
+      // are just not what we ask a human to type.
       throw new Error(
-        "حقل reportOptions.deltaMode غير صالح: يجب أن يكون 'daily' أو 'weekly-sun' أو 'weekly-thu'.",
+        `حقل reportOptions.deltaMode غير صالح: يجب أن يكون ${DELTA_MODES.map((m) => `'${m}'`).join(' أو ')}.`,
       );
     }
     if ('slides' in ro && !isPlainObject(ro.slides)) {
@@ -841,13 +904,18 @@ function pickImportKeys(doc) {
     out.grafana = picked;
   }
   if (isPlainObject(out.reportOptions)) {
-    // Whitelist exactly {excludeNoTat, slides(4 keys), kpiCards(7 keys), labels}.
-    // Flags coerce to booleans; only string label values survive; unknown
-    // slide/card subkeys are discarded.
+    // Whitelist exactly {excludeNoTat, autoDownloadFiles, deltaMode, slides(6 keys),
+    // kpiCards(7 keys), labels}. Flags coerce to booleans; only string label values
+    // survive; unknown slide/card subkeys are discarded.
     const ro = out.reportOptions;
     const picked = {};
     if ('excludeNoTat' in ro) picked.excludeNoTat = !!ro.excludeNoTat;
-    // A legacy 'weekly' lands as 'weekly-sun'; an unrecognized value is dropped so
+    // v7 manual-generate auto-download. Coerce-tolerant exactly like excludeNoTat and
+    // the slide/card flags — a presentation preference, not a safety switch, so a
+    // sloppy truthy value from a hand-edited backup is normalized rather than rejected.
+    // (automation.autoDownload, the unattended one, stays strict: see its block above.)
+    if ('autoDownloadFiles' in ro) picked.autoDownloadFiles = !!ro.autoDownloadFiles;
+    // Retired weekly values land as 'week'; an unrecognized value is dropped so
     // the stored default survives the merge (validateImport already rejected it).
     const dm = canonicalDeltaMode(ro.deltaMode);
     if (dm != null) picked.deltaMode = dm;
@@ -990,6 +1058,7 @@ export function importSettings(jsonText) {
   }
   validateImport(incoming);
   const wasV1 = incoming.schemaVersion === 1;
+  const preWeekBackup = typeof incoming.schemaVersion === 'number' && incoming.schemaVersion <= 6;
   incoming = pickImportKeys(incoming); // discard unknown keys — nothing but config may persist
   if (wasV1) {
     // A v1 backup's cancelledByMonth carries max-era (data-derived) months that
@@ -998,6 +1067,16 @@ export function importSettings(jsonText) {
     incoming.historicalConstants = {
       cancelledByMonth: { ...HISTORICAL_CONSTANTS_SEED.cancelledByMonth },
     };
+  }
+  if (preWeekBackup && incoming.reportOptions && 'deltaMode' in incoming.reportOptions) {
+    // A pre-v7 backup's deltaMode is the OLD default ('daily' in v3-v6) — by
+    // migrateV6toV7's own premise, "a DEFAULT nobody chose". Importing it verbatim
+    // would permanently undo the one-time week-default migration (saveSettings stamps
+    // the current schemaVersion, so migrate() never routes the doc through v6→v7
+    // again). Drop it and let the device's migrated value stand — the same
+    // backup-needs-the-migration idea as the wasV1 fixup above. A deltaMode chosen
+    // AFTER v7 shipped travels in a v7 backup and imports untouched.
+    delete incoming.reportOptions.deltaMode;
   }
 
   const current = clone(loadSettings());

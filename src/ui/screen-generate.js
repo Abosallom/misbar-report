@@ -2,15 +2,16 @@
 // The file-producing core now lives in automation/pipeline.js (produceReportFiles) so
 // an unattended run makes byte-identical files; this screen drives it and paints the
 // very same progress bar, file rows and live slide thumbnails it always has.
-import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-08-04.1';
-import { el, progressBar, toast } from './components.js?v=v2026-08-04.1';
-import { resetRunData } from '../state.js?v=v2026-08-04.1';
-import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-08-04.1';
-import { autoDraft, splitTaskLists } from '../model/drafts.js?v=v2026-08-04.1';
-import { buildLateLabsSection, triggerDownload } from './late-labs-section.js?v=v2026-08-04.1';
+import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-08-04.2';
+import { el, progressBar, toast } from './components.js?v=v2026-08-04.2';
+import { resetRunData } from '../state.js?v=v2026-08-04.2';
+import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-08-04.2';
+import { autoDraft, splitTaskLists } from '../model/drafts.js?v=v2026-08-04.2';
+import { buildLateLabsSection, triggerDownload } from './late-labs-section.js?v=v2026-08-04.2';
 import {
   applyDeltaBaseline, buildFileDefs, produceReportFiles, recordRunSnapshot,
-} from '../automation/pipeline.js?v=v2026-08-04.1';
+  shouldAutoDownloadFiles,
+} from '../automation/pipeline.js?v=v2026-08-04.2';
 
 async function tryImport(path) { try { return await import(path); } catch { return null; } }
 const isMobile = () => /iP(hone|ad|od)|Android/i.test(navigator.userAgent);
@@ -170,7 +171,7 @@ export async function render(container, ctx) {
   // generated files' exec legend/chips match the review preview. recordSnapshot (below)
   // appends this run to snapshotHistory on success. Guarded → legacy engine deltas if the
   // module isn't present at runtime.
-  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-08-04.1');
+  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-08-04.2');
   const pickBaseline = dbMod && dbMod.pickDeltaBaseline;
   const recordSnapshot = dbMod && dbMod.recordSnapshot;
   applyDeltaBaseline(model, store, pickBaseline);
@@ -276,7 +277,7 @@ export async function render(container, ctx) {
     // unattended generation feeds the same delta/history features.
     // recordShownTasks also writes the closed-task grace log (v6) from this very
     // model — guarded import, so an older/partial build just keeps the numbers path.
-    const tlMod = await tryImport('../model/task-lifecycle.js?v=v2026-08-04.1');
+    const tlMod = await tryImport('../model/task-lifecycle.js?v=v2026-08-04.2');
     recordRunSnapshot({
       model, store, state, date, recordSnapshot,
       recordShownTasks: tlMod && tlMod.recordShownTasks,
@@ -289,8 +290,15 @@ export async function render(container, ctx) {
 
     // Auto-download works on desktop; iOS/Safari may drop programmatic clicks
     // that fire without recent user activation, so it's attempted on desktop only
-    // and the panel below always offers gesture-driven buttons.
-    if (!isMobile()) {
+    // and the panel below always offers gesture-driven buttons. Since 2026-08-04 the
+    // operator can also turn it off (reportOptions.autoDownloadFiles — the checkbox on
+    // the review screen / settings' report tab): the decision lives in ONE pure
+    // predicate (pipeline.js shouldAutoDownloadFiles) so this screen, the settings
+    // mirror and the tests can never disagree, and it is read here — not cached at
+    // render time — so a toggle flipped just before توليد التقارير is honoured.
+    // Strictly unrelated to automation.autoDownload, which only governs unattended runs.
+    const autoDownload = shouldAutoDownloadFiles({ settings: store.settings, mobile: isMobile() });
+    if (autoDownload) {
       for (let i = 0; i < produced.length; i++) {
         const p = produced[i];
         p.url = triggerDownload(p.blob, p.def.name);
@@ -307,7 +315,12 @@ export async function render(container, ctx) {
         onClick: () => { produced.forEach((p) => { p.url = triggerDownload(p.blob, p.def.name); }); },
       }),
       hadError ? el('p', { class: 'small muted', text: STR.generate.genMissing }) : null,
-      el('p', { class: 'small muted', style: 'margin-top:6px', text: STR.generate.downloadHint }),
+      el('p', {
+        class: 'small muted',
+        style: 'margin-top:6px',
+        // Auto-download off → the buttons are not a fallback, they ARE the download.
+        text: autoDownload ? STR.generate.downloadHint : STR.generate.downloadPickHint,
+      }),
       el('div', { class: 'dl-links' }, produced.map((p) =>
         el('a', {
           class: 'dl-link', href: p.url || URL.createObjectURL(p.blob), download: p.def.name,

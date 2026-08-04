@@ -172,6 +172,10 @@ export const STR = {
     done: 'تم إنشاء جميع الملفات',
     downloadAgain: 'تنزيل الملف',
     downloadHint: 'إن لم يبدأ التنزيل تلقائيًا، استخدم الأزرار التالية:',
+    // Shown INSTEAD of downloadHint when reportOptions.autoDownloadFiles is off
+    // (pipeline.js shouldAutoDownloadFiles): nothing was saved by itself, so the
+    // per-file buttons below are the whole download story, not a fallback.
+    downloadPickHint: 'التنزيل التلقائي مُعطَّل — اختر الملفات التي تريد تنزيلها:',
     newReport: 'تقرير جديد',
     genMissing: 'وحدات التوليد غير متوفرة بعد (قيد الإنشاء).',
     failed: 'تعذّر إنشاء الملفات',

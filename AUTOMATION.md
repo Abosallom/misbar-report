@@ -19,7 +19,7 @@ Every option is independent; a step whose option is `false` never runs.
 | `enabled` | المفتاح الرئيسي. Master switch. When off, `?auto=1` and the daily Mac job do nothing. |
 | `autoPull` | يسحب أحدث لقطة مشفَّرة من المصدر. Pulls the latest encrypted snapshot / live orders. |
 | `autoGenerate` | يشغّل المحرك ويبني الشرائح. Runs the engine and builds the report deck. |
-| `autoDownload` | ينزّل ملفات التقرير الأربعة (٢ PPTX + ٢ PDF). Downloads the 4 report files (2 PPTX + 2 PDF). |
+| `autoDownload` | ينزّل ملفات التقرير الأربعة (٢ PPTX + ٢ PDF) **في التشغيل الآلي فقط**. Downloads the 4 report files (2 PPTX + 2 PDF) — **unattended runs only**. |
 | `autoLabFiles` | ينشئ ملفات المختبرات المتأخرة. Builds the per-lab late-orders files. |
 | `autoEmailDrafts` | يُجهّز مسوّدات البريد كملفات — **بدون إرسال**. Prepares email drafts as files — **never sends**. |
 | `autoAcceptTat` | يقبل اقتراحات TAT المطابقة تلقائيًا. Auto-accepts the confident TAT suggestions. |
@@ -27,6 +27,14 @@ Every option is independent; a step whose option is `false` never runs.
 
 الافتراضي: كل شيء مُطفأ (`AUTOMATION_DEFAULTS`). Everything defaults to **off** —
 automation is strictly opt-in, per option, from the settings screen.
+
+`automation.autoDownload` ≠ `reportOptions.autoDownloadFiles`: الأول يخص التشغيل غير
+المراقَب (ملفات التقرير + ملفات المختبرات + مسودات البريد)، والثاني خيار عرض للتوليد
+اليدوي فقط (تنزيل الملفات الأربعة تلقائياً بعد الضغط على «توليد التقارير»). تعديل أحدهما
+لا يمسّ الآخر إطلاقاً. `automation.autoDownload` gates the **unattended** run's downloads;
+`reportOptions.autoDownloadFiles` (default ON, `automation/pipeline.js`
+`shouldAutoDownloadFiles`) governs the **manual** generate flow only — a presentation
+checkbox must never arm a background download, so neither flag reads or writes the other.
 
 مواعيد التقرير الأسبوعي ليست خيارًا في الإعدادات — هي في LaunchAgent (§3).
 There is deliberately **no weekly option in this table**: the weekly run days live in the

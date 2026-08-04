@@ -9,7 +9,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  AUTOMATION_DEFAULTS, AUTOMATION_STEPS, runAutomation,
+  AUTOMATION_DEFAULTS, AUTOMATION_STEPS, runAutomation, shouldAutoDownloadFiles,
 } from '../src/automation/pipeline.js';
 // The lifecycle module is pure and tiny — injected through the same deps seam so the
 // taskLog cases assert the REAL key/entry shape rather than a re-implementation.
@@ -476,4 +476,81 @@ test('a failed generate writes no taskLog at all', async () => {
   assert.equal(statusOf(res, 'generate'), 'error');
   assert.deepEqual(store.docs, [], 'no files produced → no lifecycle write');
   assert.deepEqual(store.snapshots, [], 'and no snapshot, as before');
+});
+
+/* ------------------------------------------------------------------ *
+ * shouldAutoDownloadFiles (R2) — the MANUAL generate flow's gate.
+ *
+ * reportOptions.autoDownloadFiles decides whether the 4 files the operator
+ * just generated push themselves into the browser's downloads (ON = the
+ * shipped desktop behaviour) or wait behind the per-file buttons. The
+ * predicate is pure so it can be pinned here without a DOM; screen-generate
+ * wraps its download loop in it.
+ *
+ * It is STRICTLY INDEPENDENT from automation.autoDownload. That flag belongs
+ * to the UNATTENDED run — a presentation checkbox on the review screen must
+ * never arm a background download, and turning the presentation checkbox off
+ * must never disarm a run the user deliberately automated. Two settings, two
+ * owners, no cross-reads: the independence case below is the executable
+ * statement of that rule.
+ * ------------------------------------------------------------------ */
+test('shouldAutoDownloadFiles truth table: default ON, explicit false OFF', () => {
+  const withFlag = (v) => ({ reportOptions: { autoDownloadFiles: v } });
+  // Explicit values.
+  assert.equal(shouldAutoDownloadFiles({ settings: withFlag(true), mobile: false }), true);
+  assert.equal(shouldAutoDownloadFiles({ settings: withFlag(false), mobile: false }), false);
+  // Absent / empty / missing settings → ON. An install that never stored the flag keeps
+  // downloading exactly as it did before the toggle shipped.
+  assert.equal(shouldAutoDownloadFiles({ settings: { reportOptions: {} }, mobile: false }), true);
+  assert.equal(shouldAutoDownloadFiles({ settings: {}, mobile: false }), true);
+  assert.equal(shouldAutoDownloadFiles({ settings: undefined, mobile: false }), true);
+  assert.equal(shouldAutoDownloadFiles({ mobile: false }), true);
+  assert.equal(shouldAutoDownloadFiles({}), true);
+  assert.equal(shouldAutoDownloadFiles(), true);
+});
+
+test('shouldAutoDownloadFiles is always false on mobile, whatever the setting says', () => {
+  // Unchanged platform reality: iOS Safari drops programmatic anchor clicks, so the
+  // mobile flow has always used the per-file buttons. The new toggle cannot turn that on.
+  for (const v of [true, false, undefined]) {
+    assert.equal(
+      shouldAutoDownloadFiles({ settings: { reportOptions: { autoDownloadFiles: v } }, mobile: true }),
+      false,
+      `mobile + autoDownloadFiles:${String(v)}`,
+    );
+  }
+  assert.equal(shouldAutoDownloadFiles({ settings: {}, mobile: true }), false);
+});
+
+test('automation.autoDownload is INDEPENDENT of reportOptions.autoDownloadFiles', async () => {
+  // The unattended run downloads because the user armed automation.autoDownload. The
+  // review screen's presentation checkbox (autoDownloadFiles:false) must not reach into
+  // it: if this ever fails, an operator who tidied up their manual flow has silently
+  // disarmed their scheduled run.
+  const downloaded = [];
+  const store = makeStore({
+    reportOptions: { autoDownloadFiles: false, slides: {}, kpiCards: {}, labels: {}, deltaMode: 'week' },
+  });
+  const deps = fakeDeps({
+    loadDownload: async () => ({ triggerDownload: (blob, name) => downloaded.push(name) }),
+  });
+  const res = await run({
+    store,
+    deps,
+    // Deck only — the lab-file and email steps have their own download paths.
+    options: { ...ALL_ON, autoDownload: true, autoLabFiles: false, autoEmailDrafts: false },
+  });
+  assert.equal(statusOf(res, 'generate'), 'done');
+  assert.deepEqual(downloaded, ['report.pptx'], 'the automated run downloaded despite autoDownloadFiles:false');
+  // And the predicate still reports OFF for the manual flow on the same settings — the
+  // two answers are allowed to disagree, which is the whole point.
+  assert.equal(shouldAutoDownloadFiles({ settings: store.settings, mobile: false }), false);
+});
+
+test('automation.autoDownload:false downloads nothing even with autoDownloadFiles ON', () => {
+  // The mirror image, stated as a predicate check: the manual gate says ON, but that
+  // says nothing about the unattended run, which stays off until its own flag is armed.
+  const settings = { reportOptions: { autoDownloadFiles: true } };
+  assert.equal(shouldAutoDownloadFiles({ settings, mobile: false }), true);
+  assert.equal(AUTOMATION_DEFAULTS.autoDownload, false, 'automation is opt-in, never inferred');
 });

@@ -5,7 +5,8 @@
 // delta inflated by ~the rejected count (~+15 live) that is a definition change,
 // not progress. Stored history is NEVER rewritten (it is the published record);
 // instead pickDeltaBaseline DISCLOSES it via definitionShift:true, exactly the way
-// it already returns anchored:false for a weekly baseline that missed its weekday.
+// it already returns anchored:false for a week-to-date baseline with no report stored
+// before the week's Sunday.
 //
 // Companion to test/delta-baseline.test.mjs, which stays green untouched: the flag
 // is emitted only for a baseline that actually carries a `completed` number (one
@@ -88,19 +89,24 @@ test('no completed number → no flag (nothing definitional can be shown)', () =
   assert.equal(bad.definitionShift, undefined);
 });
 
-test('the flag rides alongside anchored on the weekly modes', () => {
+test("the flag rides alongside anchored on the week-to-date mode", () => {
+  // 2026-07-29 is a Wednesday, so its week starts Sunday 2026-07-26 and the baseline is
+  // the last report strictly before that Sunday — 07-23, which is pre-change.
   const history = {
     '2026-07-19': nums(640), // Sun, pre-change
-    '2026-07-23': nums(650), // Thu, pre-change
+    '2026-07-23': nums(650), // Thu, pre-change — the pre-Sunday baseline for the 07-26 week
   };
-  const sun = pickDeltaBaseline({ history, reportDate: '2026-07-29', mode: 'weekly-sun' });
-  assert.deepEqual(sun, {
-    numbers: nums(640), baselineDate: '2026-07-19', mode: 'weekly-sun', anchored: true, definitionShift: true,
+  const week = pickDeltaBaseline({ history, reportDate: '2026-07-29', mode: 'week' });
+  assert.deepEqual(week, {
+    numbers: nums(650), baselineDate: '2026-07-23', mode: 'week', anchored: true, definitionShift: true,
   });
-  // anchored:false and definitionShift are independent disclosures — both can show.
-  const thuOnly = pickDeltaBaseline({ history: { '2026-07-23': nums(650) }, reportDate: '2026-07-29', mode: 'weekly-sun' });
-  assert.equal(thuOnly.anchored, false);
-  assert.equal(thuOnly.definitionShift, true);
+  // anchored:false and definitionShift are INDEPENDENT disclosures — both can show at
+  // once. Here history starts inside the week (07-27 Mon), so there is no pre-Sunday
+  // report to anchor on AND the degraded baseline still speaks the old definition.
+  const inWeekOnly = pickDeltaBaseline({ history: { '2026-07-27': nums(660) }, reportDate: '2026-07-29', mode: 'week' });
+  assert.equal(inWeekOnly.baselineDate, '2026-07-27');
+  assert.equal(inWeekOnly.anchored, false);
+  assert.equal(inWeekOnly.definitionShift, true);
 });
 
 // ---- legacy snapshot fallback ------------------------------------------------

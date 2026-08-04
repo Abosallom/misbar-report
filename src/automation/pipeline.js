@@ -14,9 +14,9 @@
 //
 // PHI rule unchanged: order rows live in `state` only. Nothing here logs a row
 // or writes one to storage — only aggregate numbers reach store.updateSnapshot.
-import { STR, todayISO, buildFileName } from '../i18n/ar.js?v=v2026-08-04.1';
-import { VARIANTS, normTest } from '../contracts.js?v=v2026-08-04.1';
-import { getGenLibs } from '../vendor-loader.js?v=v2026-08-04.1';
+import { STR, todayISO, buildFileName } from '../i18n/ar.js?v=v2026-08-04.2';
+import { VARIANTS, normTest } from '../contracts.js?v=v2026-08-04.2';
+import { getGenLibs } from '../vendor-loader.js?v=v2026-08-04.2';
 
 /* ------------------------------------------------------------------ *
  * Shared micro-helpers (same idioms the screens use)
@@ -55,8 +55,9 @@ export function currentNumbersOf(kpi) {
 }
 
 // deltaMode baseline (user decision B): recompute model.kpi.deltas against the picked
-// baseline and stamp model.deltaBaseline {baselineDate, mode, anchored} so the exec legend
-// renders mode-aware and a non-anchored weekly fallback stays disclosable. Signed (no
+// baseline and stamp model.deltaBaseline {baselineDate, mode, anchored, definitionShift}
+// so the exec legend renders mode-aware and BOTH disclosures (a non-anchored week
+// fallback, an old-definition baseline) survive to file production. Signed (no
 // max(0) clamp) so a drop surfaces as a '−N' green chip. Degrades to the engine's legacy
 // deltas when the delta-baseline module is missing or no baseline resolves. Mutates
 // kpi.deltas in place so the generated files match the review preview.
@@ -69,7 +70,31 @@ export function applyDeltaBaseline(model, store, pickDeltaBaseline) {
       history: settings.snapshotHistory,
       legacySnapshot: settings.snapshot,
       reportDate: model.reportDate,
-      mode: (settings.reportOptions && settings.reportOptions.deltaMode) || 'daily',
+      // The RAW stored value — deliberately NOT `|| 'daily'` (review fix 2026-08-04).
+      // The default is 'week' now, so that fallback silently re-daily-ified every FALSY
+      // stored mode (undefined — main.js seedSettings() writes no reportOptions key at
+      // all, so the local-store fallback always lands here — plus null, '', 0, false)
+      // while screen-review's twin fed the same expression through normalizeDeltaMode and
+      // got 'week'. screen-generate re-runs THIS copy on the very model object review
+      // already stamped, so the deck always won the disagreement: the banner promised
+      // 'منذ بداية الأسبوع' and the files shipped a day-over-day baseline.
+      // delta-baseline.js names that exact failure ("falling back to 'daily' would
+      // silently re-daily-ify a user who never asked for daily").
+      //
+      // Passing the raw value is EQUIVALENT to screen-review's normalizeDeltaMode(...)
+      // for every possible input, and that is the point: pickDeltaBaseline normalizes its
+      // own `mode` argument (its documented contract — "anything unknown →
+      // DEFAULT_DELTA_MODE"), normalizeDeltaMode is idempotent, and the mode stamped
+      // below is `picked.mode`, the canonical one the picker chose. Normalizing HERE
+      // instead — i.e. a static `import { normalizeDeltaMode }` — would turn
+      // model/delta-baseline.js into a HARD dependency of this module, and it is
+      // deliberately an optional injected one (DEFAULT_DEPS.loadDeltaBaseline uses
+      // tryImport; this function receives the picker as an argument). A missing or
+      // export-skewed delta-baseline.js would then fail pipeline.js at load time and
+      // main.js's headless trigger (`await import('./automation/pipeline.js')`, which
+      // catches and abandons the run) would produce NO report at all, instead of the
+      // engine's legacy deltas this function's header promises.
+      mode: settings.reportOptions && settings.reportOptions.deltaMode,
     });
   } catch (e) { console.warn('[generate] pickDeltaBaseline failed; keeping legacy deltas', e); return; }
   if (!picked || !picked.numbers) return; // no baseline resolvable → keep engine deltas
@@ -81,13 +106,61 @@ export function applyDeltaBaseline(model, store, pickDeltaBaseline) {
   }
   model.kpi.deltas = deltas;
   model.deltaBaseline = { baselineDate: picked.baselineDate, mode: picked.mode };
-  // anchored is only meaningful for the weekday-anchored weekly modes: false means the
-  // picked baseline is NOT on the requested weekday (no such report stored yet). It MUST
-  // be preserved here, not just in the review screen's copy: this is the function the
-  // unattended run and screen-generate use, and screen-generate re-runs it on the very
-  // model object review already stamped — dropping the key would delete the disclosure
-  // on the way to file production.
+  // anchored is only meaningful for mode 'week' and, since 2026-08-04, means: NO report
+  // was stored BEFORE this week's Sunday, so the picked baseline is just the most recent
+  // prior report and the numbers are NOT a full week-to-date gap. (It used to mean "the
+  // baseline missed the requested weekday" under the retired weekly-sun/weekly-thu pair —
+  // same flag, same consumers, narrower meaning.) It MUST be preserved here, not just in
+  // the review screen's copy: this is the function the unattended run and screen-generate
+  // use, and screen-generate re-runs it on the very model object review already stamped —
+  // dropping the key would delete the disclosure on the way to file production
+  // (build-spec downgrades to the daily legend wording on anchored:false).
   if ('anchored' in picked) model.deltaBaseline.anchored = !!picked.anchored;
+  // definitionShift is the SECOND disclosure riding on the same object and gets the
+  // IDENTICAL treatment (review fix 2026-08-04 — until now only screen-review's copy
+  // forwarded it). true means the picked baseline's `completed` was recorded under the
+  // pre-2026-07-28 rule (rejected EXCLUDED from completed), so part of the completed chip
+  // is the definition change rather than movement. The argument is the one written out
+  // for `anchored` just above: this assignment REPLACES the deltaBaseline object review
+  // already stamped, so dropping the key deletes the disclosure on the way to file
+  // production. Latent only because build-spec currently reads db.anchored and db.mode
+  // and not db.definitionShift — the day the deck discloses a definition shift, it would
+  // silently not. Both stampers now produce the same object for the same input.
+  if (picked.definitionShift) model.deltaBaseline.definitionShift = true;
+}
+
+/**
+ * R2 — does the MANUAL generate flow push the 4 produced files to the browser by itself?
+ *
+ * TWO SWITCHES, DELIBERATELY INDEPENDENT — do not merge them:
+ *   • reportOptions.autoDownloadFiles (THIS predicate) is a PRESENTATION choice for the
+ *     run the operator is watching: ON (the shipped behaviour, and what an absent key
+ *     means) auto-saves the 4 files the moment they are ready; OFF leaves the success
+ *     panel's per-file buttons as the only way to download, which is what an operator
+ *     who only wants the PDF asks for.
+ *   • automation.autoDownload gates the UNATTENDED run (runAutomation stepGenerate /
+ *     autoDownloadAll) — deck files, lab workbooks AND email drafts, with nobody at the
+ *     screen. A checkbox about how a hand-driven generation presents its output must
+ *     never arm a background download, so neither flag is read as a fallback for the
+ *     other and neither writes the other.
+ *
+ * Pure (no DOM, no storage) so plain node can pin the truth table. `mobile` is the
+ * caller's platform answer (screen-generate passes isMobile()): iOS/Safari drops
+ * programmatic download clicks that fire without recent user activation, so a mobile run
+ * NEVER auto-downloads regardless of the setting — unchanged platform reality, not a
+ * second preference.
+ *
+ * @param {{settings?:Object, mobile?:boolean}} args
+ * @returns {boolean}
+ */
+export function shouldAutoDownloadFiles({ settings, mobile } = {}) {
+  if (mobile) return false;
+  const ro = settings && settings.reportOptions;
+  if (!ro || typeof ro !== 'object') return true; // no options doc at all → shipped behaviour
+  // Absent/null = ON (the key post-dates the feature, so every existing doc lacks it and
+  // must keep auto-downloading); anything else is read for truthiness, so the store's
+  // coerce-tolerant import path and a hand-edited backup both land on a real boolean.
+  return ro.autoDownloadFiles == null ? true : !!ro.autoDownloadFiles;
 }
 
 /** Variant → the model task list THAT variant's deck publishes (build-spec.js:1213). */
@@ -232,7 +305,7 @@ function installFastTimers() {
 // Build the SlideSpec per VARIANT — the variant changes slide-5 content
 // (task rows), so one shared spec would leak internal tasks into NUPCO files.
 async function buildVariantSpec(model, variant) {
-  const mod = await tryImport('../slidespec/build-spec.js?v=v2026-08-04.1');
+  const mod = await tryImport('../slidespec/build-spec.js?v=v2026-08-04.2');
   const fn = pickFn(mod, ['buildSpec', 'build', 'makeSpec', 'toSpec']);
   if (!fn) return null;
   let spec = fn(model, { variant });
@@ -258,7 +331,7 @@ async function toBlob(result, kind) {
 // renderPptx(spec, {variant, PptxGenJS}) -> Promise<Blob>
 async function makePptx(spec, variant, libs) {
   if (!spec) return null;
-  const mod = await tryImport('../render/pptx-renderer.js?v=v2026-08-04.1');
+  const mod = await tryImport('../render/pptx-renderer.js?v=v2026-08-04.2');
   const fn = pickFn(mod, ['renderPptx', 'buildPptx', 'toPptx', 'makePptx', 'render']);
   if (!fn) return null;
   const r = await fn(spec, { variant, PptxGenJS: libs.PptxGenJS });
@@ -270,9 +343,9 @@ async function makePptx(spec, variant, libs) {
 // the host and before capture starts — screen-generate clones them into live thumbnails.
 async function makePdf(spec, variant, libs, host, onProgress, onSlides) {
   if (!spec) return null;
-  const rMod = await tryImport('../render/html-renderer.js?v=v2026-08-04.1');
+  const rMod = await tryImport('../render/html-renderer.js?v=v2026-08-04.2');
   const renderSlides = pickFn(rMod, ['renderSlides', 'renderSpec', 'renderHtml', 'render']);
-  const pMod = await tryImport('../render/pdf-export.js?v=v2026-08-04.1');
+  const pMod = await tryImport('../render/pdf-export.js?v=v2026-08-04.2');
   const exportPdf = pickFn(pMod, ['exportPdf', 'renderPdf', 'toPdf', 'buildPdf', 'render']);
   if (!renderSlides || !exportPdf) return null;
   host.innerHTML = '';
@@ -456,17 +529,17 @@ const PULL_REUSE_MS = 15000;
 
 /** Default heavy dependencies — every one overridable through `deps` (tests inject fakes). */
 const DEFAULT_DEPS = Object.freeze({
-  loadGrafana: () => import('../ingest/grafana.js?v=v2026-08-04.1'),
-  loadEngine: () => tryImport('../engine/engine.js?v=v2026-08-04.1'),
-  loadReportModel: () => import('../model/report-model.js?v=v2026-08-04.1'),
-  loadDeltaBaseline: () => tryImport('../model/delta-baseline.js?v=v2026-08-04.1'),
-  loadTaskLifecycle: () => tryImport('../model/task-lifecycle.js?v=v2026-08-04.1'),
-  loadLateLabs: () => import('../export/late-labs.js?v=v2026-08-04.1'),
-  loadTatSuggest: () => tryImport('../ingest/tat-suggest.js?v=v2026-08-04.1'),
-  loadTatLoinc: () => tryImport('../seeds/tat-lookup.js?v=v2026-08-04.1'),
+  loadGrafana: () => import('../ingest/grafana.js?v=v2026-08-04.2'),
+  loadEngine: () => tryImport('../engine/engine.js?v=v2026-08-04.2'),
+  loadReportModel: () => import('../model/report-model.js?v=v2026-08-04.2'),
+  loadDeltaBaseline: () => tryImport('../model/delta-baseline.js?v=v2026-08-04.2'),
+  loadTaskLifecycle: () => tryImport('../model/task-lifecycle.js?v=v2026-08-04.2'),
+  loadLateLabs: () => import('../export/late-labs.js?v=v2026-08-04.2'),
+  loadTatSuggest: () => tryImport('../ingest/tat-suggest.js?v=v2026-08-04.2'),
+  loadTatLoinc: () => tryImport('../seeds/tat-lookup.js?v=v2026-08-04.2'),
   // Track 5's module; absent until it ships → the emails step reports 'skip'.
-  loadEmlDraft: () => tryImport('../export/eml-draft.js?v=v2026-08-04.1'),
-  loadDownload: () => tryImport('../ui/late-labs-section.js?v=v2026-08-04.1'),
+  loadEmlDraft: () => tryImport('../export/eml-draft.js?v=v2026-08-04.2'),
+  loadDownload: () => tryImport('../ui/late-labs-section.js?v=v2026-08-04.2'),
   produceReportFiles,
   now: () => Date.now(),
 });

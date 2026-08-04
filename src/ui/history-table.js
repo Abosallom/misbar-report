@@ -5,9 +5,8 @@
 //   • أسبوع      → table = 7 daily rows, chart = 7 daily points
 //   • شهر        → table = ~5 weekly rows, chart = ~30 daily points
 //   • منذ البداية → table = month-end rows + the report date, chart = weekly points
-// The شهر rows are WEEKDAY-AWARE: with the active deltaMode set to weekly-sun /
-// weekly-thu (the Sun–Thu Saudi work week issues the weekly report on Sunday and on
-// Thursday) they sample the last ~5 Sundays / Thursdays instead of arbitrary weekly
+// The شهر rows are WEEKDAY-AWARE: with the active deltaMode set to 'week' (or one of its
+// retired weekly aliases) they sample the last ~5 THURSDAYS instead of arbitrary weekly
 // points, and the date column header names that weekday. When the dataset is too short to
 // contain even ONE such weekday the rows revert to generic weekly points and the header /
 // footnote drop the weekday, so a named weekday always describes the rows shown. أسبوع and
@@ -31,13 +30,19 @@
 // نسبة الاكتمال nonsense). The published entry is still shown when nothing can be
 // computed, marked `staleDef` so the footnote says the number is old-definition.
 // Stored history itself is NEVER rewritten here — this module only reads it.
-import { el } from './components.js?v=v2026-08-04.1';
-import { formatDateAr } from '../i18n/ar.js?v=v2026-08-04.1';
-import { COMPLETED_DEF_SINCE } from '../model/delta-baseline.js?v=v2026-08-04.1';
+import { el } from './components.js?v=v2026-08-04.2';
+import { formatDateAr } from '../i18n/ar.js?v=v2026-08-04.2';
+import { COMPLETED_DEF_SINCE } from '../model/delta-baseline.js?v=v2026-08-04.2';
 
-/* Relative imports carry ?v=… — the orchestrator re-stamps this token. */
-const V = '?v=v2026-07-22.13';
-
+// Every relative specifier in this file — static AND the two guarded dynamic ones below —
+// carries its ?v= INLINE so scripts/stamp-version.mjs owns the whole literal (its SPEC_RE
+// matches a string whose entire content is a relative path + optional query, strips the old
+// query and re-stamps). A local `const V = '?v=…'` concatenated onto an already-stamped
+// specifier used to live here (2026-07-22): it produced '…/workday.js?v=<new>?v=<stale>',
+// a URL the stamper cannot reach, so workday.js was fetched and evaluated TWICE — once
+// under the stamped URL (static import in late-labs-section.js / export/late-labs.js) and
+// once under the double-query one. Harmless only while these modules are stateless; never
+// rebuild a specifier by concatenation here.
 async function tryImport(path) { try { return await import(path); } catch { return null; } }
 
 const ISO_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -70,10 +75,20 @@ const HEAD_TAIL = ['المصدر', ...NUM_COLS.map((c) => c.label), 'نسبة ا
 const headRow = (dateHead) => [dateHead || 'التاريخ', ...HEAD_TAIL];
 
 // deltaMode → the weekday the شهر rows anchor to. 0 = Sunday … 4 = Thursday (matching
-// Date#getUTCDay). Anything else (daily, absent, legacy) → null = the old weekly points.
+// Date#getUTCDay). Anything else (daily, absent, unknown) → null = the old weekly points.
+//
+// 'week' (the week-to-date default) anchors to THURSDAY, not Sunday. The week's baseline
+// is the report before its Sunday, so the report that carries a FULL week of accumulated
+// chips is Thursday's — the week-closing one, and the last one actually sent. Sampling
+// Thursdays therefore makes the row-to-row gap equal exactly one week's worth of chips,
+// so a شهر row's deltas line up with what the deck showed that day. Anchoring on Sunday
+// would sample the report whose chips are only one day old.
+// The two retired mode values keep their own mappings so a stale stored/cached value
+// still produces weekday-anchored rows instead of silently reverting to weekly points.
 const WEEKDAY_ANCHORS = {
-  'weekly-sun': { dow: 0, label: 'الأحد' },
-  'weekly-thu': { dow: 4, label: 'الخميس' },
+  week: { dow: 4, label: 'الخميس' },
+  'weekly-sun': { dow: 0, label: 'الأحد' },  // retired mode value
+  'weekly-thu': { dow: 4, label: 'الخميس' }, // retired mode value
 };
 const anchorOf = (deltaMode) => WEEKDAY_ANCHORS[deltaMode] || null;
 // Weekday of a whole-UTC-day count. Epoch day 0 (1970-01-01) was a Thursday (4); the
@@ -131,7 +146,7 @@ const deltaStyle = (delta, good) => DELTA_BASE
 const BADGE_BASE = 'display:inline-block;font-size:.66rem;font-weight:700;padding:1px 8px;border-radius:999px;white-space:nowrap;border:1px solid';
 const BADGE_PUBLISHED = BADGE_BASE + ';background:var(--good-bg,#DCFCE7);color:var(--good-text,#166534);border-color:rgba(22,163,74,.35)';
 const BADGE_COMPUTED = BADGE_BASE + ';background:var(--bg-light);color:var(--slate-600);border-color:var(--border-dark)';
-// Range pills — style-matched to the review screen's delta-mode pills (يومي / أسبوعي — الأحد / أسبوعي — الخميس).
+// Range pills — style-matched to the review screen's delta-mode pills (يومي / أسبوعي).
 const pillStyle = (on) => 'border-radius:999px;padding:6px 16px;font-weight:700;font-size:.8rem;cursor:pointer;min-height:32px;line-height:1;transition:background .12s;'
   + (on
     ? 'background:var(--navy);color:#fff;border:1px solid var(--navy);'
@@ -497,15 +512,15 @@ function renderRangeContent(bundle, range) {
  * the beginning, with a range selector (أسبوع | شهر | منذ البداية) driving a per-sample
  * table + a three-line trend chart. Returns synchronously; the body fills once the
  * guarded engine imports resolve. Never throws.
- * deltaMode ('daily' | 'weekly-sun' | 'weekly-thu', anything else = daily) only affects
- * the شهر rows: the weekly modes sample the last ~5 Sundays / Thursdays and the date
- * column header names that weekday.
+ * deltaMode ('daily' | 'week', anything else = unanchored) only affects the شهر rows:
+ * 'week' samples the last ~5 THURSDAYS — the week-closing report, so one row-to-row gap
+ * is exactly one week's chips — and the date column header names that weekday.
  * `range` seeds the selected range pill (default أسبوع). The live selection is mirrored
  * on the returned element as `panel.dataset.range`, so a caller that rebuilds the panel
  * (e.g. on a delta-mode switch — the switch that drives the شهر rows) can read the old
  * panel's dataset.range and pass it back here instead of snapping the user to أسبوع.
  * @param {{rows:?Object[], tatTests:?Object, history:?Object, endIso:?string,
- *          deltaMode:?('daily'|'weekly-sun'|'weekly-thu'),
+ *          deltaMode:?('daily'|'week'),
  *          range:?('week'|'month'|'all')}} o
  * @returns {HTMLElement} a <details class="card"> element with dataset.range
  */
@@ -521,8 +536,8 @@ export function buildHistoryPanel({ rows, tatTests, history, endIso, deltaMode, 
 
   (async () => {
     const [asofMod, wdMod] = await Promise.all([
-      tryImport('../engine/asof.js?v=v2026-08-04.1' + V),
-      tryImport('../engine/workday.js?v=v2026-08-04.1' + V),
+      tryImport('../engine/asof.js?v=v2026-08-04.2'),
+      tryImport('../engine/workday.js?v=v2026-08-04.2'),
     ]);
     const computeAsOf = asofMod && typeof asofMod.computeNumbersAsOf === 'function' ? asofMod.computeNumbersAsOf : null;
     const degraded = !computeAsOf;

@@ -154,7 +154,7 @@
  *     'https://elab.seha.sa/hpapm'. Empty/disabled → CSV drop only. The access
  *     token is the public-dashboard token (view-only, server-side-masked data);
  *     it is NEVER seeded in the repo — the user enters it once in Settings.
- * @property {{excludeNoTat:boolean, slides:Object<string,boolean>, kpiCards:Object<string,boolean>, labels:Object<string,string>, deltaMode:('daily'|'weekly-sun'|'weekly-thu')}} reportOptions
+ * @property {{excludeNoTat:boolean, slides:Object<string,boolean>, kpiCards:Object<string,boolean>, labels:Object<string,string>, deltaMode:('daily'|'week'), autoDownloadFiles:boolean}} reportOptions
  *   - presentation defaults: excludeNoTat drops rows with no TAT from ANY source
  *     (lookup + CSV fallback = null → 'No Match') before aggregation; slides keys
  *     'execFunnel'|'monthly'|'compliance'|'action'|'challenges'|'definitions' toggle the middle
@@ -164,10 +164,22 @@
  *     keys and hide exec-slide cards (row geometry repacks); labels overrides the
  *     DEFAULT_LABELS registry in slidespec/build-spec.js (empty = built-in text);
  *     deltaMode picks the exec delta-chip comparison window — 'daily' vs the last
- *     report before the report date, or WEEKDAY-ANCHORED 'weekly-sun' / 'weekly-thu'
- *     vs the most recent report issued on that weekday (the weekly report goes out
- *     on Sunday and on Thursday). A stored legacy 'weekly' migrates to 'weekly-sun'
- *     (see model/delta-baseline.js pickDeltaBaseline / normalizeDeltaMode).
+ *     report before the report date, or 'week' (the DEFAULT since 2026-08-04) =
+ *     WEEK-TO-DATE: every report of one Sun–Thu week compares against the same
+ *     baseline, the most recent report stored strictly BEFORE that week's Sunday, so
+ *     the chips accumulate and Thursday's deck carries the whole week. With no
+ *     pre-week entry the picker falls back to the most recent prior report and says
+ *     so via anchored:false. The retired 'weekly' / 'weekly-sun' / 'weekly-thu'
+ *     values are ALIASES of 'week'; schema v7 forces stored 'daily' to 'week' once
+ *     (see model/delta-baseline.js pickDeltaBaseline / normalizeDeltaMode and
+ *     store.js migrateV6toV7).
+ *     autoDownloadFiles (default TRUE; an ABSENT key means ON — it post-dates the
+ *     feature) governs ONLY the manual generate flow: whether the 4 produced files
+ *     are pushed to the browser automatically, or the operator picks them from the
+ *     success panel's per-file buttons. Mobile never auto-downloads either way. It is
+ *     strictly INDEPENDENT of automation.autoDownload below, which arms the
+ *     UNATTENDED run's downloads — the single predicate is
+ *     automation/pipeline.js shouldAutoDownloadFiles.
  * @property {{enabled:boolean, autoPull:boolean, autoGenerate:boolean, autoDownload:boolean,
  *             autoLabFiles:boolean, autoEmailDrafts:boolean, autoAcceptTat:boolean,
  *             dailyTime:string, labRecipients:Object<string,string>}} automation

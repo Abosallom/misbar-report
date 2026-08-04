@@ -1,15 +1,25 @@
 // test/delta-baseline.test.mjs — Worker H. Pure delta-baseline model. Run: node --test
 // Covers recordSnapshot (add/update-in-place + 45-date trim) and pickDeltaBaseline
-// (daily most-recent-before; the two WEEKDAY-ANCHORED weekly modes 'weekly-sun' /
-// 'weekly-thu' — the weekly report is issued on Sunday and Thursday — including the
-// anchored:false degrade, the legacy 'weekly' alias and timezone-independent weekday
-// math; strictly-before enforcement, legacySnapshot fallback, and the null case).
+// (daily most-recent-before; the WEEK-TO-DATE mode 'week' — the DEFAULT since
+// 2026-08-04 — including in-week accumulation, week rollover, the Fri/Sat tail of a
+// just-ended week, the anchored:false degrade, the weekly/weekly-sun/weekly-thu
+// aliases and timezone-independent week math; strictly-before enforcement,
+// legacySnapshot fallback, and the null case).
+//
+// WHY 'week' REPLACED THE TWO WEEKDAY-ANCHORED MODES (user decision 2026-08-04,
+// Talal): the green chips must accumulate THROUGH the Sun–Thu work week so the
+// Thursday deck — the one that is actually sent — shows the whole week's movement.
+// So every report in a week shares ONE baseline: the most recent stored report
+// STRICTLY BEFORE that week's Sunday. The week's own Sunday report is deliberately
+// NOT a candidate; using it would silently drop Sunday's own movement out of
+// Thursday's numbers. 'weekly-sun' / 'weekly-thu' are now aliases of 'week'.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  recordSnapshot, pickDeltaBaseline, normalizeDeltaMode, DELTA_MODES, HISTORY_LIMIT,
+  recordSnapshot, pickDeltaBaseline, normalizeDeltaMode, canonicalDeltaMode,
+  isWeekDeltaMode, DELTA_MODES, DEFAULT_DELTA_MODE, HISTORY_LIMIT,
 } from '../src/model/delta-baseline.js';
 
 // Deterministic ISO-date generator for fixtures (UTC; no Date.now in the module).
@@ -76,119 +86,105 @@ test('daily picks the most recent history date strictly before reportDate (not s
   assert.deepEqual(out, { numbers: { total: 22 }, baselineDate: '2026-07-22', mode: 'daily' });
 });
 
-test('daily is the default when mode is omitted/unknown', () => {
-  const history = { '2026-07-19': { total: 1 }, '2026-07-22': { total: 2 } };
-  const out = pickDeltaBaseline({ history, reportDate: '2026-07-23' });
-  assert.equal(out.baselineDate, '2026-07-22');
-  assert.equal(out.mode, 'daily');
-});
-
-// ---- pickDeltaBaseline: weekday-anchored weekly ------------------------------
-// Real July-2026 weekdays (verified against Date.UTC): Sundays 05/12/19/26,
-// Thursdays 02/09/16/23. reportDate 2026-07-26 is itself a Sunday.
-const THREE_WEEKS = {
-  '2026-07-02': { total: 2 },  // Thu
-  '2026-07-05': { total: 5 },  // Sun
-  '2026-07-09': { total: 9 },  // Thu
-  '2026-07-12': { total: 12 }, // Sun
-  '2026-07-16': { total: 16 }, // Thu
-  '2026-07-19': { total: 19 }, // Sun
-  '2026-07-21': { total: 21 }, // Tue — never an anchor
-  '2026-07-23': { total: 23 }, // Thu
-  '2026-07-25': { total: 25 }, // Sat — most recent overall (the daily pick)
-  '2026-07-26': { total: 999 }, // SAME DAY as reportDate (Sun) — must be excluded
-  '2026-08-02': { total: 888 }, // FUTURE Sunday — must be excluded
+// ---- pickDeltaBaseline: week-to-date ----------------------------------------
+// Real weekdays (verified against Date.UTC): 2026-07-26 and 2026-08-02 are SUNDAYS;
+// 2026-07-23 and 2026-07-30 are THURSDAYS; 2026-07-25 and 2026-08-01 are SATURDAYS.
+// weekStart(iso) = iso − isoWeekday(iso), so the whole Sun-26 → Sat-01 span shares the
+// week that starts 2026-07-26 and therefore the same pre-Sunday baseline: 2026-07-25.
+const WEEK_HISTORY = {
+  '2026-07-19': { total: 19 }, // Sun, previous-previous week
+  '2026-07-23': { total: 23 }, // Thu, previous week
+  '2026-07-25': { total: 25 }, // Sat — the last report BEFORE Sunday 07-26 → THE baseline
+  '2026-07-26': { total: 26 }, // Sun — the week's OWN opening report; never its baseline
+  '2026-07-27': { total: 27 }, // Mon
+  '2026-07-28': { total: 28 }, // Tue
+  '2026-07-30': { total: 30 }, // Thu — the deck that is actually sent
+  '2026-08-01': { total: 999 }, // Sat — belongs to the 07-26 week; baseline for 08-02
 };
 
-test('weekly-sun picks the most recent PRIOR Sunday (not same-day, not future)', () => {
-  const out = pickDeltaBaseline({ history: THREE_WEEKS, reportDate: '2026-07-26', mode: 'weekly-sun' });
-  assert.deepEqual(out, {
-    numbers: { total: 19 }, baselineDate: '2026-07-19', mode: 'weekly-sun', anchored: true,
-  });
-});
-
-test('weekly-thu picks the most recent PRIOR Thursday', () => {
-  const out = pickDeltaBaseline({ history: THREE_WEEKS, reportDate: '2026-07-26', mode: 'weekly-thu' });
-  assert.deepEqual(out, {
-    numbers: { total: 23 }, baselineDate: '2026-07-23', mode: 'weekly-thu', anchored: true,
-  });
-});
-
-test('the two weekly options never collapse onto the same baseline', () => {
-  // Same history + same report date, three weeks deep: each mode walks back to its
-  // own weekday, and neither takes the most recent date (07-25) the daily mode takes.
-  const sun = pickDeltaBaseline({ history: THREE_WEEKS, reportDate: '2026-07-26', mode: 'weekly-sun' });
-  const thu = pickDeltaBaseline({ history: THREE_WEEKS, reportDate: '2026-07-26', mode: 'weekly-thu' });
-  const day = pickDeltaBaseline({ history: THREE_WEEKS, reportDate: '2026-07-26', mode: 'daily' });
-  assert.notEqual(sun.baselineDate, thu.baselineDate);
-  assert.equal(day.baselineDate, '2026-07-25');
-  // Earlier weeks are reachable: drop the latest anchors and it steps one week back.
-  const older = { ...THREE_WEEKS };
-  delete older['2026-07-19'];
-  delete older['2026-07-23'];
-  assert.equal(pickDeltaBaseline({ history: older, reportDate: '2026-07-26', mode: 'weekly-sun' }).baselineDate, '2026-07-12');
-  assert.equal(pickDeltaBaseline({ history: older, reportDate: '2026-07-26', mode: 'weekly-thu' }).baselineDate, '2026-07-16');
-});
-
-test('weekly falls back to the most recent prior report with anchored:false', () => {
-  // History has no Sunday before the report date (07-21 Tue, 07-23 Thu) → the chips
-  // still work off the most recent prior date, flagged as not weekday-anchored.
-  const history = { '2026-07-21': { total: 21 }, '2026-07-23': { total: 23 } };
-  const out = pickDeltaBaseline({ history, reportDate: '2026-07-26', mode: 'weekly-sun' });
-  assert.deepEqual(out, {
-    numbers: { total: 23 }, baselineDate: '2026-07-23', mode: 'weekly-sun', anchored: false,
-  });
-  // Symmetric: no Thursday in history → same degrade for weekly-thu.
-  const noThu = pickDeltaBaseline({
-    history: { '2026-07-19': { total: 19 }, '2026-07-21': { total: 21 } },
-    reportDate: '2026-07-26',
-    mode: 'weekly-thu',
-  });
-  assert.deepEqual(noThu, {
-    numbers: { total: 21 }, baselineDate: '2026-07-21', mode: 'weekly-thu', anchored: false,
-  });
-});
-
-test("legacy 'weekly' is an alias of 'weekly-sun'", () => {
-  const legacy = pickDeltaBaseline({ history: THREE_WEEKS, reportDate: '2026-07-26', mode: 'weekly' });
-  const sun = pickDeltaBaseline({ history: THREE_WEEKS, reportDate: '2026-07-26', mode: 'weekly-sun' });
-  assert.deepEqual(legacy, sun);
-  assert.equal(legacy.mode, 'weekly-sun'); // canonicalized in the output too
-  assert.equal(normalizeDeltaMode('weekly'), 'weekly-sun');
-});
-
-test('an unknown mode falls back to daily', () => {
-  for (const bad of ['weekly-mon', 'WEEKLY-SUN', '', null, undefined, 7, {}]) {
-    assert.equal(normalizeDeltaMode(bad), 'daily', `${String(bad)} → daily`);
+test('week: every report in one Sun–Thu week accumulates against the SAME pre-Sunday baseline', () => {
+  // Sunday, Monday, Tuesday and the sent-on-Thursday deck all compare to 2026-07-25.
+  for (const reportDate of ['2026-07-26', '2026-07-27', '2026-07-28', '2026-07-30']) {
+    const out = pickDeltaBaseline({ history: WEEK_HISTORY, reportDate, mode: 'week' });
+    assert.deepEqual(out, {
+      numbers: { total: 25 }, baselineDate: '2026-07-25', mode: 'week', anchored: true,
+    }, `report ${reportDate}`);
+    // THE trap this whole design exists to avoid: the week's own Sunday report is not a
+    // candidate. Anchoring on it would drop Sunday's movement out of Thursday's chips.
+    assert.notEqual(out.baselineDate, '2026-07-26', `${reportDate} must not anchor its own Sunday`);
   }
-  const out = pickDeltaBaseline({ history: THREE_WEEKS, reportDate: '2026-07-26', mode: 'monthly' });
-  assert.deepEqual(out, { numbers: { total: 25 }, baselineDate: '2026-07-25', mode: 'daily' });
-  assert.deepEqual(DELTA_MODES, ['daily', 'weekly-sun', 'weekly-thu']);
 });
 
-test('weekday anchoring is timezone-independent', () => {
-  // A local-midnight Date() shifts the day for negative UTC offsets, which would make
-  // 'weekly-sun' pick a Saturday in America/* and a Sunday in Asia/Riyadh. Run the
-  // same pick under several TZs (process.env.TZ is honoured on the next Date call in
-  // Node) and assert the answer never moves. Also pin the two edge weekdays: 07-25
-  // (Sat) must never anchor Sunday, and 07-27 (Mon) must never anchor Sunday either.
+test('week: the baseline rolls over on the next Sunday', () => {
+  // 2026-08-02 is the NEXT Sunday: its week starts that day, so the baseline becomes the
+  // last report before it (Sat 08-01) — the previous week's numbers stop accumulating.
+  const out = pickDeltaBaseline({ history: WEEK_HISTORY, reportDate: '2026-08-02', mode: 'week' });
+  assert.deepEqual(out, {
+    numbers: { total: 999 }, baselineDate: '2026-08-01', mode: 'week', anchored: true,
+  });
+});
+
+test('week: Friday and Saturday belong to the just-ended week (no special case)', () => {
+  // weekStart uses the same formula for every weekday, so Fri 07-31 and Sat 08-01 land
+  // on the 07-26 week and produce EXACTLY Thursday 07-30's answer — byte for byte.
+  const thu = pickDeltaBaseline({ history: WEEK_HISTORY, reportDate: '2026-07-30', mode: 'week' });
+  const fri = pickDeltaBaseline({ history: WEEK_HISTORY, reportDate: '2026-07-31', mode: 'week' });
+  const sat = pickDeltaBaseline({ history: WEEK_HISTORY, reportDate: '2026-08-01', mode: 'week' });
+  assert.deepEqual(fri, thu);
+  assert.deepEqual(sat, thu);
+  assert.equal(fri.baselineDate, '2026-07-25');
+});
+
+test('week degrades to the most recent prior report with anchored:false', () => {
+  // History starts INSIDE the week (07-26 Sun, 07-27 Mon): there is no report before the
+  // week's Sunday yet, so the chips still work off the most recent prior report and the
+  // result says so — the deck/banner then use the daily wording instead of asserting a
+  // week-to-date comparison the baseline cannot support.
+  const history = { '2026-07-26': { total: 26 }, '2026-07-27': { total: 27 } };
+  const out = pickDeltaBaseline({ history, reportDate: '2026-07-28', mode: 'week' });
+  assert.deepEqual(out, {
+    numbers: { total: 27 }, baselineDate: '2026-07-27', mode: 'week', anchored: false,
+  });
+});
+
+test('week enforces strictly-before across a year boundary', () => {
+  // 2025-12-28 is a Sunday and 2026-01-01 a Thursday, so the report's week starts
+  // 2025-12-28 — the SAME day the only prior entry carries. The own-week Sunday is not a
+  // week baseline and 2026-01-04 is a future Sunday, so neither anchors: the picker
+  // degrades to the most recent report strictly before the report date and discloses it.
+  const history = { '2025-12-28': { total: 1 }, '2026-01-04': { total: 2 } };
+  const out = pickDeltaBaseline({ history, reportDate: '2026-01-01', mode: 'week' });
+  assert.deepEqual(out, {
+    numbers: { total: 1 }, baselineDate: '2025-12-28', mode: 'week', anchored: false,
+  });
+});
+
+test('week math is timezone-independent (the Sunday boundary never moves)', () => {
+  // A local-midnight Date() shifts the day for negative UTC offsets, which would push
+  // the week boundary one day and make 07-26's baseline the Sunday itself in America/*.
+  // Run the same pick under five zones spanning UTC−11 … UTC+14 and assert it is fixed.
   const original = process.env.TZ;
   const history = {
-    '2026-07-19': { total: 19 }, // Sun
     '2026-07-23': { total: 23 }, // Thu
-    '2026-07-25': { total: 25 }, // Sat
+    '2026-07-25': { total: 25 }, // Sat — the pre-Sunday baseline in EVERY zone
+    '2026-07-26': { total: 26 }, // Sun — the report's own week start
   };
   try {
     for (const tz of ['UTC', 'Asia/Riyadh', 'Pacific/Kiritimati', 'Pacific/Midway', 'America/Los_Angeles']) {
       process.env.TZ = tz;
-      const sun = pickDeltaBaseline({ history, reportDate: '2026-07-26', mode: 'weekly-sun' });
-      const thu = pickDeltaBaseline({ history, reportDate: '2026-07-26', mode: 'weekly-thu' });
+      const out = pickDeltaBaseline({ history, reportDate: '2026-07-26', mode: 'week' });
       assert.deepEqual(
-        [sun.baselineDate, sun.anchored, thu.baselineDate, thu.anchored],
-        ['2026-07-19', true, '2026-07-23', true],
+        [out.baselineDate, out.anchored, out.mode],
+        ['2026-07-25', true, 'week'],
         `TZ=${tz}`,
       );
-      // The Saturday is only ever the DAILY pick, never a Sunday anchor.
+      // Monday of the same week resolves identically — the boundary is the week, not the day.
+      assert.equal(
+        pickDeltaBaseline({ history, reportDate: '2026-07-27', mode: 'week' }).baselineDate,
+        '2026-07-25',
+        `TZ=${tz} (Mon)`,
+      );
+      // The daily mode still takes the most recent date, whatever the zone.
       assert.equal(pickDeltaBaseline({ history, reportDate: '2026-07-26', mode: 'daily' }).baselineDate, '2026-07-25');
     }
   } finally {
@@ -196,13 +192,58 @@ test('weekday anchoring is timezone-independent', () => {
   }
 });
 
-test('weekly enforces strictly-before across a year boundary', () => {
-  // 2025-12-28 is a Sunday, 2026-01-04 the next one. Report date 2026-01-01 → the
-  // 2026 Sunday is in the future and excluded; the December one anchors.
-  const history = { '2025-12-28': { total: 1 }, '2026-01-04': { total: 2 } };
-  const out = pickDeltaBaseline({ history, reportDate: '2026-01-01', mode: 'weekly-sun' });
-  assert.equal(out.baselineDate, '2025-12-28');
+// ---- mode registry: aliases, enum, fallback ---------------------------------
+test("the retired weekly modes are aliases of 'week' (stored settings keep working)", () => {
+  const week = pickDeltaBaseline({ history: WEEK_HISTORY, reportDate: '2026-07-30', mode: 'week' });
+  for (const alias of ['weekly', 'weekly-sun', 'weekly-thu']) {
+    const out = pickDeltaBaseline({ history: WEEK_HISTORY, reportDate: '2026-07-30', mode: alias });
+    assert.deepEqual(out, week, `${alias} → week`);
+    assert.equal(out.mode, 'week', `${alias} is canonicalized in the output too`);
+    assert.equal(normalizeDeltaMode(alias), 'week');
+    assert.equal(canonicalDeltaMode(alias), 'week');
+  }
+});
+
+test('the mode enum is the two published modes and week is the default', () => {
+  assert.deepEqual(DELTA_MODES, ['daily', 'week']);
+  assert.equal(DEFAULT_DELTA_MODE, 'week');
+  assert.ok(DELTA_MODES.includes(DEFAULT_DELTA_MODE), 'the default must be a member of the enum');
+});
+
+test('an unknown mode falls back to the default, and canonicalDeltaMode says null', () => {
+  for (const bad of ['weekly-mon', 'WEEK', 'monthly', '', null, undefined, 7, {}]) {
+    assert.equal(normalizeDeltaMode(bad), DEFAULT_DELTA_MODE, `${String(bad)} → ${DEFAULT_DELTA_MODE}`);
+    assert.equal(canonicalDeltaMode(bad), null, `canonicalDeltaMode(${String(bad)}) → null`);
+  }
+  // PROTOTYPE-KEY GUARD: the alias table must be null-prototype, or a stored deltaMode of
+  // 'toString' / 'constructor' would resolve to an inherited Function and be treated as a
+  // real mode (store.js then persists it and every consumer switches on garbage).
+  for (const proto of ['toString', 'constructor', 'valueOf', 'hasOwnProperty', '__proto__']) {
+    assert.equal(canonicalDeltaMode(proto), null, `canonicalDeltaMode('${proto}') must be null`);
+    assert.equal(normalizeDeltaMode(proto), DEFAULT_DELTA_MODE, `'${proto}' → ${DEFAULT_DELTA_MODE}`);
+  }
+  assert.equal(canonicalDeltaMode('nope'), null);
+  assert.equal(canonicalDeltaMode('daily'), 'daily');
+  assert.equal(canonicalDeltaMode('week'), 'week');
+});
+
+test('week is the mode when none is given (the default reaches the picker)', () => {
+  const out = pickDeltaBaseline({ history: WEEK_HISTORY, reportDate: '2026-07-30' });
+  assert.equal(out.mode, 'week');
+  assert.equal(out.baselineDate, '2026-07-25');
   assert.equal(out.anchored, true);
+});
+
+test('isWeekDeltaMode is true for week and every alias, false for daily', () => {
+  // screen-review's old isWeeklyMode used startsWith('weekly') — 'week' FAILS that, which
+  // would silently delete both baseline disclosures. This predicate is its replacement.
+  assert.equal(isWeekDeltaMode('week'), true);
+  assert.equal(isWeekDeltaMode('weekly'), true);
+  assert.equal(isWeekDeltaMode('weekly-sun'), true);
+  assert.equal(isWeekDeltaMode('weekly-thu'), true);
+  assert.equal(isWeekDeltaMode('daily'), false);
+  // Unknown values normalize to the DEFAULT, which is 'week' — the disclosures stay on.
+  assert.equal(isWeekDeltaMode('nonsense'), DEFAULT_DELTA_MODE === 'week');
 });
 
 // ---- strictly-before across a month boundary --------------------------------
@@ -224,7 +265,7 @@ test('falls back to legacySnapshot when history has no qualifying entry', () => 
     history: { '2026-07-23': { total: 1 }, '2026-08-01': { total: 2 } },
     legacySnapshot,
     reportDate: '2026-07-23',
-    mode: 'weekly',
+    mode: 'week',
   });
   assert.equal(future.mode, 'legacy');
   assert.equal(future.baselineDate, '2026-07-09');
@@ -242,6 +283,12 @@ test('returns null when neither history nor legacySnapshot yields a baseline', (
   // History present but all on/after reportDate, and no legacy → null.
   assert.equal(
     pickDeltaBaseline({ history: { '2026-07-23': { total: 1 } }, reportDate: '2026-07-23', mode: 'daily' }),
+    null,
+  );
+  // Same in week mode: nothing strictly before the report date at all → null, not a
+  // degraded anchored:false result (there is no baseline to degrade TO).
+  assert.equal(
+    pickDeltaBaseline({ history: { '2026-07-30': { total: 1 } }, reportDate: '2026-07-30', mode: 'week' }),
     null,
   );
   // Legacy present but with no numbers object → not a usable baseline → null.

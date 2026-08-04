@@ -8,14 +8,14 @@
 // mirror of the automation panel), live source (Grafana + cached-tracker), and
 // backup (export/import).
 
-import { SNAPSHOT_SEED, REPORT_OPTIONS_SEED, AUTOMATION_SEED } from '../seeds/defaults.js?v=v2026-08-04.1';
-import { normalizeDeltaMode } from '../model/delta-baseline.js?v=v2026-08-04.1';
+import { SNAPSHOT_SEED, REPORT_OPTIONS_SEED, AUTOMATION_SEED } from '../seeds/defaults.js?v=v2026-08-04.2';
+import { normalizeDeltaMode } from '../model/delta-baseline.js?v=v2026-08-04.2';
 // NAMESPACE import on purpose: the access tab reads lock.currentUser(), which is a
 // newer export. A named import would throw at link time on any build of lock.js that
 // predates it (and take the whole settings screen down); a namespace import lets the
 // tab degrade to 'unknown user' instead. lock.js is DOM-free at module scope, so this
 // stays importable in bare Node (test/module-smoke).
-import * as lock from './lock.js?v=v2026-08-04.1';
+import * as lock from './lock.js?v=v2026-08-04.2';
 
 const TABS = [
   { id: 'tat', label: 'مدة الفحوصات' },
@@ -80,6 +80,16 @@ const REPORT_CARD_FIELDS = [
   },
 ];
 
+/* reportOptions.deltaMode radio options — EXPORTED so the delta-mode registry test can
+ * pin them against DELTA_MODES (model/delta-baseline.js) and against the review screen's
+ * DELTA_MODE_PILLS: three surfaces, one enum, no chance of a stale fourth option
+ * surviving here after the weekly-sun/weekly-thu pair was retired into 'week'. Order =
+ * DELTA_MODES order. */
+export const DELTA_MODE_OPTIONS = [
+  { value: 'daily', label: 'يومي — مقارنة بآخر تقرير' },
+  { value: 'week', label: 'أسبوعي — تراكمي من الأحد حتى الخميس' },
+];
+
 // Automation switches (Settings.automation). This tab MIRRORS the automation
 // panel — both surfaces write the same canonical settings block through the same
 // autosave path, so whichever one the user touches the other reflects on reopen.
@@ -88,7 +98,14 @@ const AUTOMATION_FIELDS = [
   { key: 'enabled', label: 'تفعيل التشغيل الآلي' },
   { key: 'autoPull', label: 'سحب البيانات تلقائياً' },
   { key: 'autoGenerate', label: 'توليد التقرير تلقائياً' },
-  { key: 'autoDownload', label: 'تنزيل ملفات التقرير تلقائياً' },
+  {
+    key: 'autoDownload',
+    label: 'تنزيل ملفات التقرير تلقائياً',
+    // Separate switch from reportOptions.autoDownloadFiles (report-options tab): this
+    // one arms an UNATTENDED run's downloads (deck + lab files + email drafts) and is
+    // never read by the manual generate flow. Same words, different job — hence the hint.
+    hint: 'يخص التشغيل غير المراقَب فقط (ملفات التقرير وملفات المختبرات ومسودات البريد). التوليد اليدوي يتبع خيار «تنزيل الملفات الأربعة تلقائياً بعد التوليد» في تبويب خيارات التقرير.',
+  },
   { key: 'autoLabFiles', label: 'إنشاء ملفات المختبرات تلقائياً' },
   { key: 'autoEmailDrafts', label: 'تجهيز مسودات البريد تلقائياً' },
   { key: 'autoAcceptTat', label: 'قبول المدد المقترحة للفحوصات تلقائياً' },
@@ -865,15 +882,24 @@ export function render(container, ctx) {
           kpiCards: { ...REPORT_OPTIONS_SEED.kpiCards },
           labels: {},
           deltaMode: REPORT_OPTIONS_SEED.deltaMode,
+          autoDownloadFiles: REPORT_OPTIONS_SEED.autoDownloadFiles,
         };
       }
       const r = S.doc.reportOptions;
       if (!r.slides || typeof r.slides !== 'object') r.slides = { ...REPORT_OPTIONS_SEED.slides };
       if (!r.kpiCards || typeof r.kpiCards !== 'object') r.kpiCards = { ...REPORT_OPTIONS_SEED.kpiCards };
       if (!r.labels || typeof r.labels !== 'object') r.labels = {};
-      // deltaMode is weekday-anchored ('daily' | 'weekly-sun' | 'weekly-thu'); a
-      // legacy stored 'weekly' reads as 'weekly-sun', anything else as the seed.
+      // deltaMode has exactly two values now ('daily' | 'week'); the retired
+      // 'weekly' / 'weekly-sun' / 'weekly-thu' are aliases of 'week' and anything
+      // unrecognized falls back to DEFAULT_DELTA_MODE — normalizeDeltaMode owns it.
       r.deltaMode = normalizeDeltaMode(r.deltaMode);
+      // R2 — autoDownloadFiles post-dates every stored doc, so an ABSENT key means ON
+      // (the shipped behaviour). Backfilled from the seed rather than hard-coded true,
+      // so the seed stays the single owner of the default. Only a real boolean is kept:
+      // this row must never render unchecked because the value is a string 'false'.
+      if (typeof r.autoDownloadFiles !== 'boolean') {
+        r.autoDownloadFiles = REPORT_OPTIONS_SEED.autoDownloadFiles !== false;
+      }
       return r;
     }
 
@@ -934,22 +960,35 @@ export function render(container, ctx) {
           const row = checkField(f.label, () => ro().kpiCards[f.key], (v) => { ro().kpiCards[f.key] = v; });
           return f.hint ? [row, h('p', { class: 'st-help', text: f.hint })] : [row];
         }),
-        // (d) delta-chip comparison window — daily, or one of the TWO weekday-anchored
-        // weekly options (the weekly report is issued on Sunday and on Thursday).
+        // (d) delta-chip comparison window — daily, or week-to-date (the default).
+        // Options come from the exported DELTA_MODE_OPTIONS so this radio, the review
+        // pills and DELTA_MODES stay one list.
         radioField(
           'مقارنة الفروقات (الأسهم)',
           'st-deltaMode',
-          [
-            { value: 'daily', label: 'يومي — مقارنة بآخر تقرير' },
-            { value: 'weekly-sun', label: 'أسبوعي — الأحد' },
-            { value: 'weekly-thu', label: 'أسبوعي — الخميس' },
-          ],
+          DELTA_MODE_OPTIONS,
           () => ro().deltaMode,
           (v) => { ro().deltaMode = v; },
         ),
         h('p', {
           class: 'st-help',
-          text: 'الخيارات الأسبوعية تقارن بآخر تقرير صادر في ذلك اليوم من الأسبوع (الأحد أو الخميس)؛ وإن لم يوجد بعد فبآخر تقرير سابق.',
+          text: 'أسبوعي (الافتراضي): كل تقارير الأسبوع (الأحد–الخميس) تُقارن بالتقرير نفسه — آخر تقرير صدر قبل أحد ذلك الأسبوع — فتتراكم الفروقات ويعرض تقرير الخميس تغيّر الأسبوع كاملاً. تقارير الجمعة والسبت تتبع الأسبوع المنتهي للتو.',
+        }),
+        h('p', {
+          class: 'st-help',
+          text: 'إن لم يصدر أي تقرير قبل بداية الأسبوع فتتم المقارنة بأحدث تقرير متاح، ويُذكر ذلك صراحةً في شاشة المراجعة وفي شريحة الملخص.',
+        }),
+        // (e) R2 — auto-download of the 4 files after a MANUAL generation. Mirror of the
+        // checkbox next to «توليد التقارير» on the review screen; both write this one key.
+        groupHead('بعد التوليد'),
+        checkField(
+          'تنزيل الملفات الأربعة تلقائياً بعد التوليد',
+          () => ro().autoDownloadFiles !== false,
+          (v) => { ro().autoDownloadFiles = v; },
+        ),
+        h('p', {
+          class: 'st-help',
+          text: 'يخص التوليد اليدوي فقط: عند إطفائه لا يُنزَّل أي ملف تلقائياً وتختار الملفات بنفسك من أزرار التنزيل بعد اكتمال التوليد. لا علاقة له بخيار «تنزيل ملفات التقرير تلقائياً» في تبويب التشغيل الآلي، فذاك يخص التشغيل غير المراقَب وحده. (على الجوال لا يُنزَّل أي ملف تلقائياً في كل الأحوال.)',
         }),
         h('p', {
           class: 'st-help',
@@ -1106,8 +1145,13 @@ export function render(container, ctx) {
           class: 'st-help',
           text: 'تشغيل آلي للتقرير اليومي. جميع المفاتيح معطّلة افتراضياً؛ لا تُنفَّذ أي خطوة إلا بعد تفعيلها هنا. هذه نسخة مطابقة للوحة التشغيل الآلي — التعديل في أي منهما يظهر في الآخر.',
         }),
-        ...AUTOMATION_FIELDS.map((f) =>
-          checkField(f.label, () => auto()[f.key], (v) => { auto()[f.key] = v; })),
+        // A field may carry an optional `hint` (one st-help line under its checkbox) —
+        // used by autoDownload to separate it from the identically-worded, and totally
+        // independent, reportOptions.autoDownloadFiles on the report-options tab.
+        ...AUTOMATION_FIELDS.flatMap((f) => {
+          const row = checkField(f.label, () => auto()[f.key], (v) => { auto()[f.key] = v; });
+          return f.hint ? [row, h('p', { class: 'st-help', text: f.hint })] : [row];
+        }),
         h('div', { class: 'st-field' }, [
           h('label', { class: 'st-label', text: 'وقت التشغيل اليومي (HH:MM)' }),
           timeInput,

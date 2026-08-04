@@ -19,10 +19,10 @@ export const HISTORICAL_CONSTANTS_SEED = {
 
 // Report presentation options (Settings.reportOptions): whether to drop no-TAT
 // rows, which middle slides render, which exec-slide KPI cards show, any per-report
-// label overrides (edited from the review screen), and the delta-chip comparison
-// window (deltaMode: 'daily' vs the last report, or the weekday-anchored
-// 'weekly-sun' / 'weekly-thu' vs the most recent report issued on that weekday —
-// the weekly report goes out on Sunday and Thursday). See contracts.js.
+// label overrides (edited from the review screen), whether the manual generate flow
+// auto-downloads the four files, and the delta-chip comparison window
+// (deltaMode: 'daily' vs the last report, or 'week' = week-to-date vs the last report
+// published before this Sun–Thu week started). See contracts.js.
 //
 // slides.definitions defaults to FALSE: the delivered deck is the simple SIX-slide
 // shape (cover · exec+journey · monthly · compliance · action · thanks) the user
@@ -60,7 +60,25 @@ export const REPORT_OPTIONS_SEED = {
     turnaround: false,
   },
   labels: {},
-  deltaMode: 'daily',
+  // Week-to-date is the DEFAULT comparison window (2026-08-04 user request: the chips
+  // accumulate Sun→Thu against the last report before the week started, "instead of
+  // daily"). MUST stay equal to DEFAULT_DELTA_MODE (model/delta-baseline.js) — that
+  // module owns the enum, this is only the first-run copy of it.
+  // A SEED CHANGE ALONE DOES NOT REACH EXISTING INSTALLS: every saveSettings has been
+  // persisting deltaMode:'daily' since v3, and backfillReportOptions only fills a
+  // MISSING key. Flipping the stored value is the job of store.js migrateV6toV7
+  // (same shape as the v4→v5 slides.definitions reset); after it runs once, choosing
+  // 'daily' in Settings sticks.
+  deltaMode: 'week',
+  // Manual generate flow only: TRUE = the four generated files download automatically
+  // the moment they are ready (the behaviour shipped to date, so TRUE keeps every
+  // existing install exactly as it was and an ABSENT key reads as ON in the predicate);
+  // FALSE = nothing downloads by itself and the user picks files with the per-file
+  // buttons already on the generate screen.
+  // STRICTLY INDEPENDENT of automation.autoDownload, which governs the UNATTENDED run.
+  // A presentation checkbox on the review screen must never arm a background download,
+  // and turning this off must never disable a pipeline the user deliberately armed.
+  autoDownloadFiles: true,
 };
 
 // Automation pipeline options (Settings.automation, v4): the unattended daily run.

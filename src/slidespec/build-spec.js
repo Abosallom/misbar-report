@@ -22,7 +22,7 @@
 //   m.reportOptions.kpiCards[key] toggles the 7 exec KPI cards (row geometry repacks)
 //                                 + the OPT-IN 'turnaround' block on the monthly slide
 //   m.overrides[key]              per-run manual NUMBER overrides (suppresses that delta chip)
-import { COLORS as C, GEOM } from '../theme.js?v=v2026-08-04.1';
+import { COLORS as C, GEOM } from '../theme.js?v=v2026-08-04.2';
 
 // OPT-IN kpiCards KEYS. reportOptions.kpiCards normally reads "on unless === false"
 // (see buildExec's cardDefs filter). The keys in this set INVERT that: they render only
@@ -94,12 +94,15 @@ export const DEFAULT_LABELS = {
   // the old red/green colour key was removed. The legend is MODE-AWARE — the daily/weekly
   // variants substitute the baseline date into '{date}'; the plain key is the legacy
   // (no-baseline) previous-report wording. Rendered only when a chip is visible this run.
-  // WEEKLY is weekday-anchored (user decision 2026-07-26): the Saudi work week is Sun–Thu
-  // and the weekly report is issued on Sunday AND on Thursday, so there are exactly two
-  // weekly baselines — 'weekly-sun' and 'weekly-thu' — each with its own legend wording.
-  // execDeltaLegendWeekly stays for the legacy pre-split 'weekly' mode value.
+  // The weekly comparison is WEEK-TO-DATE since 2026-08-04 (user request): one baseline
+  // per Sun–Thu week — the last report before that week's Sunday — so the chips
+  // accumulate through the week. Its wording therefore names the WEEK's start, not a
+  // weekday: execDeltaLegendWeek. The three older weekly keys are RETIRED but KEPT (a
+  // labels override saved against one of them must not vanish, and DELTA_LEGEND_KEY
+  // still maps the old mode values for stale-cache safety — see it for why).
   execDeltaLegend: '▲ التغيّر منذ التقرير السابق',
   execDeltaLegendDaily: '▲ التغيّر منذ آخر تقرير ({date})',
+  execDeltaLegendWeek: '▲ التغيّر منذ بداية الأسبوع — مقارنة بتقرير ({date})',
   execDeltaLegendWeekly: '▲ التغيّر الأسبوعي — منذ تقرير ({date})',
   execDeltaLegendWeeklySun: '▲ التغيّر الأسبوعي — منذ تقرير الأحد ({date})',
   execDeltaLegendWeeklyThu: '▲ التغيّر الأسبوعي — منذ تقرير الخميس ({date})',
@@ -327,9 +330,10 @@ export const LABEL_NAMES = {
   execCompletionRate: 'سطر نسبة الاكتمال الإجمالية (غير مستخدم حالياً)',
   execDeltaLegend: 'مفتاح التغيّر — الصيغة الافتراضية (منذ التقرير السابق)',
   execDeltaLegendDaily: 'مفتاح التغيّر اليومي — منذ آخر تقرير ({date})',
-  execDeltaLegendWeekly: 'مفتاح التغيّر الأسبوعي — منذ تقرير قبل أسبوع ({date})',
-  execDeltaLegendWeeklySun: 'مفتاح التغيّر الأسبوعي — منذ تقرير الأحد ({date})',
-  execDeltaLegendWeeklyThu: 'مفتاح التغيّر الأسبوعي — منذ تقرير الخميس ({date})',
+  execDeltaLegendWeek: 'مفتاح التغيّر الأسبوعي — منذ بداية الأسبوع ({date})',
+  execDeltaLegendWeekly: 'مفتاح التغيّر الأسبوعي — منذ تقرير قبل أسبوع ({date}) (غير مستخدم حالياً)',
+  execDeltaLegendWeeklySun: 'مفتاح التغيّر الأسبوعي — منذ تقرير الأحد ({date}) (غير مستخدم حالياً)',
+  execDeltaLegendWeeklyThu: 'مفتاح التغيّر الأسبوعي — منذ تقرير الخميس ({date}) (غير مستخدم حالياً)',
   monthlyRowOrders: 'صف الجدول الشهري: الفحوصات',
   monthlyRowResults: 'صف الجدول الشهري: فحوصات مكتملة (تشمل المرفوضة)',
   monthlyRowRejected: 'صف الجدول الشهري: النتائج المرفوضة (غير مستخدم حالياً)',
@@ -432,22 +436,30 @@ const bullets = (items) => items.map((s) => '•  ' + s).join('\n');
 const fmtDelta = (n) => (Number.isFinite(n) && n !== 0 ? (n > 0 ? '+' + n : '−' + Math.abs(n)) : undefined);
 // Mode-aware delta legend: every dated mode substitutes the baseline date into '{date}';
 // legacy (no baseline, or mode 'legacy') uses the plain previous-report wording. The
-// weekly comparison is weekday-anchored (user decision 2026-07-26) — pickDeltaBaseline
-// returns 'weekly-sun' / 'weekly-thu' and each gets its own wording; the bare 'weekly'
-// mapping is kept for the legacy pre-split mode value. All strings stay overridable
-// through the labels registry.
+// weekly comparison is WEEK-TO-DATE since 2026-08-04 — pickDeltaBaseline returns mode
+// 'week' with the pre-Sunday baseline date. All strings stay overridable through the
+// labels registry.
+//
+// The three RETIRED mode values are still mapped ON PURPOSE. This is a static site
+// served from Pages with ?v= cache-busting per module: a browser can hold an older
+// cached model/delta-baseline.js (still emitting 'weekly-sun') against this newer
+// build-spec.js for as long as its cache skews. An unmapped mode falls all the way
+// through to the undated 'منذ التقرير السابق' wording, silently dropping the baseline
+// date off the deck. Keeping four lines costs nothing and makes that skew invisible.
 const DELTA_LEGEND_KEY = {
   daily: 'execDeltaLegendDaily',
-  weekly: 'execDeltaLegendWeekly',           // legacy pre-split mode value
-  'weekly-sun': 'execDeltaLegendWeeklySun',
-  'weekly-thu': 'execDeltaLegendWeeklyThu',
+  week: 'execDeltaLegendWeek',
+  weekly: 'execDeltaLegendWeekly',           // retired — stale-cache safety only
+  'weekly-sun': 'execDeltaLegendWeeklySun',  // retired — stale-cache safety only
+  'weekly-thu': 'execDeltaLegendWeeklyThu',  // retired — stale-cache safety only
 };
-// db.anchored === false means pickDeltaBaseline found NO report on the requested weekday
-// yet (history still filling up) and degraded to the most recent prior report. Naming that
-// date 'تقرير الأحد' / 'تقرير الخميس' would assert a weekday the baseline does not have —
-// the deck would state a false comparison basis while the review screen discloses the
-// fallback (screen-review.js anchorFallbackNote). So the unanchored case falls back to the
-// daily wording ('منذ آخر تقرير ({date})'), which is exactly what that baseline IS.
+// db.anchored === false means pickDeltaBaseline found NO report before this week's Sunday
+// yet (history still filling up) and degraded to the most recent prior report. Calling that
+// 'منذ بداية الأسبوع' would assert a week-to-date span the baseline does not have — the deck
+// would state a false comparison basis while the review screen discloses the fallback
+// (screen-review.js). So the unanchored case falls back to the daily wording
+// ('منذ آخر تقرير ({date})'), which is exactly what that baseline IS. Unchanged by the
+// week-to-date switch: the flag means the same thing and the right wording is still daily's.
 // BOTH stampers forward `anchored`, so the fallback wording is reached on either path:
 // src/ui/screen-review.js:79 and src/automation/pipeline.js:90 each copy it onto
 // model.deltaBaseline (both carry their own comment saying it MUST be preserved).

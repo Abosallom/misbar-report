@@ -1,17 +1,19 @@
 // ui/screen-review.js — review/edit report content with a live slide preview (Track E).
-import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-08-04.1';
-import { el, editableTable, textareaField, toast } from './components.js?v=v2026-08-04.1';
-import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-08-04.1';
-import { autoDraft, splitTaskLists } from '../model/drafts.js?v=v2026-08-04.1';
-import { buildHistoryPanel } from './history-table.js?v=v2026-08-04.1';
-import { normalizeDeltaMode } from '../model/delta-baseline.js?v=v2026-08-04.1';
+import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-08-04.2';
+import { el, editableTable, textareaField, toast } from './components.js?v=v2026-08-04.2';
+import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-08-04.2';
+import { autoDraft, splitTaskLists } from '../model/drafts.js?v=v2026-08-04.2';
+import { buildHistoryPanel } from './history-table.js?v=v2026-08-04.2';
+import {
+  normalizeDeltaMode, isWeekDeltaMode, DEFAULT_DELTA_MODE,
+} from '../model/delta-baseline.js?v=v2026-08-04.2';
 // Same module instance drafts.js already imports (identical specifier) — the grace
 // re-check below MUST use task-lifecycle's own identity/status vocabulary, never a
 // second local copy of it. Static, not guarded: drafts.js (imported above) already
 // depends on this module, so there is no new failure mode.
 import {
   CLOSED as CLOSED_STATUS, LIST_EXTERNAL, LIST_INTERNAL, taskKey,
-} from '../model/task-lifecycle.js?v=v2026-08-04.1';
+} from '../model/task-lifecycle.js?v=v2026-08-04.2';
 
 /* small local module helpers (kept local to avoid cross-screen coupling) */
 async function tryImport(path) { try { return await import(path); } catch { return null; } }
@@ -44,17 +46,17 @@ function currentNumbersOf(kpi) {
     shippedNotReceived: b.shippedNotReceived, awaitingResults: b.awaitingResults, lateNoResult: b.lateNoResult,
   };
 }
-/* The delta-comparison windows (user decision 2) are OWNED by model/delta-baseline.js:
- * normalizeDeltaMode is imported, never re-implemented here, so the review pills, the
- * settings radio (screen-settings.js) and the persisted/validated store value (store.js —
- * which imports DELTA_MODES from the same module) can never disagree about the enum.
- * The Saudi work week is Sun–Thu and the weekly report is issued on Sunday AND on
- * Thursday, so 'weekly' is weekday-ANCHORED with exactly two options instead of a
- * generic 7-days-back. A doc still holding the pre-split legacy 'weekly' reads as
- * weekly-Sunday (the first weekly issue of the week), not a downgrade to 'daily'.
- * isWeeklyMode is derived from the canonical value so any future weekly-* mode is
- * covered without a second list to maintain. */
-const isWeeklyMode = (m) => normalizeDeltaMode(m).startsWith('weekly');
+/* The delta-comparison windows are OWNED by model/delta-baseline.js: normalizeDeltaMode,
+ * isWeekDeltaMode and DEFAULT_DELTA_MODE are imported, never re-implemented here, so the
+ * review pills, the settings radio (screen-settings.js) and the persisted/validated store
+ * value (store.js — which imports the same module) can never disagree about the enum.
+ * There are exactly TWO modes now: 'daily' and 'week' (week-to-date across the Sun–Thu
+ * work week, the default since 2026-08-04). The local
+ *     const isWeeklyMode = (m) => normalizeDeltaMode(m).startsWith('weekly');
+ * that used to live here is DELETED: 'week' does not start with 'weekly', so it would
+ * have returned false for the one mode that needs the disclosure and silently killed
+ * anchorFallbackNote. Guarding a mode enum with a string prefix is exactly the bug the
+ * shared isWeekDeltaMode predicate exists to prevent. */
 
 // deltaMode baseline (user decision B): recompute model.kpi.deltas against the picked
 // baseline and stamp model.deltaBaseline {baselineDate, mode, anchored, definitionShift}
@@ -83,9 +85,11 @@ function applyDeltaBaseline(model, store, pickDeltaBaseline) {
     deltas[key] = (typeof prev === 'number' && typeof cur[key] === 'number') ? (cur[key] - prev) : 0;
   }
   model.kpi.deltas = deltas;
-  // anchored is only meaningful for the weekday-anchored weekly modes: false means the
-  // picked baseline is NOT on the requested weekday (no such report stored yet), so the
-  // banner labels the comparison instead of presenting it as a true Sunday/Thursday gap.
+  // anchored is only meaningful for mode 'week': false means NO report is stored from
+  // before this week's Sunday, so the picked baseline is merely the most recent prior
+  // report and the chips are NOT a week-to-date gap. The banner labels the comparison
+  // (anchorFallbackNote) instead of presenting it as a real week, and build-spec
+  // downgrades the deck legend to the daily wording off the same flag.
   model.deltaBaseline = { baselineDate: picked.baselineDate, mode: picked.mode };
   if ('anchored' in picked) model.deltaBaseline.anchored = !!picked.anchored;
   // definitionShift:true = the picked baseline's `completed` was recorded under the
@@ -115,7 +119,13 @@ function defaultReportOptions() {
       collected: true, dispatched: true, received: true,
     },
     labels: {},
-    deltaMode: 'daily',
+    // Week-to-date is the DEFAULT (2026-08-04 user request) — taken from the model
+    // module's constant, never re-typed, so a future default change lands here too.
+    deltaMode: DEFAULT_DELTA_MODE,
+    // R2: auto-download of the 4 files after a manual generation. TRUE = the shipped
+    // behaviour, which is also what an ABSENT key must mean for every doc written
+    // before this option existed (see reportOptionsFromSettings below).
+    autoDownloadFiles: true,
   };
 }
 
@@ -130,6 +140,9 @@ function reportOptionsFromSettings(settings) {
     kpiCards: { ...base.kpiCards, ...(ro.kpiCards || {}) },
     labels: { ...(ro.labels || {}) },
     deltaMode: normalizeDeltaMode(ro.deltaMode),
+    // Absent/non-boolean → the default (ON). Only an explicit false turns it off, so a
+    // doc written before R2 keeps auto-downloading exactly as it always did.
+    autoDownloadFiles: ro.autoDownloadFiles != null ? !!ro.autoDownloadFiles : base.autoDownloadFiles,
   };
 }
 
@@ -191,6 +204,57 @@ const DELTA_CHIP_TONE = {
   info: 'background:var(--info-bg,#E0E7FF);color:var(--info-text,#1E3A8A);border:1px solid rgba(30,58,138,.30)',
 };
 const DELTA_CHIP_BASE = 'display:inline-flex;align-items:center;gap:4px;border-radius:999px;padding:6px 13px;font-weight:800;font-size:.82rem;line-height:1.3;white-space:nowrap';
+
+/* Delta-mode pills — MODULE SCOPE and EXPORTED so the registry test can pin them against
+ * DELTA_MODES (model/delta-baseline.js) and against screen-settings' DELTA_MODE_OPTIONS:
+ * one enum, three surfaces. Order = DELTA_MODES order (RTL → 'يومي' sits on the right).
+ * Two pills only; the retired weekly-sun/weekly-thu pair is an ALIAS of 'week' now, so a
+ * doc holding either lights up the أسبوعي pill instead of matching nothing. */
+export const DELTA_MODE_PILLS = [
+  { mode: 'daily', label: 'يومي', title: 'مقارنة بآخر تقرير سابق' },
+  {
+    mode: 'week',
+    label: 'أسبوعي (الأحد–الخميس)',
+    title: 'مقارنة بآخر تقرير صدر قبل بداية الأسبوع — يتراكم من الأحد حتى الخميس',
+  },
+];
+
+/* Banner wording — the SINGLE decision of whether a run may speak about "the week".
+ * True only when the mode really is 'week' AND the picked baseline really is a pre-Sunday
+ * one (anchored !== false, and not the undated legacy snapshot). That is the exact rule
+ * build-spec applies to the deck legend (deltaLegendText: anchored === false → the daily
+ * wording, a mode with no DELTA_LEGEND_KEY entry → the neutral default), so the banner the
+ * operator reads and the slide the audience gets can never claim different comparison
+ * windows. The two shapes build-spec ALSO neutralises — a missing db and a db with no
+ * baselineDate — land on the previous-report branch here as well: !!db covers the first,
+ * and the only stamped shape with baselineDate:null is the legacy snapshot path
+ * (delta-baseline.js:338, mode 'legacy'), which the mode !== 'legacy' clause already
+ * catches. Returns the three strings the banner needs; asOfAr may be ''.
+ *
+ * MODULE SCOPE and EXPORTED as of the 2026-08-04 review: as a closure inside render() this
+ * was unreachable from node, so the operator-facing half of that contract had zero tests
+ * while the deck half is pinned (test/delta-mode-registry.test.mjs). Explicit
+ * (deltaMode, deltaBaseline) parameters instead of reading `model` from the enclosing
+ * scope — the call site passes model.reportOptions.deltaMode / model.deltaBaseline at call
+ * time, exactly what the closure read. Any future edit to the rule belongs HERE and must
+ * stay in step with build-spec's deltaLegendText. */
+export function deltaWording(deltaMode, deltaBaseline, asOfAr = '') {
+  const db = deltaBaseline;
+  const week = isWeekDeltaMode(deltaMode)
+    && !!db && db.mode !== 'legacy' && db.anchored !== false;
+  if (week) {
+    return {
+      heading: 'ما الجديد منذ بداية الأسبوع',
+      sub: asOfAr ? `مقارنة بتقرير ${asOfAr} — قبل بداية الأسبوع` : 'مقارنة بآخر تقرير قبل بداية الأسبوع',
+      empty: asOfAr ? `لا تغييرات منذ بداية الأسبوع (${asOfAr})` : 'لا تغييرات منذ بداية الأسبوع',
+    };
+  }
+  return {
+    heading: 'ما الجديد منذ التقرير السابق',
+    sub: asOfAr ? `مقارنة بتقرير ${asOfAr}` : 'مقارنة بالتقرير السابق',
+    empty: asOfAr ? `لا تغييرات منذ التقرير السابق (${asOfAr})` : 'لا تغييرات منذ التقرير السابق',
+  };
+}
 
 /* Slide-pager (preview) chrome. */
 const PAGER_BAR_STYLE = 'display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap';
@@ -359,7 +423,7 @@ export async function render(container, ctx) {
   // pickDeltaBaseline export degrades to the legacy engine deltas instead of throwing
   // (same URL as the static normalizeDeltaMode import → already-evaluated module, no
   // second fetch). Re-run per preview (below) so a report-date change re-picks.
-  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-08-04.1');
+  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-08-04.2');
   const pickBaseline = dbMod && dbMod.pickDeltaBaseline;
   applyDeltaBaseline(model, store, pickBaseline);
   const kpi = model.kpi;
@@ -382,6 +446,9 @@ export async function render(container, ctx) {
         kpiCards: { ...(cur.kpiCards || {}), ...ro.kpiCards },
         labels: { ...(ro.labels || {}) },
         deltaMode: normalizeDeltaMode(ro.deltaMode),
+        // R2 — written as a real boolean so the settings mirror, the store validator and
+        // pipeline.js shouldAutoDownloadFiles all read one shape.
+        autoDownloadFiles: ro.autoDownloadFiles !== false,
       };
       store.saveSettings(doc);
     } catch (e) { console.warn('[review] persist reportOptions failed', e); }
@@ -429,9 +496,9 @@ export async function render(container, ctx) {
     const token = ++renderToken;
     model.reportDate = state.reportDate;
     applyDeltaBaseline(model, store, pickBaseline); // re-pick baseline for the current report date
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-08-04.1');
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-08-04.2');
     const buildSpec = pickFn(specMod, ['buildSpec', 'build', 'makeSpec', 'toSpec']);
-    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-08-04.1');
+    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-08-04.2');
     const renderFn = pickFn(rendMod, ['renderSpec', 'renderSlides', 'renderHtml', 'render']);
 
     if (!buildSpec || !renderFn) {
@@ -815,7 +882,7 @@ export async function render(container, ctx) {
     el('summary', { class: 'card__title', style: 'cursor:pointer', text: STR.review.labelsCardTitle }),
   ]);
   (async () => {
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-08-04.1');
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-08-04.2');
     const LABEL_NAMES = specMod && specMod.LABEL_NAMES;
     const DEFAULT_LABELS = (specMod && specMod.DEFAULT_LABELS) || {};
     if (!LABEL_NAMES || typeof LABEL_NAMES !== 'object') {
@@ -858,33 +925,74 @@ export async function render(container, ctx) {
       navigate('generate');
     },
   });
-  const generateBtn = el('div', { class: 'sticky-actions' }, [genButton]);
+  // R2 — auto-download switch, attached to the generate button because that is the
+  // moment it acts on: ON (default, and what an absent key means) saves the 4 files the
+  // instant they are ready; OFF leaves the success panel's per-file buttons as the only
+  // download. The label is deliberately NOT the automation tab's identically-meaning
+  // 'تنزيل ملفات التقرير تلقائياً' — that switch arms UNATTENDED runs and this one must
+  // never be mistaken for it. Persisted through the same persistReportOptions path the
+  // pills and slide chips use; screen-generate reads the decision back through
+  // pipeline.js shouldAutoDownloadFiles (which also enforces "mobile never auto-saves").
+  // .checked is set IMPERATIVELY: el() skips a false-valued attribute, so passing
+  // checked:false would leave a stale ON box after the user turned it off.
+  const autoDlCheck = el('input', {
+    type: 'checkbox',
+    // Explicit name: the wrapping <label> gives a visual association but the a11y tree
+    // read this control as an unnamed checkbox, which is what a screen reader announces.
+    'aria-label': 'تنزيل الملفات الأربعة تلقائياً بعد التوليد',
+    style: 'width:18px;height:18px;flex:0 0 auto;accent-color:var(--navy)',
+  });
+  autoDlCheck.checked = model.reportOptions.autoDownloadFiles !== false;
+  autoDlCheck.addEventListener('change', () => {
+    model.reportOptions.autoDownloadFiles = autoDlCheck.checked;
+    persistReportOptions();
+    toast(autoDlCheck.checked
+      ? 'سيتم تنزيل الملفات الأربعة تلقائياً بعد التوليد'
+      : 'لن يُنزَّل أي ملف تلقائياً — اختر الملفات بعد التوليد', 'ok');
+  });
+  // OPAQUE background on purpose: .sticky-actions paints a gradient that is transparent
+  // at its TOP 30%, which was fine while the bar held only the solid full-width button.
+  // This row lands in that transparent band, so at a 390px phone width the card scrolling
+  // underneath (the report-date hint) showed straight through the label text. --bg-lighter
+  // is the same colour the gradient resolves to, so the patch is invisible on both themes.
+  const autoDlRow = el('label', {
+    style: 'display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:8px;font-weight:600;font-size:.85rem;color:var(--slate-600);background:var(--bg-lighter);padding:6px 8px;border-radius:8px',
+  }, [
+    autoDlCheck,
+    el('span', { text: 'تنزيل الملفات الأربعة تلقائياً بعد التوليد' }),
+  ]);
+  const generateBtn = el('div', { class: 'sticky-actions' }, [autoDlRow, genButton]);
 
-  // 'ما الجديد منذ التقرير السابق' banner — the first thing the operator sees.
-  // Reads the deltas vs the picked baseline: a coloured chip per NON-ZERO delta (signed,
-  // so a drop shows '−N'), else a calm single line. Rebuilt on a delta-mode switch.
-  // A weekly-anchored baseline that landed on the WRONG weekday (no Sunday/Thursday
-  // report stored yet) must never be presented as a true week-over-week gap, so the
-  // banner carries a muted one-liner instead of a silently mis-labelled number.
+  // 'ما الجديد' banner — the first thing the operator sees. Reads the deltas vs the
+  // picked baseline: a coloured chip per NON-ZERO delta (signed, so a drop shows '−N'),
+  // else a calm single line. Rebuilt on a delta-mode switch.
+  // Under 'week' a baseline that is NOT from before this week's Sunday (nothing stored
+  // that early yet) must never be presented as a true week-to-date gap, so the banner
+  // carries a muted one-liner instead of a silently mis-labelled number.
   function anchorFallbackNote() {
     const db = model.deltaBaseline;
-    if (!isWeeklyMode(model.reportOptions.deltaMode)) return null;
+    if (!isWeekDeltaMode(model.reportOptions.deltaMode)) return null;
     if (!db) return null;
     // mode 'legacy' = pickDeltaBaseline fell back to the single stored snapshot, which is
-    // NOT drawn from the dated report history and therefore never weekday-anchored (that
-    // path returns no `anchored` key at all, so a bare `anchored !== false` test would let
-    // the WEAKEST baseline through as if it were a true Sunday/Thursday gap). Disclose it
-    // too, with its own wording.
+    // NOT drawn from the dated report history and therefore can never be a week baseline
+    // (that path returns no `anchored` key at all, so a bare `anchored !== false` test
+    // would let the WEAKEST baseline through as if it were a real week). Disclose it too,
+    // with its own wording.
     const legacy = db.mode === 'legacy';
     if (!legacy && db.anchored !== false) return null; // anchored → nothing to disclose
     return el('p', {
       class: 'small muted',
       style: 'margin:10px 0 0',
       text: legacy
-        ? 'لا يوجد سجل تقارير لهذا اليوم — تمت المقارنة باللقطة المحفوظة'
-        : 'لا يوجد تقرير في هذا اليوم بعد — تمت المقارنة بأحدث تقرير متاح',
+        ? 'لا يوجد سجل تقارير سابق — تمت المقارنة باللقطة المحفوظة'
+        : 'لم يصدر أي تقرير قبل بداية هذا الأسبوع — تمت المقارنة بأحدث تقرير متاح',
     });
   }
+
+  // Banner wording lives at MODULE scope (exported deltaWording, next to
+  // DELTA_MODE_PILLS) so the same rule the deck legend uses is reachable from node and
+  // can be pinned by test/delta-mode-registry.test.mjs. Read its comment before editing
+  // the week-vs-previous-report rule.
 
   // Second, INDEPENDENT baseline disclosure (2026-07-28). 'مكتملة' changed meaning that
   // day — a REJECTED result is the lab's final outcome, so rejected rows now count as
@@ -920,14 +1028,16 @@ export async function render(container, ctx) {
       return Number.isFinite(n) && n !== 0;
     });
     const note = anchorFallbackNote();
+    // week vs previous-report phrasing, one decision — read at call time from the same
+    // two fields the closure used to reach through `model`.
+    const words = deltaWording(model.reportOptions.deltaMode, model.deltaBaseline, asOfAr);
     const defNote = definitionShiftNote(); // shown in BOTH branches: a definitional +N can
     // even net out to 'لا تغييرات' while hiding real movement of the same size.
     if (!active.length) {
-      const txt = asOfAr ? `لا تغييرات منذ التقرير السابق (${asOfAr})` : 'لا تغييرات منذ التقرير السابق';
       return el('div', { class: 'card', style: 'padding:14px 16px' }, [
         el('div', { style: 'display:flex;align-items:center;gap:8px' }, [
           el('span', { text: '✓', style: 'color:var(--green);font-weight:800;font-size:1.1rem' }),
-          el('span', { text: txt, style: 'color:var(--slate-600);font-weight:600;font-size:.92rem' }),
+          el('span', { text: words.empty, style: 'color:var(--slate-600);font-weight:600;font-size:.92rem' }),
         ]),
         note,
         defNote,
@@ -949,29 +1059,23 @@ export async function render(container, ctx) {
       ]);
     });
     return el('div', { class: 'card', style: 'padding:16px 18px;border-inline-start:4px solid var(--navy)' }, [
-      el('div', { style: 'font-weight:800;font-size:1.05rem;color:var(--navy);margin-bottom:3px', text: 'ما الجديد منذ التقرير السابق' }),
-      el('div', { class: 'small muted', style: 'margin-bottom:12px', text: asOfAr ? `مقارنة بتقرير ${asOfAr}` : 'مقارنة بالتقرير السابق' }),
+      el('div', { style: 'font-weight:800;font-size:1.05rem;color:var(--navy);margin-bottom:3px', text: words.heading }),
+      el('div', { class: 'small muted', style: 'margin-bottom:12px', text: words.sub }),
       el('div', { style: 'display:flex;flex-wrap:wrap;gap:8px' }, chips),
       note,
       defNote,
     ]);
   }
 
-  // Delta-mode segmented control (يومي / أسبوعي — الأحد / أسبوعي — الخميس) — the
-  // deltaMode option surfaced in the MAIN flow, right above the 'ما الجديد' banner where
-  // the baseline date is shown. The Saudi work week is Sun–Thu and the weekly report is
-  // issued on Sunday AND Thursday, so 'weekly' is two weekday-anchored choices, not one
-  // generic 7-days-back. Clicking persists reportOptions.deltaMode through the SAME
-  // settings save path the slide chips use (persistReportOptions), re-picks the baseline,
-  // and live-refreshes the banner + preview + progress panel. Initial state comes from
-  // settings (default 'daily'), so this stays in sync with the settings-screen radio.
-  const DELTA_MODE_PILLS = [
-    { mode: 'daily', label: 'يومي', title: 'مقارنة بآخر تقرير سابق' },
-    { mode: 'weekly-sun', label: 'أسبوعي — الأحد', title: 'مقارنة بآخر تقرير صادر يوم الأحد' },
-    { mode: 'weekly-thu', label: 'أسبوعي — الخميس', title: 'مقارنة بآخر تقرير صادر يوم الخميس' },
-  ];
-  // Compact enough that all three pills sit on one row at a 390px phone width; labels
-  // never break mid-pill (white-space:nowrap) and the row wraps as a whole if narrower.
+  // Delta-mode segmented control (يومي / أسبوعي (الأحد–الخميس)) — the deltaMode option
+  // surfaced in the MAIN flow, right above the 'ما الجديد' banner where the baseline date
+  // is shown. Two pills, driven by the exported module-scope DELTA_MODE_PILLS.
+  // Clicking persists reportOptions.deltaMode through the SAME settings save path the
+  // slide chips use (persistReportOptions), re-picks the baseline, and live-refreshes the
+  // banner + preview + progress panel. Initial state comes from settings (default
+  // 'week'), so this stays in sync with the settings-screen radio.
+  // Compact enough that both pills sit on one row at a 390px phone width; labels never
+  // break mid-pill (white-space:nowrap) and the row wraps as a whole if narrower.
   const dmPillStyle = (on) => 'border-radius:999px;padding:6px 12px;font-weight:700;font-size:.78rem;cursor:pointer;min-height:32px;line-height:1;white-space:nowrap;transition:background .12s;'
     + (on
       ? 'background:var(--navy);color:#fff;border:1px solid var(--navy);'
@@ -1024,8 +1128,9 @@ export async function render(container, ctx) {
   // 'أرقام التقارير والتقدم' — a collapsed-by-default RTL progress card (range pills
   // أسبوع/شهر/منذ البداية driving a per-sample table + trend chart) mounted right below
   // the delta switcher. Rebuilt when the report date changes (the window/anchor) and when
-  // the delta mode changes — under weekly-sun/weekly-thu the شهر range samples THAT
-  // weekday; the open/closed state is preserved across rebuilds. Numbers come from
+  // the delta mode changes — under 'week' the شهر range samples THURSDAYS (the
+  // week-closing report, so a row-to-row gap is exactly one week's chips); the
+  // open/closed state is preserved across rebuilds. Numbers come from
   // engine/asof.js (guarded inside the panel → published-history-only, chart hidden).
   const historyHost = el('div', { class: 'history-host' });
   let historyOpen = false;
