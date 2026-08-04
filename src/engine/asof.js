@@ -61,8 +61,8 @@
 // earliest defensible day and restores the partition, while still resolving to
 // SOME day for every row so the CROWN identity at a saturated as-of is unchanged.
 
-import { parseDateTime, toEpochDay, workday, MS_PER_DAY } from './workday.js?v=v2026-07-23.7';
-import { buildTatIndex, resolveTat } from './tat.js?v=v2026-07-23.7';
+import { parseDateTime, toEpochDay, workday, MS_PER_DAY } from './workday.js?v=v2026-08-04.1';
+import { buildTatIndex, resolveTat } from './tat.js?v=v2026-08-04.1';
 
 // engine.js's cascade keys off these exact rawStatus literals (not exported).
 const RAW_CANCELLED = 'Order Cancelled';

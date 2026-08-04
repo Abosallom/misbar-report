@@ -1,10 +1,17 @@
 // ui/screen-review.js — review/edit report content with a live slide preview (Track E).
-import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-07-23.7';
-import { el, editableTable, textareaField, toast } from './components.js?v=v2026-07-23.7';
-import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-07-23.7';
-import { autoDraft } from '../model/drafts.js?v=v2026-07-23.7';
-import { buildHistoryPanel } from './history-table.js?v=v2026-07-23.7';
-import { normalizeDeltaMode } from '../model/delta-baseline.js?v=v2026-07-23.7';
+import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-08-04.1';
+import { el, editableTable, textareaField, toast } from './components.js?v=v2026-08-04.1';
+import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-08-04.1';
+import { autoDraft, splitTaskLists } from '../model/drafts.js?v=v2026-08-04.1';
+import { buildHistoryPanel } from './history-table.js?v=v2026-08-04.1';
+import { normalizeDeltaMode } from '../model/delta-baseline.js?v=v2026-08-04.1';
+// Same module instance drafts.js already imports (identical specifier) — the grace
+// re-check below MUST use task-lifecycle's own identity/status vocabulary, never a
+// second local copy of it. Static, not guarded: drafts.js (imported above) already
+// depends on this module, so there is no new failure mode.
+import {
+  CLOSED as CLOSED_STATUS, LIST_EXTERNAL, LIST_INTERNAL, taskKey,
+} from '../model/task-lifecycle.js?v=v2026-08-04.1';
 
 /* small local module helpers (kept local to avoid cross-screen coupling) */
 async function tryImport(path) { try { return await import(path); } catch { return null; } }
@@ -14,12 +21,16 @@ function pickFn(mod, names) {
   if (typeof mod.default === 'function') return mod.default;
   return null;
 }
-// Canonical internal rule mirrors model/drafts.js: فئة التقرير 'لين' routes a task to
-// the internal (داخلي) deck; مفتوح displays as قيد التنفيذ. (An old /داخل|internal/i
-// regex here matched no real 'لين' rows and once rendered the internal table empty.)
-const CAT_INTERNAL = 'لين';
-const displayStatus = (s) => (s === 'مفتوح' ? 'قيد التنفيذ' : s);
+// The task split (which list a row belongs to, and whether a مغلق row still gets its
+// one grace appearance) is owned entirely by model/drafts.js splitTaskLists — this
+// screen no longer keeps a local copy of that rule. isClosed below is only a display
+// helper: it tints closed rows in the editable table.
 const isClosed = (t) => /مغلق|closed|منجز|مكتمل/i.test((t && (t.status || '')) || '');
+// The EXACT predicate splitTaskLists and recordShownTasks use (status === 'مغلق').
+// Membership decisions must never ride on the looser display regex above: a row whose
+// status reads 'مكتمل' is not "closed" to the lifecycle rule, so treating it as closed
+// here would drop a row the deck is supposed to carry.
+const isClosedStatus = (t) => !!t && typeof t === 'object' && t.status === CLOSED_STATUS;
 const linesToArr = (s) => String(s || '').split('\n').map((x) => x.trim()).filter(Boolean);
 
 // Engine's 10 published numbers (the delta keys) pulled out of an EngineOutput/kpi.
@@ -147,6 +158,7 @@ const SLIDE_TOGGLES = [
   { key: 'monthly', label: STR.review.slideToggles.monthly },
   { key: 'compliance', label: STR.review.slideToggles.compliance },
   { key: 'action', label: STR.review.slideToggles.action },
+  { key: 'challenges', label: STR.review.slideToggles.challenges },
 ];
 
 const OV_INPUT_STYLE = 'flex:1;min-width:0;border:1px solid var(--border-dark);border-radius:6px;padding:6px 8px;min-height:36px;background:var(--white);color:var(--text);font-weight:700;text-align:right';
@@ -199,20 +211,20 @@ function buildDraftReportModel(state, store) {
 
   let d;
   try {
-    d = autoDraft(tracker, reportDate);
+    // settings.taskLog carries the closed-task grace state (model/task-lifecycle.js).
+    d = autoDraft(tracker, reportDate, { taskLog: store.settings && store.settings.taskLog });
   } catch (e) {
     console.warn('[review] autoDraft failed; falling back to local split', e);
-    // Mirror the canonical split (model/drafts.js): tasksInternal = EVERY task whose
-    // category === 'لين' — hidden rows and مغلق included — with the مفتوح→قيد التنفيذ
-    // display mapping. The other lists stay on visible (non-hidden) rows.
+    // The split is NOT re-derived here any more — splitTaskLists (model/drafts.js) is
+    // its single owner, so this path cannot drift from the real rule again. Called
+    // with an empty bag it degrades to non-closed rows only: strictly a subset of the
+    // real answer (no grace rows), never the old "show every مغلق task" behaviour.
     const allTasks = tracker.tasks || [];
-    const toDisplay = (t) => ({ ...t, status: displayStatus(t.status) });
     const visible = allTasks.filter((t) => !t.hidden);
     d = {
-      tasksInternal: allTasks.filter((t) => t.category === CAT_INTERNAL).map(toDisplay),
-      tasksCurrent: visible.filter((t) => t.category !== CAT_INTERNAL && !isClosed(t)).map(toDisplay),
+      ...splitTaskLists(allTasks, {}),
       completedTasks: visible.filter(isClosed).map((t) => t.task),
-      plannedTasks: visible.filter((t) => !isClosed(t) && t.category !== CAT_INTERNAL).map((t) => t.task),
+      plannedTasks: visible.filter((t) => !isClosed(t) && t.category !== 'لين').map((t) => t.task),
       supportRequired: (tracker.challenges || []).map((c) => c.title).filter(Boolean),
     };
   }
@@ -235,6 +247,90 @@ function buildDraftReportModel(state, store) {
     reportOptions: reportOptionsFromSettings(store.settings),
     overrides: {},
   };
+}
+
+/* Report-date change → RE-DECIDE the مغلق rows (bug fix 2026-08-04).
+ *
+ * The task lists are drafted ONCE (render() guards with `if (!state.reportModel)`), but
+ * the closed-row grace rule is a FUNCTION OF THE REPORT DATE: task-lifecycle's isGraceRow
+ * admits a مغلق row only while its log entry is unspent (closedOn == null) or was spent on
+ * THIS very date (closedOn === reportDate — what makes a same-day regeneration idempotent).
+ * Stamping model.reportDate alone froze the grace decision at draft time while
+ * recordRunSnapshot recorded the write under the NEW date, so a task closed and published
+ * on D was published a SECOND time on D+1 (its closedOn === D entry grants nothing for
+ * D+1) — and prune then dropped the entry, so nothing could ever catch it. Reachable from
+ * the ordinary "kept-open PWA tab, next morning" and "drafting tomorrow's deck" flows. The
+ * mirror case (moving onto a date that EQUALS a stored closedOn) withheld a row the deck
+ * should carry.
+ *
+ * Reconcile, do NOT re-draft: the operator's edits (added rows, retyped text, flipped
+ * statuses, deleted rows) must survive a date correction. Only a row the TRACKER reports as
+ * مغلق can gain or lose a grace, so:
+ *   - drop a مغلق row that is tracker-sourced-closed and the new date does not grant;
+ *   - re-admit a مغلق row the new date grants that the OLD date did not (so a grace row the
+ *     operator deliberately deleted is not resurrected by an unrelated date edit), placed in
+ *     tracker order;
+ *   - never touch non-closed rows — their membership is date-independent (isScheduled reads
+ *     status/dueDate only) — nor any row the operator typed in by hand.
+ * Which list a row belongs to stays drafts.js's business: splitTaskLists is called for both
+ * dates and this function only compares its answers. panels.completedTasks/plannedTasks
+ * carry the other date-anchored windows but are NOT rendered (build-spec reads only
+ * panels.supportRequired), so they are deliberately left alone.
+ *
+ * @returns {boolean} true when a list actually changed (caller remounts those tables).
+ */
+function reconcileGraceRows(model, state, store, prevDate) {
+  const tracker = (state.parsed && state.parsed.tracker) || buildMockTracker();
+  const rows = (tracker && tracker.tasks) || [];
+  const taskLog = store.settings && store.settings.taskLog;
+  let fresh; let before;
+  try {
+    fresh = splitTaskLists(rows, { taskLog, reportDate: state.reportDate });
+    before = splitTaskLists(rows, { taskLog, reportDate: prevDate });
+  } catch (e) {
+    console.warn('[review] grace re-check failed; task lists left as drafted', e);
+    return false;
+  }
+  // Keys of every tracker row that is مغلق, registered under BOTH list ids: this set only
+  // answers "did this row arrive closed from the tracker?" (i.e. it can only be here via
+  // the grace rule), so it must not encode the category split. The list-aware half of the
+  // test is `granted`, which comes straight from splitTaskLists.
+  const trackerClosed = new Set();
+  for (const t of rows) {
+    if (!isClosedStatus(t)) continue;
+    trackerClosed.add(taskKey(LIST_EXTERNAL, t));
+    trackerClosed.add(taskKey(LIST_INTERNAL, t));
+  }
+  let changed = false;
+  for (const [field, listId] of [['tasksCurrent', LIST_EXTERNAL], ['tasksInternal', LIST_INTERNAL]]) {
+    const cur = Array.isArray(model[field]) ? model[field] : [];
+    const freshRows = Array.isArray(fresh[field]) ? fresh[field] : [];
+    const k = (t) => taskKey(listId, t);
+    const granted = new Set(freshRows.filter(isClosedStatus).map(k));
+    const grantedBefore = new Set((before[field] || []).filter(isClosedStatus).map(k));
+    // 1. Removals — a spent grace must not ride along under the new date.
+    const out = cur.filter((r) => !(isClosedStatus(r) && trackerClosed.has(k(r)) && !granted.has(k(r))));
+    let touched = out.length !== cur.length;
+    // 2. Additions — newly granted only, spliced in after the nearest preceding fresh row
+    //    that is still on the list so tracker order survives.
+    const present = new Set(out.map(k));
+    for (let i = 0; i < freshRows.length; i++) {
+      const r = freshRows[i];
+      const key = k(r);
+      if (!isClosedStatus(r) || present.has(key) || grantedBefore.has(key)) continue;
+      let at = 0;
+      for (let j = i - 1; j >= 0; j--) {
+        const prevKey = k(freshRows[j]);
+        const idx = out.findIndex((x) => k(x) === prevKey);
+        if (idx >= 0) { at = idx + 1; break; }
+      }
+      out.splice(at, 0, { ...r });
+      present.add(key);
+      touched = true;
+    }
+    if (touched) { model[field] = out; changed = true; }
+  }
+  return changed;
 }
 
 export async function render(container, ctx) {
@@ -263,7 +359,7 @@ export async function render(container, ctx) {
   // pickDeltaBaseline export degrades to the legacy engine deltas instead of throwing
   // (same URL as the static normalizeDeltaMode import → already-evaluated module, no
   // second fetch). Re-run per preview (below) so a report-date change re-picks.
-  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-07-23.7');
+  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-08-04.1');
   const pickBaseline = dbMod && dbMod.pickDeltaBaseline;
   applyDeltaBaseline(model, store, pickBaseline);
   const kpi = model.kpi;
@@ -333,9 +429,9 @@ export async function render(container, ctx) {
     const token = ++renderToken;
     model.reportDate = state.reportDate;
     applyDeltaBaseline(model, store, pickBaseline); // re-pick baseline for the current report date
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-07-23.7');
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-08-04.1');
     const buildSpec = pickFn(specMod, ['buildSpec', 'build', 'makeSpec', 'toSpec']);
-    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-07-23.7');
+    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-08-04.1');
     const renderFn = pickFn(rendMod, ['renderSpec', 'renderSlides', 'renderHtml', 'render']);
 
     if (!buildSpec || !renderFn) {
@@ -460,9 +556,18 @@ export async function render(container, ctx) {
   /* ---------- Controls ---------- */
   const dateInput = el('input', { type: 'date', value: state.reportDate });
   dateInput.addEventListener('change', () => {
+    const prevDate = state.reportDate;
     state.reportDate = dateInput.value || todayISO();
     model.reportDate = state.reportDate; // sync immediately — generate must never see a stale date
     dateHint.textContent = formatDateAr(state.reportDate);
+    // The مغلق rows are date-dependent (see reconcileGraceRows): re-decide them for the
+    // new date and remount the affected tables, so what the operator reviews is exactly
+    // what generate publishes AND what recordShownTasks then writes under that date.
+    if (state.reportDate !== prevDate && reconcileGraceRows(model, state, store, prevDate)) {
+      mountCurrentTable();
+      mountInternalTable();
+      toast('تم تحديث المهام المغلقة حسب تاريخ التقرير الجديد', 'ok');
+    }
     renderHistory(); // window anchor moved → rebuild the last-week panel
     schedulePreview();
   });
@@ -496,32 +601,52 @@ export async function render(container, ctx) {
   ];
   const newTask = () => ({ task: '', status: STATUS_OPTIONS[0], dueDate: '', owner: '', responsible: '', category: '', hidden: false });
 
-  const tasksCurrentCard = el('div', { class: 'card' }, [
-    el('div', { class: 'card__title', text: STR.review.tasksCurrentTitle }),
-    editableTable({
+  // Both task tables live in a host div and are (re)built by a mount function: a report-date
+  // change re-decides their مغلق rows (reconcileGraceRows) and editableTable snapshots its
+  // `rows` into private state at construction time, so the DOM must be rebuilt from the new
+  // array — otherwise the operator would review one list and publish another.
+  const tasksCurrentHost = el('div');
+  function mountCurrentTable() {
+    tasksCurrentHost.innerHTML = '';
+    tasksCurrentHost.appendChild(editableTable({
       columns: taskCols, rows: model.tasksCurrent, minWidth: '520px', newRow: newTask,
       onChange: (rows) => { model.tasksCurrent = rows; schedulePreview(); },
-    }),
+    }));
+  }
+  mountCurrentTable();
+  const tasksCurrentCard = el('div', { class: 'card' }, [
+    el('div', { class: 'card__title', text: STR.review.tasksCurrentTitle }),
+    tasksCurrentHost,
   ]);
-  // Internal (لين) task table = the COMPLETE log — all statuses + hidden (collapsed
-  // done-work) rows — so it can run long. Collapse to the first COLLAPSE_ROWS rows
-  // behind a toggle, dim hidden rows (with a 'مخفي في الجدول' chip) and give مغلق rows
-  // a subtle done tint. editableTable rebuilds its <tbody> on add/remove, so the
-  // decoration is re-applied from onChange (and once up-front). Editability, the
-  // add/remove wiring and the hidden flag (preserved by editableTable's {...r} spread)
-  // are all untouched — decoration only styles rows, it never mutates the data.
+  // Internal (لين) task table = non-closed rows plus any one-shot مغلق grace rows
+  // (lifecycle rule, 2026-08-04 — supersedes the old "complete 31-row log", so the
+  // steady state is ~8-10 rows). The collapse stays as a guard for a pathological
+  // tracker; grace rows are EXEMPT from it (see decorateInternalTable) — the one
+  // row the operator most needs to review must never load hidden. Dim hidden rows
+  // (with a 'مخفي في الجدول' chip) and give مغلق rows a subtle done tint.
+  // editableTable rebuilds its <tbody> on add/remove, so the decoration is
+  // re-applied from onChange (and once per mount). Like tasksCurrent, the table
+  // lives in a host and is remounted by reconcileGraceRows on a report-date change
+  // — editableTable snapshots `rows` at construction, so a new array needs a new DOM.
   const COLLAPSE_ROWS = 8;
   let internalExpanded = false;
-  const internalTable = editableTable({
-    columns: taskCols, rows: model.tasksInternal, minWidth: '520px', newRow: newTask,
-    onChange: (rows) => { model.tasksInternal = rows; decorateInternalTable(); schedulePreview(); },
-  });
+  const tasksInternalHost = el('div');
+  let internalTable = null;
+  function mountInternalTable() {
+    tasksInternalHost.innerHTML = '';
+    internalTable = editableTable({
+      columns: taskCols, rows: model.tasksInternal, minWidth: '520px', newRow: newTask,
+      onChange: (rows) => { model.tasksInternal = rows; decorateInternalTable(); schedulePreview(); },
+    });
+    tasksInternalHost.appendChild(internalTable);
+    decorateInternalTable();
+  }
   const internalToggle = el('button', {
     type: 'button', class: 'btn btn--ghost btn--sm', style: 'margin-top:8px;display:none',
     onClick: () => { internalExpanded = !internalExpanded; decorateInternalTable(); },
   });
   function decorateInternalTable() {
-    const tbody = internalTable.querySelector('tbody');
+    const tbody = internalTable && internalTable.querySelector('tbody');
     if (!tbody) return;
     const rows = model.tasksInternal || [];
     const trs = Array.from(tbody.children);
@@ -529,8 +654,10 @@ export async function render(container, ctx) {
     tbody.querySelectorAll('.rev-hidden-chip').forEach((n) => n.remove());
     trs.forEach((tr, i) => {
       const r = rows[i] || {};
-      // Collapse everything past the threshold unless expanded.
-      tr.style.display = (!internalExpanded && i >= COLLAPSE_ROWS) ? 'none' : '';
+      // Collapse everything past the threshold unless expanded — EXCEPT مغلق rows:
+      // a grace row is the one-shot "completed" announcement and tends to sit last
+      // in tracker order, exactly where the collapse would hide it from review.
+      tr.style.display = (!internalExpanded && i >= COLLAPSE_ROWS && !isClosed(r)) ? 'none' : '';
       // مغلق → subtle green 'done' tint; hidden (collapsed done-work) → dimmed + chip.
       tr.style.background = isClosed(r) ? 'var(--closed-tint,rgba(22,163,74,.08))' : '';
       tr.style.opacity = r.hidden ? '0.55' : '';
@@ -553,10 +680,10 @@ export async function render(container, ctx) {
   }
   const tasksInternalCard = el('div', { class: 'card' }, [
     el('div', { class: 'card__title', text: STR.review.tasksInternalTitle }),
-    internalTable,
+    tasksInternalHost,
     internalToggle,
   ]);
-  decorateInternalTable(); // decorate the initial (already-rendered) rows
+  mountInternalTable(); // build + decorate the initial rows
 
   // Challenges
   const challengeCols = [
@@ -688,7 +815,7 @@ export async function render(container, ctx) {
     el('summary', { class: 'card__title', style: 'cursor:pointer', text: STR.review.labelsCardTitle }),
   ]);
   (async () => {
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-07-23.7');
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-08-04.1');
     const LABEL_NAMES = specMod && specMod.LABEL_NAMES;
     const DEFAULT_LABELS = (specMod && specMod.DEFAULT_LABELS) || {};
     if (!LABEL_NAMES || typeof LABEL_NAMES !== 'object') {

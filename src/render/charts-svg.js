@@ -29,7 +29,7 @@
 // explicitly with `opts.catDir = 'ltr'` on that chart element. There is
 // exactly one knob (CAT_DIR / opts.catDir) so the two layers cannot fight
 // silently.
-import { COLORS as C } from '../theme.js?v=v2026-07-23.7';
+import { COLORS as C } from '../theme.js?v=v2026-08-04.1';
 
 const PXIN = 96;
 /** Default category progression for this (Arabic) deck: index 0 on the right. */

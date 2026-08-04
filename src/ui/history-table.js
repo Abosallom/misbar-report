@@ -31,9 +31,9 @@
 // نسبة الاكتمال nonsense). The published entry is still shown when nothing can be
 // computed, marked `staleDef` so the footnote says the number is old-definition.
 // Stored history itself is NEVER rewritten here — this module only reads it.
-import { el } from './components.js?v=v2026-07-23.7';
-import { formatDateAr } from '../i18n/ar.js?v=v2026-07-23.7';
-import { COMPLETED_DEF_SINCE } from '../model/delta-baseline.js?v=v2026-07-23.7';
+import { el } from './components.js?v=v2026-08-04.1';
+import { formatDateAr } from '../i18n/ar.js?v=v2026-08-04.1';
+import { COMPLETED_DEF_SINCE } from '../model/delta-baseline.js?v=v2026-08-04.1';
 
 /* Relative imports carry ?v=… — the orchestrator re-stamps this token. */
 const V = '?v=v2026-07-22.13';
@@ -521,8 +521,8 @@ export function buildHistoryPanel({ rows, tatTests, history, endIso, deltaMode, 
 
   (async () => {
     const [asofMod, wdMod] = await Promise.all([
-      tryImport('../engine/asof.js?v=v2026-07-23.7' + V),
-      tryImport('../engine/workday.js?v=v2026-07-23.7' + V),
+      tryImport('../engine/asof.js?v=v2026-08-04.1' + V),
+      tryImport('../engine/workday.js?v=v2026-08-04.1' + V),
     ]);
     const computeAsOf = asofMod && typeof asofMod.computeNumbersAsOf === 'function' ? asofMod.computeNumbersAsOf : null;
     const degraded = !computeAsOf;

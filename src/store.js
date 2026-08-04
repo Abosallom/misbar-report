@@ -7,20 +7,32 @@
 //     dashboard token: view-only, server-side-masked data, never a login/PHI key.
 //   • cachedTracker — the last parsed Project Tracker (PROJECT-management content:
 //     tasks/challenges/risks). This is explicitly allowed; it is NOT patient data.
+//   • taskLog (v6) — the closed-task grace bookkeeping (model/task-lifecycle.js):
+//     normalized TASK TEXT → {openOn, closedOn}. NO NEW DATA CLASS: it is the same
+//     project-management content cachedTracker already stores, kept in plaintext so
+//     an exported backup is auditable by the user who owns it.
 // All localStorage access is wrapped in try/catch because Safari private mode
 // throws on write; on failure we fall back to an in-memory doc and expose
 // isEphemeral() so the UI can warn the user their edits will not persist.
 
-import { SETTINGS_KEY } from './contracts.js?v=v2026-07-23.7';
-import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-07-23.7';
-import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-07-23.7';
+import { SETTINGS_KEY } from './contracts.js?v=v2026-08-04.1';
+import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-08-04.1';
+import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-08-04.1';
 import {
   HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED, GRAFANA_SEED, REPORT_OPTIONS_SEED,
-  SNAPSHOT_HISTORY_SEED, AUTOMATION_SEED,
-} from './seeds/defaults.js?v=v2026-07-23.7';
-import { DELTA_MODES } from './model/delta-baseline.js?v=v2026-07-23.7';
+  SNAPSHOT_HISTORY_SEED, AUTOMATION_SEED, TASK_LOG_SEED,
+} from './seeds/defaults.js?v=v2026-08-04.1';
+import { DELTA_MODES } from './model/delta-baseline.js?v=v2026-08-04.1';
+import {
+  sanitizeTaskLog, recordShownTasks, TASK_LOG_LIMIT, TASK_KEY_MAX,
+} from './model/task-lifecycle.js?v=v2026-08-04.1';
 
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
+
+// taskLog key = 'ext'|'int' (3) + '|' (1) + up to TASK_KEY_MAX chars of task text.
+// A little headroom above that so a key is rejected only when it is genuinely
+// not one of ours, never because of an off-by-a-few.
+const TASK_KEY_MAX_LEN = TASK_KEY_MAX + 8;
 
 // Well-formed 'YYYY-MM-DD' — the key shape for snapshotHistory entries.
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -147,6 +159,7 @@ function buildSeedDoc() {
     },
     snapshot: clone(SNAPSHOT_SEED), // deep clone: SNAPSHOT_SEED.numbers is nested
     snapshotHistory: clone(SNAPSHOT_HISTORY_SEED), // rolling per-date numbers (v3); empty on first run
+    taskLog: clone(TASK_LOG_SEED), // closed-task grace log (v6); empty = nothing remembered yet
     grafana: { ...GRAFANA_SEED },
     reportOptions: clone(REPORT_OPTIONS_SEED), // deep clone: nested slides/kpiCards/labels
     automation: clone(AUTOMATION_SEED), // deep clone: nested labRecipients (v4); all switches off
@@ -222,6 +235,10 @@ function migrateSnapshotShape(doc) {
   backfillReportOptions(doc); // add reportOptions + any new slide/card subkeys + deltaMode
   if (!isPlainObject(doc.snapshotHistory)) doc.snapshotHistory = {}; // v3 rolling history
   backfillAutomation(doc); // v4 automation block (all switches default false)
+  // v6 closed-task grace log. Backfilled EMPTY on purpose (seeds TASK_LOG_SEED):
+  // an empty log means "nothing was ever shown open", which is exactly what makes
+  // the tracker's pre-existing مغلق rows stay off the deck.
+  if (!isPlainObject(doc.taskLog)) doc.taskLog = clone(TASK_LOG_SEED);
   return doc;
 }
 
@@ -313,10 +330,50 @@ function migrateV2toV5(doc) {
   return migrateV3toV5(doc);
 }
 
-/** v1 → v5: chain every transform so old docs land on the current schema. */
+/** v1 → v5: chain every transform so old docs land on v5. */
 function migrateV1toV5(doc) {
   migrateV1toV2(doc);
   return migrateV2toV5(doc);
+}
+
+/**
+ * v5 → v6: add the closed-task grace log (`taskLog`).
+ *
+ * The shape-softening pass backfills it as `{}` — and empty is not a placeholder,
+ * it IS the pre-ship exclusion mechanism: model/task-lifecycle.js shows a مغلق
+ * task one last time only if the log remembers it was shown non-closed earlier, so
+ * an upgraded install starts remembering nothing and the tracker's long tail of
+ * already-closed rows never floods the first report after the upgrade. Nothing
+ * else changes; the log fills itself from the next successful generation on.
+ */
+function migrateV5toV6(doc) {
+  migrateSnapshotShape(doc); // backfills doc.taskLog = {} (plus every earlier key)
+  doc.schemaVersion = 6;
+  return doc;
+}
+
+/** v4 → v6: run the v4→v5 transform, then v5→v6. */
+function migrateV4toV6(doc) {
+  migrateV4toV5(doc);
+  return migrateV5toV6(doc);
+}
+
+/** v3 → v6: run the v3→v5 chain, then v5→v6. */
+function migrateV3toV6(doc) {
+  migrateV3toV5(doc);
+  return migrateV5toV6(doc);
+}
+
+/** v2 → v6: run the v2→v5 chain, then v5→v6. */
+function migrateV2toV6(doc) {
+  migrateV2toV5(doc);
+  return migrateV5toV6(doc);
+}
+
+/** v1 → v6: chain every transform so the oldest docs land on the current schema. */
+function migrateV1toV6(doc) {
+  migrateV1toV5(doc);
+  return migrateV5toV6(doc);
 }
 
 /** Version-check + migrate/reset. Unknown versions reset to seeds. */
@@ -326,10 +383,11 @@ function migrate(doc) {
     return persist(buildSeedDoc());
   }
   if (doc.schemaVersion === SCHEMA_VERSION) return migrateSnapshotShape(doc);
-  if (doc.schemaVersion === 4) return persist(migrateV4toV5(doc));
-  if (doc.schemaVersion === 3) return persist(migrateV3toV5(doc));
-  if (doc.schemaVersion === 2) return persist(migrateV2toV5(doc));
-  if (doc.schemaVersion === 1) return persist(migrateV1toV5(doc));
+  if (doc.schemaVersion === 5) return persist(migrateV5toV6(doc));
+  if (doc.schemaVersion === 4) return persist(migrateV4toV6(doc));
+  if (doc.schemaVersion === 3) return persist(migrateV3toV6(doc));
+  if (doc.schemaVersion === 2) return persist(migrateV2toV6(doc));
+  if (doc.schemaVersion === 1) return persist(migrateV1toV6(doc));
   // Future schema bumps add forward-migration cases above this line.
   console.warn(
     `[misbar/store] unsupported schemaVersion ${doc.schemaVersion} ` +
@@ -478,13 +536,25 @@ export function exportSettings() {
 
 // ---- import -----------------------------------------------------------------
 
+// Schema versions an import accepts: every version migrate() can transform, plus
+// the current one. Extend this WITH the migration dispatcher — a version that can
+// be loaded from storage but not imported orphans that generation's backups.
+const IMPORTABLE_VERSIONS = new Set([1, 2, 3, 4, 5, SCHEMA_VERSION]);
+
 function validateImport(doc) {
   if (!isPlainObject(doc)) {
     throw new Error('ملف الإعدادات غير صالح: الجذر ليس كائناً.');
   }
-  // Accept v1/v2/v3 (transformed on import) or the current v4. Anything else is rejected.
-  if (doc.schemaVersion !== 1 && doc.schemaVersion !== 2 && doc.schemaVersion !== 3
-      && doc.schemaVersion !== SCHEMA_VERSION) {
+  // Accept every schema this store can migrate forward, plus the current one.
+  //
+  // BUG FIX (2026-08-04): this gate was a hand-written list that stopped at 3 and
+  // was never extended when v4 (automation) and v5 (definitions reset) shipped —
+  // so backups exported by v4/v5 installs were ALREADY being rejected as
+  // "unsupported", even though loadSettings() migrates those very docs happily.
+  // The set is now derived from the migration chain: anything the dispatcher in
+  // migrate() can transform is importable, and the merged doc is saved stamped
+  // with SCHEMA_VERSION.
+  if (!IMPORTABLE_VERSIONS.has(doc.schemaVersion)) {
     throw new Error(
       `إصدار المخطط غير مدعوم: ${doc.schemaVersion == null ? 'مفقود' : doc.schemaVersion}` +
         ` (المتوقع ${SCHEMA_VERSION}).`,
@@ -535,6 +605,37 @@ function validateImport(doc) {
           throw new Error(`قيمة غير رقمية في snapshotHistory["${date}"]: "${k}".`);
         }
       }
+    }
+  }
+  if ('taskLog' in doc) {
+    // v6 closed-task grace log. It needs its OWN block: snapshotHistory's validator
+    // above accepts only finite-NUMBER leaves, and every leaf here is a date string
+    // or null. Bounds are enforced (entry count, key length) so a hand-edited or
+    // hostile backup cannot bloat localStorage through this key.
+    const tl = doc.taskLog;
+    if (!isPlainObject(tl)) {
+      throw new Error('حقل taskLog غير صالح: يجب أن يكون كائناً.');
+    }
+    const entries = Object.entries(tl);
+    if (entries.length > TASK_LOG_LIMIT) {
+      throw new Error(`حقل taskLog كبير جداً: ${entries.length} عنصراً (الحد ${TASK_LOG_LIMIT}).`);
+    }
+    for (const [key, entry] of entries) {
+      if (key.length > TASK_KEY_MAX_LEN) {
+        throw new Error(`مفتاح طويل جداً في taskLog (الحد ${TASK_KEY_MAX_LEN} حرفاً).`);
+      }
+      if (!isPlainObject(entry)) {
+        throw new Error(`حقل taskLog["${key}"] غير صالح: يجب أن يكون كائناً.`);
+      }
+      if (!ISO_DATE_RE.test(String(entry.openOn))) {
+        throw new Error(`قيمة openOn غير صالحة في taskLog["${key}"]: يجب أن تكون تاريخاً بصيغة YYYY-MM-DD.`);
+      }
+      if (entry.closedOn != null && !ISO_DATE_RE.test(String(entry.closedOn))) {
+        throw new Error(`قيمة closedOn غير صالحة في taskLog["${key}"]: يجب أن تكون تاريخاً أو null.`);
+      }
+      // Extra fields are NOT an error — pickImportKeys runs the entry through
+      // sanitizeTaskLog, which keeps exactly {openOn, closedOn} and drops the rest
+      // (same tolerance the grafana/automation blocks give unknown subkeys).
     }
   }
   if ('grafana' in doc) {
@@ -660,11 +761,14 @@ function validateImport(doc) {
 
 // Only these top-level keys may ever be persisted — the "no PHI in storage"
 // invariant depends on unknown keys being discarded before the merge.
-const IMPORT_KEYS = ['schemaVersion', 'tatLookup', 'displayNames', 'scorecard', 'historicalConstants', 'snapshot', 'snapshotHistory', 'grafana', 'reportOptions', 'automation', 'cachedTracker'];
+const IMPORT_KEYS = ['schemaVersion', 'tatLookup', 'displayNames', 'scorecard', 'historicalConstants', 'snapshot', 'snapshotHistory', 'grafana', 'reportOptions', 'automation', 'cachedTracker', 'taskLog'];
 
 // The exact reportOptions subkeys that may be imported. Unknown slide/card keys
 // are dropped; label values must be strings. Keys mirror REPORT_OPTIONS_SEED.
-const REPORT_OPTION_SLIDE_KEYS = ['execFunnel', 'monthly', 'compliance', 'action', 'definitions'];
+// 'challenges' (v6) is the «التحديات والمخاطر» slide split out of the old
+// tasks-and-challenges slide; an ABSENT flag renders it (build-spec treats a
+// missing key as ON), so an install that never stored it keeps the full deck.
+const REPORT_OPTION_SLIDE_KEYS = ['execFunnel', 'monthly', 'compliance', 'action', 'challenges', 'definitions'];
 const REPORT_OPTION_CARD_KEYS = [
   'total', 'awaitingDispatch', 'awaitingResults', 'completed', 'rejected', 'lateNoResult', 'shippedNotReceived',
 ];
@@ -715,6 +819,15 @@ function pickImportKeys(doc) {
       picked[date] = clean;
     }
     out.snapshotHistory = picked;
+  }
+  if (isPlainObject(out.taskLog)) {
+    // sanitizeTaskLog (model/task-lifecycle.js) is the single owner of the entry
+    // shape — reuse it here rather than re-deriving the rules: entries without a
+    // valid openOn are dropped, closedOn is normalized to a date or null, and any
+    // extra field is discarded.
+    out.taskLog = sanitizeTaskLog(out.taskLog);
+  } else if ('taskLog' in out) {
+    delete out.taskLog; // not an object → keep this device's own log
   }
   if (isPlainObject(out.grafana)) {
     // Only the five known fields ever persist — unknown subkeys are discarded.
@@ -802,6 +915,29 @@ function deepMergeImportWins(base, over) {
 }
 
 /**
+ * Trim a POST-MERGE taskLog back to TASK_LOG_LIMIT.
+ *
+ * BUG FIX (2026-08-04): validateImport bounds the INCOMING log and pickImportKeys
+ * normalizes its ENTRY SHAPE, but neither bounds the RESULT — deepMergeImportWins
+ * unions the two maps per key. A device already at the cap (recordShownTasks caps
+ * every write at TASK_LOG_LIMIT) importing a backup with that many DIFFERENT keys
+ * stored 2× the cap, and its own next export was then rejected by validateImport
+ * ("حقل taskLog كبير جداً: 600 عنصراً") — export → import → export was not closed
+ * under the validator, and the key quietly doubled its localStorage footprint until
+ * the next successful generation pruned it.
+ *
+ * The cap RULE stays owned by model/task-lifecycle.js: recordShownTasks with no
+ * argument bag is its sanitize-and-prune-only entry point — an unusable reportDate
+ * returns prune(log, null), which drops nothing by date and only trims to
+ * TASK_LOG_LIMIT by most-recently-touched. Nothing is re-derived here.
+ * @param {*} log
+ * @returns {Object<string,{openOn:string, closedOn:string|null}>}
+ */
+function capTaskLog(log) {
+  return recordShownTasks(log, null);
+}
+
+/**
  * Names of the automation switches an import flips ON (absent/false -> true).
  * The import layer round-trips the automation block verbatim on purpose — that is
  * how a configured install is restored on another machine — so a backup CAN arm
@@ -874,6 +1010,13 @@ export function importSettings(jsonText) {
   if (isPlainObject(incoming.snapshot) && isPlainObject(merged.snapshot)
       && !('defVersion' in incoming.snapshot)) {
     delete merged.snapshot.defVersion;
+  }
+  // The taskLog merge is a per-key UNION, so two in-bounds logs can produce an
+  // out-of-bounds one. Re-apply the cap the validator enforces (see capTaskLog),
+  // and ONLY when the union actually overflowed — an in-bounds import must merge
+  // exactly as before, keeping even entries this device stored by hand.
+  if (isPlainObject(merged.taskLog) && Object.keys(merged.taskLog).length > TASK_LOG_LIMIT) {
+    merged.taskLog = capTaskLog(merged.taskLog);
   }
 
   const summary = {

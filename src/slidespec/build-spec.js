@@ -2,7 +2,12 @@
 // buildSpec(reportModel, { variant }) -> SlideSpec (see src/contracts.js).
 // One builder per slide. ALL geometry is in inches, derived by converting EMU->inches
 // (÷914400) from the original deck OOXML (تقرير مسبار 09072026.pptx).
-// SIX-slide deck (both variants): cover · execFunnel · monthly · compliance · action · thanks.
+// SEVEN-slide deck (both variants, since 2026-08-04):
+//   cover · execFunnel · monthly · compliance · action (المهام) · challenges (التحديات
+//   والمخاطر) · thanks.
+// The action slide used to carry the tasks table AND the support band AND the challenges +
+// risks tables; the user's 2026-08-04 review split the last three onto their own slide so
+// every block has room (tasks 15 → 18 rows, challenges/risks 3 → 10 rows each).
 // The definitions slide (منهجية الأرقام) is built on demand only — it is OPT-IN via
 // reportOptions.slides.definitions === true (user decision 2026-07-26: the default deck is
 // back to the simple 20-07 reference shape). The internal variant may still exceed six
@@ -17,7 +22,7 @@
 //   m.reportOptions.kpiCards[key] toggles the 7 exec KPI cards (row geometry repacks)
 //                                 + the OPT-IN 'turnaround' block on the monthly slide
 //   m.overrides[key]              per-run manual NUMBER overrides (suppresses that delta chip)
-import { COLORS as C, GEOM } from '../theme.js?v=v2026-07-23.7';
+import { COLORS as C, GEOM } from '../theme.js?v=v2026-08-04.1';
 
 // OPT-IN kpiCards KEYS. reportOptions.kpiCards normally reads "on unless === false"
 // (see buildExec's cardDefs filter). The keys in this set INVERT that: they render only
@@ -42,8 +47,19 @@ export const DEFAULT_LABELS = {
   titleExec: 'الملخص التنفيذي  •  رحلة الطلب',
   titleMonthly: 'الطلبات والنتائج الشهرية',
   titleCompliance: 'مقياس الالتزام',
-  titleAction: 'المهام والتحديات والمخاطر',
+  // SPLIT 2026-08-04 (user review): the old single slide crammed the tasks table, the
+  // الدعم المطلوب band and the challenges + risks tables onto one page, which capped the
+  // tasks at 15 rows in a 3.35in strip and the other two tables at THREE rows each. It is
+  // now two slides — 'action' (tasks only, full band) and 'challenges' — so titleAction
+  // drops the والتحديات والمخاطر half of its name and the new titleChallenges carries it.
+  titleAction: 'المهام',
+  titleChallenges: 'التحديات والمخاطر',
   titleActionCont: 'المهام — تتمة',
+  // Block subheads. These were hard-coded strings inside buildAction until the 2026-08-04
+  // split; they are registry keys now, like every other user-facing static string.
+  subheadTasks: 'المهام الحالية',
+  subheadChallenges: 'تحديات',
+  subheadRisks: 'المخاطر',
   // Cover + thanks
   coverTitle: 'تقرير مسبار اليومي',
   coverSubtitle: 'متابعة تقدم الطلبات وقياس جاهزية المختبرات',
@@ -120,29 +136,51 @@ export const DEFAULT_LABELS = {
   // finally means exactly what it says and no longer double-counts the rejected lines.
   monthlyRowIncomplete: 'النتائج غير المكتملة',
   monthlyRowCompletion: 'نسبة الاكتمال',
-  // Monthly BAR-CHART series names. These used to reuse the monthlyRow* keys, but the
-  // reference deck's table and chart no longer agree: the user retyped the TABLE rows to
-  // the 'فحوصات' family and left the chart's legend on the original 'طلبات' family
-  // (ppt/charts/chart1.xml c:ser c:tx = 'الطلبات' / 'النتائج المستلمة' /
-  // 'النتائج غير المكتملة' — a pristine chart part PowerPoint never rewrote). So the two
-  // are SPLIT into their own keys, each independently overridable.
-  chartMonthlyOrders: 'الطلبات',
-  // Renamed with monthlyRowResults (2026-07-28): the bar it labels is the COMPLETED
-  // count (result date OR rejected), so 'المستلمة' → 'المكتملة'. The 'النتائج' family is
-  // kept, which is the whole point of this key being split from the table's.
-  chartMonthlyResults: 'النتائج المكتملة',
+  // Monthly BAR-CHART series names. These are SPLIT from the monthlyRow* keys (each pair
+  // independently overridable) because the 20-07 reference deck's table and chart did not
+  // agree: the user had retyped the TABLE rows to the 'فحوصات' family in PowerPoint while
+  // the chart part (ppt/charts/chart1.xml c:ser c:tx = 'الطلبات' / 'النتائج المستلمة' /
+  // 'النتائج غير المكتملة') was pristine app output PowerPoint never rewrote, so the
+  // legend kept the original 'طلبات' family. That mismatch was PRESERVED here on purpose
+  // — it was the reference deck's own state.
+  // OVERRIDDEN 2026-08-04 (user reviewed the generated deck: "the chart legend must match
+  // the table"): the reference-preservation argument loses to the reader, who sees a
+  // legend and a table side by side on ONE slide naming the same three metrics
+  // differently. So chartMonthlyOrders 'الطلبات' → 'الفحوصات' (= monthlyRowOrders) and
+  // chartMonthlyResults 'النتائج المكتملة' → 'فحوصات مكتملة' (= monthlyRowResults, and
+  // character-identical to kpiCompleted / compCompleted / defMCompleted — one metric, one
+  // name, now on four slides). chartMonthlyIncomplete already matched the table row.
+  // The keys STAY split: an override of the table row must not silently retitle the
+  // chart series, and vice versa. Legend width impact is negligible — charts-svg.js
+  // (:256-275) estimates legend width per character and 'الفحوصات' is SHORTER than
+  // 'الطلبات' is wide by only ~1 glyph, while 'فحوصات مكتملة' is shorter than
+  // 'النتائج المكتملة' outright.
+  chartMonthlyOrders: 'الفحوصات',
+  chartMonthlyResults: 'فحوصات مكتملة',
   chartMonthlyIncomplete: 'النتائج غير المكتملة',
   // Monthly partition footnote (under the table) — the orders add-up identity. Since
   // 2026-07-28 rejected is INSIDE completed, so it is no longer a partition term: the
   // months split in TWO, and the footnote says so rather than listing المرفوضة as a
   // third addend (which would double-count it).
-  // RENDERED AGAIN since 2026-07-28 (it had been a dead key). '(تشمل المرفوضة)' is the
-  // monthly slide's ONLY disclosure that the metric changed meaning: نسبة الاكتمال is
+  // RENDERED AGAIN since 2026-07-28 (it had been a dead key). The 'تشمل المرفوضة' clause is
+  // the monthly slide's ONLY disclosure that the metric changed meaning: نسبة الاكتمال is
   // results/orders and `results` now follows the completed rule, which moves May 2026
   // from 72.4% to 85.7% and the overall figure from 68.3% to 70.7% on golden data — a
   // 13.3-point jump on one row that the slide otherwise explains nowhere (the exec slide
   // discloses it on the KPI card sublabel; this slide had no equivalent).
-  monthlyPartition: 'الفحوصات = المكتملة (تشمل المرفوضة) + غير المكتملة',
+  // REWORDED 2026-08-04 (user: this line "reads messed up"). It was
+  // 'الفحوصات = المكتملة (تشمل المرفوضة) + غير المكتملة' — a parenthetical dropped BETWEEN
+  // the two addends of an RTL equation. Bidi mirrors '(' and ')' and the neutral '=' / '+'
+  // take the paragraph direction, so the reader met a bracket in the middle of the sum and
+  // had to work out whether 'غير المكتملة' was still an addend or part of the aside.
+  // The equation is now COMPLETE AND UNBROKEN first, the aside follows after an em-dash
+  // separator, and both addends carry the same names as the table rows they point at
+  // (monthlyRowResults / monthlyRowIncomplete). Verified in the browser at 1280×720 in the
+  // deck's self-hosted Cairo: reading each operator's client rect left→right gives
+  // '— + =', i.e. right→left the reader meets '=' then '+' then the em-dash — the bidi
+  // ordering is correct and no bracket interrupts the sum. Measured 4.170in at 9pt against
+  // the 6.661in note box: ONE line, 2.49in of slack.
+  monthlyPartition: 'الفحوصات = فحوصات مكتملة + النتائج غير المكتملة — المكتملة تشمل المرفوضة',
   // Compliance (byLab) table headers — the 20-07 NUPCO reference deck's wording (user
   // decision 2026-07-26), plus the فحوصات مكتملة column added 2026-07-27. EIGHT columns.
   // Logical RTL order (right→left) as buildCompliance authors them:
@@ -269,8 +307,12 @@ export const LABEL_NAMES = {
   titleExec: 'عنوان شريحة الملخص التنفيذي',
   titleMonthly: 'عنوان شريحة الطلبات الشهرية',
   titleCompliance: 'عنوان شريحة مقياس الالتزام',
-  titleAction: 'عنوان شريحة المهام والتحديات',
+  titleAction: 'عنوان شريحة المهام',
+  titleChallenges: 'عنوان شريحة التحديات والمخاطر',
   titleActionCont: 'عنوان شريحة تتمة المهام',
+  subheadTasks: 'عنوان فرعي: المهام الحالية',
+  subheadChallenges: 'عنوان فرعي: تحديات',
+  subheadRisks: 'عنوان فرعي: المخاطر',
   coverTitle: 'عنوان الغلاف',
   coverSubtitle: 'العنوان الفرعي للغلاف',
   coverPreparedBy: 'سطر جهة الإعداد في الغلاف',
@@ -293,8 +335,8 @@ export const LABEL_NAMES = {
   monthlyRowRejected: 'صف الجدول الشهري: النتائج المرفوضة (غير مستخدم حالياً)',
   monthlyRowIncomplete: 'صف الجدول الشهري: النتائج غير المكتملة',
   monthlyRowCompletion: 'صف الجدول الشهري: نسبة الاكتمال',
-  chartMonthlyOrders: 'سلسلة الرسم الشهري: الطلبات',
-  chartMonthlyResults: 'سلسلة الرسم الشهري: النتائج المكتملة (تشمل المرفوضة)',
+  chartMonthlyOrders: 'سلسلة الرسم الشهري: الفحوصات',
+  chartMonthlyResults: 'سلسلة الرسم الشهري: فحوصات مكتملة (تشمل المرفوضة)',
   chartMonthlyIncomplete: 'سلسلة الرسم الشهري: النتائج غير المكتملة',
   compHash: 'عمود الالتزام: الرقم',
   compLab: 'عمود الالتزام: المختبر',
@@ -652,12 +694,34 @@ function buildExecFunnel(m) {
     rect(12.03, 5.451, 0.02, 0.685, C.slate600),
     text(12.25, 5.496, 0.95, 0.55, 'المختبرات', 12, { bold: true, color: C.slate900, align: 'right', valign: 'middle', rtl: true }),
   ];
+  // THE BARS CARRY NO TEXT (user decision 2026-08-04). The stage count has always sat
+  // outside the track in its own column (x 8.629, w 1.0); the DELTA chip used to be drawn
+  // INSIDE the bar at x 7.75, i.e. on top of the right-anchored coloured fill — deltaGreen
+  // (#2E7D32) on navy/blue/amber is unreadable, and only stages 2/3/4 ever render a chip
+  // (KPI_DELTA_KEYS suppresses 1 and 5), so the offence was intermittent as well.
+  // Both numbers now STACK in the count column: the count occupies the upper 0.30in of the
+  // row (valign bottom, so it keeps sitting on the bar's optical centre) and the chip goes
+  // directly beneath it at rowY+0.40, 9.5pt.
+  // THE 0.40 IS MEASURED, NOT CHOSEN. A row's pitch is 0.65in (0.686 on the last step) and
+  // the two LINE BOXES nearly fill it: self-hosted Cairo gives the 14pt count a 0.365in
+  // line box and the 9.5pt chip a 0.245in one — 0.610in of the 0.650in pitch, i.e. 0.040in
+  // of total slack to divide between the two gaps. With valign bottom the count's line box
+  // ends 0.068in below its box (flex-end + half-leading), so it runs rowY+0.003 → rowY+0.368;
+  // the chip's starts 0.015in above its box, so at rowY+0.40 it runs rowY+0.385 → rowY+0.630
+  // and the NEXT row's count starts at rowY+0.653. Both gaps are ≈0.02in and both are
+  // POSITIVE — a browser Range probe over the whole slide reports zero overlapping pairs,
+  // where the old 0.33 offset reported three (one per chip). Glyph ink is a good deal
+  // smaller than these line boxes, so the visual gap is wider than the numbers suggest.
+  // The column's x-range (8.629→9.629) formally overlaps the track's right edge (…→8.92),
+  // but both strings are CENTRE-aligned in the 1.0in box, so their ink starts at ≈8.97 —
+  // clear of the fill, as the count already was before this change (probe: zero text ink
+  // anywhere inside the track rectangle).
   rows.forEach((r, i) => {
     const fillW = Math.round((r.val / (maxV || 1)) * trackW * 1000) / 1000;
     els.push(
       rect(11.97, accentY[i], 0.06, 0.45, r.color),
       text(9.05, rowY[i], 2.85, 0.55, r.stage, 12, { bold: true, color: C.slate900, align: 'right', valign: 'middle', rtl: true }),
-      text(8.629, rowY[i], 1.0, 0.55, String(r.val), 14, { bold: true, color: r.color, align: 'center', valign: 'middle' }),
+      text(8.629, rowY[i], 1.0, 0.30, String(r.val), 14, { bold: true, color: r.color, align: 'center', valign: 'bottom' }),
       text(0.05, rowY[i], 2.9, 0.55, r.desc, 10, { color: C.slate500, align: 'right', valign: 'middle', rtl: true }),
       rect(trackX, barY[i], trackW, barH, C.bgLighter, { radius: 0.03 }),
       rect(trackX + trackW - fillW, barY[i], fillW, barH, r.color, { radius: 0.03 }),
@@ -667,7 +731,7 @@ function buildExecFunnel(m) {
     // overridden stage value suppresses its chip.
     const stageDelta = (KPI_DELTA_KEYS.has(r.key) || isOv(r.ov)) ? undefined : fmtDelta(d[r.key]);
     if (stageDelta) {
-      els.push(text(7.75, rowY[i], 0.75, 0.55, stageDelta, 10, { bold: true, color: C.deltaGreen, align: 'center', valign: 'middle' }));
+      els.push(text(8.629, rowY[i] + 0.40, 1.0, 0.22, stageDelta, 9.5, { bold: true, color: C.deltaGreen, align: 'center', valign: 'middle' }));
     }
   });
   // Delta-chip legend — only when at least one green "+N" chip is visible this run.
@@ -896,6 +960,18 @@ function buildCompliance(m) {
     : (r.resulted != null ? r.resulted : (r.onTime || 0) + (r.resultedLate || 0)) + (r.rejected || 0));
   const completedTot = lab.reduce((s, r) => s + completedOf(r), 0);
   const completedCell = (n) => (n > 0 ? { text: String(n), color: C.green, bold: true } : String(n || 0));
+  // LATE COLUMNS IN LIGHT RED (user request 2026-08-04: "the late numbers in light red").
+  // Applies to BOTH late columns — '↳ منها متأخرة' and 'نسبة الطلبات المتأخرة' — and to
+  // their totals-row cells, so the reader's eye lands on the same metric in both places.
+  // C.redSoft (#F87171) is the light tone the user asked for; on the white/bgLighter rows
+  // it measures ≈2.6:1 against #FFFFFF, under the 4.5:1 body-text bar, so every one of
+  // these cells is BOLD — the extra stroke weight is what keeps them legible at 10pt
+  // (and it is the same pairing the completed column already uses with C.green).
+  // These are BODY cells only. The HEADER row is untouched on purpose:
+  // test/compliance-completed.test.mjs:95-97 asserts that every header cell except
+  // compRejected carries NO per-cell fill, and this file may not edit that test. Styled
+  // body cells are safe — the test's cellText() unwraps { text, … } objects.
+  const lateCell = (s) => ({ text: s, color: C.redSoft, bold: true });
   const labRows = lab.map((r, i) => rev([
     String(i + 1),
     { text: r.lab, align: 'right' },
@@ -903,8 +979,8 @@ function buildCompliance(m) {
     completedCell(completedOf(r)),
     String(r.awaitingResult),
     String(r.rejected || 0),
-    String(r.late),
-    pctLab(r.latePct),
+    lateCell(String(r.late)),
+    lateCell(pctLab(r.latePct)),
   ]));
   // Totals row — '#' cell left blank (as in the reference deck), 'المجموع' in the lab column.
   const totalRow = rev([
@@ -914,8 +990,9 @@ function buildCompliance(m) {
     { text: String(completedTot), bold: true, fill: C.bgLighter, ...(completedTot > 0 ? { color: C.green } : {}) },
     { text: String(awaitTot), bold: true, fill: C.bgLighter },
     { text: String(rejTot), bold: true, fill: C.bgLighter },
-    { text: String(lateTot), bold: true, fill: C.bgLighter },
-    { text: pctLab(latePctTot), bold: true, fill: C.bgLighter },
+    // Totals row keeps the light-red treatment of the two late columns (see lateCell).
+    { text: String(lateTot), bold: true, fill: C.bgLighter, color: C.redSoft },
+    { text: pctLab(latePctTot), bold: true, fill: C.bgLighter, color: C.redSoft },
   ]);
 
   // colW: the 20-07 REFERENCE DECK's own gridCol widths, EMU→inches (÷914400), in logical
@@ -1019,7 +1096,7 @@ function buildCompliance(m) {
 }
 
 // ============================================================================
-// Slide 5 — Tasks + challenges + risks (variant changes the task ROWS)
+// Slide 5 — Tasks ('المهام') — variant changes the task ROWS
 // ============================================================================
 // Status chip fills as the 20-07 reference build had them — 'مغلق' is C.green (#16A34A);
 // the later switch to C.greenBright (#00B050) was a post-reference cosmetic change.
@@ -1059,12 +1136,19 @@ function tasksSubhead(title, y = 1.217) {
   ];
 }
 
-// Challenges/risks share a fixed slot: header + up to 3 body rows at rowH 0.28 from
-// y=5.88 -> bottom 7.00, clear of the footer border at 7.10. Beyond 3 rows we keep
-// 2 data rows and spend the 3rd slot on a '+ N أخرى' note (a separate italic text
-// element — grammar cells can't be italic/spanned), so the block bottom stays 7.00.
-const CR_CAP = 3;
-const CR_TABLE_Y = 5.88, CR_ROW_H = 0.28;
+// Challenges/risks geometry. Until the 2026-08-04 split these two tables shared the
+// BOTTOM STRIP of the action slide — header + at most THREE body rows at rowH 0.28 from
+// y 5.88 → 7.00 — because the tasks table and the support band owned everything above.
+// They now have their own slide (buildChallenges), which is what pays for the raise:
+// the support band ends at 2.35, the subheads sit at 3.05 and the tables run
+// y 3.42 → 6.72 at rowH 0.30, i.e. header + up to TEN body rows each (3.3in of band vs
+// the old 1.12in). Beyond CR_CAP rows we keep CR_CAP−1 data rows and spend the last slot
+// on a '+ N أخرى' note (a separate italic text element — grammar cells can't be
+// italic/spanned): a full table is header+10 rows = 6.72, a capped one is header+9 = 6.42
+// plus the note's own 0.30 slot = 6.72. Either way the block bottom is 6.72, well inside
+// the 7.05 content floor and clear of the footer border at 7.10.
+const CR_CAP = 10;
+const CR_TABLE_Y = 3.42, CR_ROW_H = 0.30;
 const capCrRows = (rows) => (rows.length <= CR_CAP
   ? { rows, hidden: 0 }
   : { rows: rows.slice(0, CR_CAP - 1), hidden: rows.length - (CR_CAP - 1) });
@@ -1074,11 +1158,16 @@ const crNote = (x, hidden) => text(
 );
 
 // ---- task-table pagination ---------------------------------------------------
-// The internal report's task list is now ALL لين actions (every status incl. مغلق),
-// which routinely exceeds the first slide's 15-row block. Rows 1..15 stay on the
-// action slide (its '+ N مهمة أخرى' note becomes a small 'يتبع…' continuation marker);
-// the remainder flows onto one or more full-band continuation slides.
-const TASK_CAP = 15;                       // first-slide task rows
+// The internal report's task list can be long (every non-closed لين action plus the
+// one-report grace row of anything newly closed), so rows past the first slide's block
+// flow onto full-band continuation slides ('المهام — تتمة'); the first slide gets a small
+// 'يتبع…' continuation marker instead of the old '+ N مهمة أخرى' drop note.
+// CAP RAISED 15 → 18 (2026-08-04): the action slide is TASKS ONLY now, so the table owns
+// the whole content band (TASKS_Y_TOP 1.15 → CONT_Y_BOT 6.95 = 5.80in) instead of the
+// 3.35in strip left over above the support band. 18 body rows + the header = 19 slots at
+// the 0.30 row cap = 5.70in, which fits with 0.10in to spare — a 19th row would force
+// rowH below the cap. Pagination stays as the overflow safety net it always was.
+const TASK_CAP = 18;                       // first-slide task rows
 const CONT_CAP = 30;                       // task rows per continuation slide (~30 at min rowH 0.18)
 // Two-line date RANGES (e.g. '25-06-2026\n16-07-2026') render ~38px of ink, which needs
 // rowH ≈ 0.44 to clear the next row. That cap only engages at ≤12 rows/slide
@@ -1088,6 +1177,10 @@ const CONT_CAP = 30;                       // task rows per continuation slide (
 const CONT_CAP_TWOLINE = 12;               // task rows per continuation slide when dates wrap
 const CONT_Y_TOP = 1.0, CONT_Y_BOT = 6.95; // full-band table window
 const CONT_BAND = CONT_Y_BOT - CONT_Y_TOP; // 5.95in
+// The FIRST tasks slide uses the same window, pushed 0.15in down to clear the
+// 'المهام الحالية' subhead (a continuation slide has no subhead, hence the two constants).
+const TASKS_Y_TOP = 1.15;
+const TASKS_BAND = CONT_Y_BOT - TASKS_Y_TOP; // 5.80in
 
 // One continuation slide: a full-band task table, same columns/colW as the first
 // slide. rowH = clamp(0.18, band/(rows+1), cap) — cap 0.34, raised to 0.44 when any
@@ -1107,21 +1200,25 @@ function buildActionCont(tasks, startIndex, contNo, L) {
 
 // Returns an ARRAY of slides: [action, action-cont-1, …]. buildSpec flattens it so the
 // continuation slides land right after the action slide and pick up sequential footers.
+//
+// TASKS ONLY since 2026-08-04 (user review). This builder used to stack FOUR blocks on
+// one page — tasks table (y 1.15, a 3.35in strip), the الدعم المطلوب red band (y 4.62),
+// and the challenges + risks tables (y 5.88, three rows each) — which is why the tasks
+// were capped at 15 rows in a strip and the other two tables at three rows. The support
+// band, challenges and risks moved to their own slide (buildChallenges below); the tasks
+// table now owns the full content band, exactly like a continuation slide does.
 function buildAction(m, variant) {
   const L = labelOf(m);
-  // Block 1 — tasks table. nupco = current only; internal appends the internal rows.
-  // Internal report = لين-category actions only; NUPCO = the remaining actions.
+  // Tasks table. Internal report = لين-category actions; NUPCO = the remaining actions.
   const taskRows = variant === 'nupco' ? m.tasksCurrent : m.tasksInternal;
   const n = taskRows.length;
   const CAP = TASK_CAP;
   const shown = Math.min(n, CAP);
   const hasNote = n > CAP;
-  // Reserve the marker slot (0.26") out of AREA up front, so the table rows shrink to
-  // fit and the 'يتبع…' marker lands ABOVE the support band (starts 4.62). Without this
-  // the fixed-height table pushed the marker to y=4.50 (bottom 4.74), overlapping the
-  // band. With it, markerY + 0.24 ≤ 4.60. AREA is untouched when there is no overflow,
-  // so the n≤15 layout is unchanged.
-  const AREA = hasNote ? 3.35 - 0.26 : 3.35;
+  // Reserve the 'يتبع…' marker slot (0.26in) out of the band up front, so the rows shrink
+  // to fit and the marker still lands inside the content floor: markerY + 0.24 ≤ 6.95.
+  // The band is untouched when there is no overflow, so the n ≤ CAP layout is unaffected.
+  const AREA = hasNote ? TASKS_BAND - 0.26 : TASKS_BAND;
   // Two-line cells (date RANGES like '25-06-2026\n16-07-2026') need ~0.42in of
   // Cairo ink — with the default 0.30 cap adjacent rows' dates collide. Raise
   // the cap only when multi-line content exists AND the row count leaves room.
@@ -1131,40 +1228,88 @@ function buildAction(m, variant) {
   const rowH = Math.max(0.18, Math.min(rowCap, AREA / (shown + 1)));
   const bodySize = rowH >= 0.26 ? 9.5 : rowH >= 0.21 ? 9 : 8;
   const headerSize = bodySize;
-  const table = taskTable(taskRows.slice(0, shown), { y: 1.15, rowH, bodySize, headerSize, L });
+  const table = taskTable(taskRows.slice(0, shown), { y: TASKS_Y_TOP, rowH, bodySize, headerSize, L });
 
   const els = [
     ...chrome(L('titleAction')),
-    ...tasksSubhead('المهام الحالية', 0.84),
+    ...tasksSubhead(L('subheadTasks'), 0.84),
     table,
   ];
   if (hasNote) {
-    // Truncation is no longer acceptable for the internal report: rows 16.. move to
+    // Truncation is not acceptable for the internal report: rows CAP+1.. move to
     // continuation slides, so the first slide gets a small 'يتبع…' (continued…) marker
     // instead of the old '+ N مهمة أخرى' drop note.
-    const markerY = 1.15 + (shown + 1) * rowH;
+    const markerY = TASKS_Y_TOP + (shown + 1) * rowH;
     els.push(text(0.641, markerY, 12.259, 0.24, 'يتبع…', bodySize, { italic: true, color: C.slate600, align: 'center', valign: 'middle', rtl: true }));
   }
 
-  // Block 2 — support required (full width red band, bottom 5.54, clear of the subhead
-  // dots below). The band must CONTAIN its ink: title + up to 3 right-aligned bullets
-  // fit the band height; a 4th+ item is folded into an inline '+ N أخرى' line so live
-  // data with many long bullets never overflows into the challenges/risks subheads.
-  const SUP_CAP = 3;
+  const slides = [{ id: 'action', bg: C.white, elements: els }];
+  // Continuation slides for rows CAP+1..n. Page size shrinks to CONT_CAP_TWOLINE when ANY
+  // continuation row carries a wrapping date range, so those taller rows never collide;
+  // otherwise ~30 single-line rows per slide. '#' continues from the row's absolute
+  // position (start), so it never restarts at 1.
+  const rest = taskRows.slice(CAP);
+  const restTwoLine = rest.some((t) =>
+    Object.values(t || {}).some((v) => typeof v === 'string' && v.includes('\n')));
+  const pageSize = restTwoLine ? CONT_CAP_TWOLINE : CONT_CAP;
+  for (let start = CAP, contNo = 1; start < n; start += pageSize, contNo++) {
+    slides.push(buildActionCont(taskRows.slice(start, start + pageSize), start, contNo, L));
+  }
+  return slides;
+}
+
+// ============================================================================
+// Slide 6 — Challenges & risks ('التحديات والمخاطر') — NEW 2026-08-04
+// ============================================================================
+// The three blocks that used to share the bottom of the action slide, each given the room
+// it needs: the الدعم المطلوب red band as a TOP block (y 1.0 → 2.35, up to SUP_CAP items
+// instead of 3), then the challenges and risks tables side by side (right/left as before)
+// from y 3.42 with CR_CAP rows each instead of three.
+// NOTE ON THE SLIDE TOGGLE: the key 'challenges' is deliberately NOT in this file's
+// OPT_IN_SLIDES, so buildSpec's on() helper reads an ABSENT reportOptions.slides.challenges
+// flag as ON (`slides[key] !== false`). Settings/store/seed registration of the new key is
+// owned elsewhere; until it lands, existing saved reportOptions (which have no such key)
+// render the slide, which is the intended default.
+function buildChallenges(m) {
+  const L = labelOf(m);
+  // Block 1 — support required, now a TOP block (was a 0.92in band squeezed at y 4.62).
+  // The band must CONTAIN its ink: title + up to SUP_CAP right-aligned bullets; a further
+  // item is folded into an inline '+ N أخرى' line so live data with many long bullets can
+  // never overflow onto the tables below. CAP RAISED 3 → 5 with the extra height.
+  // EVERY NUMBER BELOW IS MEASURED, not estimated (Range probe, 1280×720, self-hosted
+  // Cairo — .sl-text CLIPS at the box, so an under-tall box silently eats a descender):
+  //   · a 10.5pt line at lineSpacing 1.0 has a 0.146in pitch and 0.271in of ink, which
+  //     starts 0.063in ABOVE the text box's top edge.
+  //   · the 14pt title's ink runs 1.048 → 1.412 inside its (0.7, 1.06, ·, 0.34) box.
+  // So the bullets start at 1.52 (ink top 1.457 — the first attempt at 1.44 put ink at
+  // 1.377 and collided with the title by 0.034in, caught by the probe), and the worst
+  // case — SUP_CAP bullets PLUS the '+ N أخرى' line = 6 lines — ends at 2.458, inside
+  // both its text box (bottom 2.496) and the band (bottom 2.471). The subhead row below
+  // starts its ink at 2.99, so even the tallest band clears it by 0.52in.
+  // The band HEIGHT follows the line count instead of being pinned at the worst case: a
+  // 1.50in pane holding three short bullets reads as an unfinished empty block. Line count
+  // = the shown bullets + the '+ N أخرى' line when it exists (at least one, so an empty
+  // supportRequired still yields a sane band rather than a sliver).
+  const SUP_CAP = 5;
   const support = m.panels.supportRequired || [];
+  const supShown = Math.min(support.length, SUP_CAP);
+  const supLines = Math.max(1, supShown + (support.length > SUP_CAP ? 1 : 0));
   const supText = bullets(support.slice(0, SUP_CAP))
     + (support.length > SUP_CAP ? `\n+ ${support.length - SUP_CAP} أخرى` : '');
-  els.push(
-    rect(0.5, 4.62, 12.3, 0.92, C.bgRed, { radius: 0.06 }),
-    // Title + bullet typography are the 20-07 reference deck's: title 14pt at
-    // (0.7, 4.66, 11.9, 0.34), bullets 10.5pt at (0.9, 5.02, 11.7, 0.50) lineSpacing 1.0.
-    // They had been shrunk to 11.5pt / 9pt with lineSpacing 0.9 to buy room for a 4th+
-    // bullet; SUP_CAP above now handles that overflow instead, so the sizes revert.
-    text(0.7, 4.66, 11.9, 0.34, L('supportTitle'), 14, { bold: true, color: C.navy, align: 'right', valign: 'middle', rtl: true }),
-    text(0.9, 5.02, 11.7, 0.50, supText, 10.5, { color: C.slate900, align: 'right', valign: 'top', rtl: true, lineSpacing: 1.0 }),
-  );
+  const SUP_Y = 1.52, SUP_LINE = 0.146;
+  // Band bottom = the last line's ink bottom (SUP_Y − 0.063 + 0.271 + LINE×(n−1)) plus a
+  // 0.013in cushion; the text box gets 0.10in over the line stack so nothing is clipped.
+  const supBandH = (SUP_Y - 1.0) + supLines * SUP_LINE + 0.075;
+  const els = [
+    ...chrome(L('titleChallenges')),
+    rect(0.5, 1.0, 12.3, supBandH, C.bgRed, { radius: 0.06 }),
+    // Title + bullet typography are the 20-07 reference deck's: title 14pt, bullets 10.5pt
+    // at lineSpacing 1.0. Only the Y offsets and the box heights move with the band.
+    text(0.7, 1.06, 11.9, 0.34, L('supportTitle'), 14, { bold: true, color: C.navy, align: 'right', valign: 'middle', rtl: true }),
+    text(0.9, SUP_Y, 11.7, supLines * SUP_LINE + 0.10, supText, 10.5, { color: C.slate900, align: 'right', valign: 'top', rtl: true, lineSpacing: 1.0 }),
+  ];
 
-  // Blocks 3 & 4 — challenges (right) + risks (left), side-by-side, subheads at y 5.60.
+  // Blocks 2 & 3 — challenges (right) + risks (left), side-by-side, subheads at y 3.05.
   const chHeader = ['الإجراء الوقائي/الحل', 'التأثير', 'المسؤول', 'المشكلة', '#'];
   const chRows = m.challenges.map((c, i) => [
     { text: c.solution, align: 'right' },
@@ -1197,35 +1342,24 @@ function buildAction(m, variant) {
     rows: [rkHeader, ...rkCap.rows],
   };
 
+  const SUB_Y = CR_TABLE_Y - 0.37;   // 3.05 — subhead row, 0.37in above the table tops
   els.push(
     // challenges subhead (right half): red dot + '!' + 'تحديات'
-    rect(12.35, 5.58, 0.3, 0.3, C.red, { radius: 0.15 }),
-    text(12.35, 5.58, 0.3, 0.3, '!', 16, { bold: true, color: C.white, align: 'center', valign: 'middle' }),
-    text(6.80, 5.60, 5.50, 0.24, 'تحديات', 14, { bold: true, color: C.red, align: 'right', valign: 'middle', rtl: true }),
+    rect(12.35, SUB_Y - 0.02, 0.3, 0.3, C.red, { radius: 0.15 }),
+    text(12.35, SUB_Y - 0.02, 0.3, 0.3, '!', 16, { bold: true, color: C.white, align: 'center', valign: 'middle' }),
+    text(6.80, SUB_Y, 5.50, 0.24, L('subheadChallenges'), 14, { bold: true, color: C.red, align: 'right', valign: 'middle', rtl: true }),
     chTable,
     // risks subhead (left half): navy dot + '⚡' + 'المخاطر'
-    rect(6.15, 5.58, 0.3, 0.3, C.navy, { radius: 0.15 }),
-    text(6.15, 5.58, 0.3, 0.3, '⚡', 14, { bold: true, color: C.white, align: 'center', valign: 'middle' }),
-    text(0.5, 5.60, 5.60, 0.24, 'المخاطر', 14, { bold: true, color: C.navy, align: 'right', valign: 'middle', rtl: true }),
+    rect(6.15, SUB_Y - 0.02, 0.3, 0.3, C.navy, { radius: 0.15 }),
+    text(6.15, SUB_Y - 0.02, 0.3, 0.3, '⚡', 14, { bold: true, color: C.white, align: 'center', valign: 'middle' }),
+    text(0.5, SUB_Y, 5.60, 0.24, L('subheadRisks'), 14, { bold: true, color: C.navy, align: 'right', valign: 'middle', rtl: true }),
     rkTable,
   );
-  // Overflow notes occupy the 3rd body-row slot (bottom 7.00, ≤ 7.05).
+  // Overflow notes occupy the last body-row slot (bottom 6.72, well inside 7.05).
   if (chCap.hidden > 0) els.push(crNote(6.80, chCap.hidden));
   if (rkCap.hidden > 0) els.push(crNote(0.5, rkCap.hidden));
 
-  const slides = [{ id: 'action', bg: C.white, elements: els }];
-  // Continuation slides for rows 16..n. Page size shrinks to CONT_CAP_TWOLINE when ANY
-  // continuation row carries a wrapping date range, so those taller rows never collide;
-  // otherwise ~30 single-line rows per slide. '#' continues from the row's absolute
-  // position (start), so it never restarts at 1.
-  const rest = taskRows.slice(CAP);
-  const restTwoLine = rest.some((t) =>
-    Object.values(t || {}).some((v) => typeof v === 'string' && v.includes('\n')));
-  const pageSize = restTwoLine ? CONT_CAP_TWOLINE : CONT_CAP;
-  for (let start = CAP, contNo = 1; start < n; start += pageSize, contNo++) {
-    slides.push(buildActionCont(taskRows.slice(start, start + pageSize), start, contNo, L));
-  }
-  return slides;
+  return { id: 'challenges', bg: C.white, elements: els };
 }
 
 // ============================================================================
@@ -1270,7 +1404,7 @@ function buildDefinitions(m) {
 }
 
 // ============================================================================
-// Slide 6 — Thanks
+// Slide 7 — Thanks
 // ============================================================================
 function buildThanks(m) {
   const L = labelOf(m);
@@ -1309,6 +1443,12 @@ export function buildSpec(reportModel, { variant = 'internal' } = {}) {
     { key: 'monthly', build: () => [buildMonthly(m)] },
     { key: 'compliance', build: () => [buildCompliance(m)] },
     { key: 'action', build: () => buildAction(m, variant) },
+    // Challenges & risks — SPLIT OFF the action slide 2026-08-04. It is a NORMAL (default
+    // ON) middle slide: 'challenges' is not in OPT_IN_SLIDES, so on() reads an absent
+    // reportOptions.slides.challenges as ON. That matters for saved report options written
+    // before this key existed — they carry no flag and must keep rendering the content the
+    // action slide used to hold, not silently drop it.
+    { key: 'challenges', build: () => [buildChallenges(m)] },
     // Definitions ('منهجية الأرقام') — default OFF (opt-in, see OPT_IN_SLIDES); when the
     // user switches it on in Settings it renders just before thanks and participates in
     // the sequential footer numbering like the other middle slides.

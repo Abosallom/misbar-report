@@ -118,9 +118,10 @@ const BY_LAB = [
   { lab: 'Anwa  Medical Company',                 total: 7,   pipeline: 0,  awaitingResult: 7,  completed: 0,   onTime: 0,  resulted: 0,   resultedLate: 0,   rejected: 0,  late: 0,  latePct: 0 },
 ];
 
-// slide 7 — current (external) tasks. PLACEHOLDER content (public repo):
-// same row counts, statuses, and date shapes as the reference deck, but names
-// and task texts are generic — real content comes from the dropped Tracker.
+// slide 5 (المهام) — current (external) tasks, i.e. the NUPCO variant's rows.
+// PLACEHOLDER content (public repo): same row counts, statuses, and date shapes as the
+// reference deck, but names and task texts are generic — real content comes from the
+// dropped Tracker.
 const TASKS_CURRENT = [
   { num: 1, status: 'مستمر',      dueDate: 'يومي',       owner: 'مسؤول أ',        responsible: 'لين',        task: 'مهمة تشغيلية يومية تجريبية للمعاينة', category: '', hidden: false },
   { num: 2, status: 'مستمر',      dueDate: 'يومي',       owner: 'مسؤول ب',        responsible: 'نوبكو',      task: 'مهمة تشغيلية يومية تجريبية ثانية',    category: '', hidden: false },
@@ -132,16 +133,30 @@ const TASKS_CURRENT = [
   { num: 8, status: 'قيد التنفيذ', dueDate: '16-07-2026', owner: 'مسؤول ز / مسؤول ح', responsible: 'نوبكو/ لين', task: 'مهمة تجريبية قيد التنفيذ ٥',          category: '', hidden: false },
 ];
 
-// slide 8 — internal tasks (internalOnly; dropped in the NUPCO variant). PLACEHOLDER.
+// slide 5 (المهام) — INTERNAL variant rows (the NUPCO variant prints TASKS_CURRENT
+// instead; since 2026-07-19 the variant changes the task ROWS, not slide presence).
+// PLACEHOLDER content, but the SHAPE is deliberate:
+//  · category is 'لين' (2026-08-04, was 'داخلي'). This array feeds build-spec DIRECTLY,
+//    so nothing re-derives it — and the internal report is defined as the لين-category
+//    actions (drafts.js splits the Tracker on exactly that value). 'داخلي' was a string
+//    the real pipeline never produces, i.e. the fixture disagreed with the rule it stands
+//    in for.
+//  · the statuses now cover FOUR of the five STATUS_FILL chips (قيد التنفيذ · متأخر ·
+//    مغلق · مستمر) instead of five identical 'قيد التنفيذ' rows, so the tasks slide's
+//    status-chip colours are actually exercised by the preview and the smoke render.
+//    The مغلق row stands for a lifecycle GRACE row — a task closed since the previous
+//    report, shown once in green and then dropped.
+// Row COUNT is unchanged (5) on purpose: the tests that pin task counts read the real
+// Tracker samples, not this fixture.
 const TASKS_INTERNAL = [
-  { num: 1, status: 'قيد التنفيذ', dueDate: '16-07-2026', owner: 'مسؤول أ', responsible: 'لين', task: 'مهمة داخلية تجريبية ١', category: 'داخلي', hidden: false },
-  { num: 2, status: 'قيد التنفيذ', dueDate: '10-07-2026', owner: 'مسؤول أ', responsible: 'لين', task: 'مهمة داخلية تجريبية ٢', category: 'داخلي', hidden: false },
-  { num: 3, status: 'قيد التنفيذ', dueDate: '09-07-2026', owner: 'مسؤول ب', responsible: 'لين', task: 'مهمة داخلية تجريبية ٣', category: 'داخلي', hidden: false },
-  { num: 4, status: 'قيد التنفيذ', dueDate: '09-07-2026', owner: 'مسؤول ب', responsible: 'لين', task: 'مهمة داخلية تجريبية ٤', category: 'داخلي', hidden: false },
-  { num: 5, status: 'قيد التنفيذ', dueDate: '16-07-2026', owner: 'مسؤول أ', responsible: 'لين', task: 'مهمة داخلية تجريبية ٥', category: 'داخلي', hidden: false },
+  { num: 1, status: 'قيد التنفيذ', dueDate: '16-07-2026', owner: 'مسؤول أ', responsible: 'لين', task: 'مهمة داخلية تجريبية ١', category: 'لين', hidden: false },
+  { num: 2, status: 'قيد التنفيذ', dueDate: '10-07-2026', owner: 'مسؤول أ', responsible: 'لين', task: 'مهمة داخلية تجريبية ٢', category: 'لين', hidden: false },
+  { num: 3, status: 'متأخر',      dueDate: '09-07-2026', owner: 'مسؤول ب', responsible: 'لين', task: 'مهمة داخلية تجريبية ٣ متأخرة عن موعدها', category: 'لين', hidden: false },
+  { num: 4, status: 'مغلق',       dueDate: '09-07-2026', owner: 'مسؤول ب', responsible: 'لين', task: 'مهمة داخلية تجريبية ٤ أُغلقت منذ التقرير السابق', category: 'لين', hidden: false },
+  { num: 5, status: 'مستمر',      dueDate: 'يومي',       owner: 'مسؤول أ', responsible: 'لين', task: 'مهمة داخلية تجريبية ٥ مستمرة', category: 'لين', hidden: false },
 ];
 
-// slide 9 — challenges & risks. PLACEHOLDER.
+// slide 6 (التحديات والمخاطر) — challenges & risks. PLACEHOLDER.
 const CHALLENGES = [
   { id: 'c1', title: '', desc: 'تحدٍ تجريبي أول للمعاينة',  impact: 'متوسط', owner: 'جهة أ', status: '', solution: 'إجراء وقائي تجريبي أول' },
   { id: 'c2', title: '', desc: 'تحدٍ تجريبي ثانٍ للمعاينة', impact: 'حرج',   owner: 'جهة ب', status: '', solution: 'إجراء وقائي تجريبي ثانٍ' },
@@ -210,7 +225,7 @@ export const MOCK_REPORT_MODEL = {
   risks: RISKS,
   scorecard: SCORECARD_SEED,
   displayNames: {}, // BY_TEST already carries short chart labels
-  // Presentation options unset (undefined) → build-spec applies its defaults: all 6
+  // Presentation options unset (undefined) → build-spec applies its defaults: all 7
   // slides on, all 7 KPI cards on, DEFAULT_LABELS text. No manual number overrides.
   // Both fields are the byte-stable "defaults" case, so the mock render is unchanged.
   reportOptions: undefined,

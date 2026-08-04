@@ -1022,3 +1022,199 @@ test('v4 stored doc migrates to v5: the definitions default is reset once, then 
   store.saveSettings(s);
   assert.equal(store.loadSettings().reportOptions.slides.definitions, true, 'opt-in persists');
 });
+
+/* ------------------------------------------------------------------ *
+ * v6 — settings.taskLog (the task-lifecycle state)
+ *
+ * taskLog is a map of stable task key -> { openOn:'YYYY-MM-DD', closedOn:'YYYY-MM-DD'|null }.
+ * It is the same data class as cachedTracker (project-management content, never PHI).
+ * An EMPTY map is load-bearing: it is exactly what makes tasks that were already مغلق
+ * before this feature shipped stay off the deck, so the v5→v6 migration backfills {}
+ * rather than inventing entries.
+ * ------------------------------------------------------------------ */
+
+const LOG_A = { openOn: '2026-07-01', closedOn: null };
+const LOG_B = { openOn: '2026-06-20', closedOn: '2026-07-02' };
+
+test('first run seeds an EMPTY taskLog (the pre-ship exclusion mechanism)', () => {
+  fresh();
+  const s = store.loadSettings();
+  assert.equal(s.schemaVersion, 6, 'schema v6');
+  assert.equal(store.SCHEMA_VERSION, 6);
+  assert.ok(s.taskLog && typeof s.taskLog === 'object' && !Array.isArray(s.taskLog));
+  assert.deepEqual(s.taskLog, {}, 'empty on first run — no closed task has an open appearance yet');
+});
+
+test('v5 stored doc migrates to v6 and gains an empty taskLog, other fields preserved', () => {
+  const mock = fresh();
+  mock.setItem(
+    SETTINGS_KEY,
+    JSON.stringify({
+      schemaVersion: 5,
+      tatLookup: { 'CBC': 2 },
+      displayNames: { A: 'a' },
+      scorecard: [{ lab: 'X' }],
+      snapshotHistory: { '2026-07-08': { completed: 5 } },
+      reportOptions: { slides: { execFunnel: false }, kpiCards: {}, labels: {}, deltaMode: 'daily' },
+      automation: { ...AUTOMATION_SEED, enabled: true },
+    }),
+  );
+  const s = store.loadSettings();
+  assert.equal(s.schemaVersion, 6, 'migrated');
+  assert.deepEqual(s.taskLog, {}, 'backfilled empty');
+  assert.equal(s.tatLookup.CBC, 2, 'tatLookup preserved');
+  assert.deepEqual(s.displayNames, { A: 'a' });
+  assert.deepEqual(s.scorecard, [{ lab: 'X' }]);
+  assert.deepEqual(s.snapshotHistory, { '2026-07-08': { completed: 5 } });
+  assert.equal(s.reportOptions.slides.execFunnel, false, 'user slide choice untouched');
+  assert.equal(s.automation.enabled, true, 'automation untouched');
+  // Persisted, not just returned.
+  assert.equal(JSON.parse(mock.getItem(SETTINGS_KEY)).schemaVersion, 6);
+});
+
+test('v1/v2/v3/v4 stored docs chain all the way to v6 and gain the taskLog', () => {
+  for (const v of [1, 2, 3, 4]) {
+    const mock = fresh();
+    mock.setItem(SETTINGS_KEY, JSON.stringify({
+      schemaVersion: v,
+      tatLookup: { 'CBC': 2 },
+      snapshot: { asOf: '2026-07-01', prevCompleted: 11 },
+    }));
+    const s = store.loadSettings();
+    assert.equal(s.schemaVersion, 6, `v${v} → v6`);
+    assert.deepEqual(s.taskLog, {}, `v${v} chain backfills taskLog`);
+    assert.equal(s.tatLookup.CBC, 2, `v${v} keeps user data`);
+    // The rest of the chain still runs (v1's snapshot widening, v4→v5 definitions reset).
+    assert.equal(s.snapshot.numbers.completed, 11, `v${v} snapshot widened`);
+    assert.ok(s.automation && s.reportOptions && s.snapshotHistory);
+  }
+});
+
+test('a stored taskLog survives a same-version load and a save round-trip', () => {
+  const mock = fresh();
+  mock.setItem(SETTINGS_KEY, JSON.stringify({
+    schemaVersion: 6,
+    taskLog: { 'int|أ': { ...LOG_A }, 'ext|ب': { ...LOG_B } },
+  }));
+  const s = store.loadSettings();
+  assert.deepEqual(s.taskLog, { 'int|أ': LOG_A, 'ext|ب': LOG_B }, 'load must never blank an existing log');
+
+  // The pipeline/generate write path: mutate the doc and save it back.
+  s.taskLog['ext|ج'] = { openOn: '2026-07-09', closedOn: null };
+  store.saveSettings(s);
+  const back = store.loadSettings();
+  assert.deepEqual(back.taskLog, {
+    'int|أ': LOG_A, 'ext|ب': LOG_B, 'ext|ج': { openOn: '2026-07-09', closedOn: null },
+  });
+  assert.deepEqual(JSON.parse(mock.getItem(SETTINGS_KEY)).taskLog, back.taskLog, 'persisted');
+});
+
+test('importSettings rejects every malformed taskLog shape (and an oversized one)', () => {
+  fresh();
+  store.loadSettings();
+  const bad = [
+    [],                                                   // not an object
+    'nope',
+    42,
+    { 'int|a': 'nope' },                                  // entry not an object
+    { 'int|a': [] },
+    { 'int|a': null },
+    { 'int|a': { closedOn: null } },                      // openOn missing
+    { 'int|a': { openOn: '2026-7-1', closedOn: null } },  // openOn not ISO
+    { 'int|a': { openOn: 20260701, closedOn: null } },
+    { 'int|a': { openOn: '2026-07-01', closedOn: 'soon' } }, // closedOn neither ISO nor null
+    { 'int|a': { openOn: '2026-07-01', closedOn: 5 } },
+  ];
+  for (const taskLog of bad) {
+    assert.throws(
+      () => store.importSettings(JSON.stringify({ schemaVersion: 6, taskLog })),
+      /taskLog/,
+      `should reject ${JSON.stringify(taskLog)}`,
+    );
+  }
+  // Hard cap: a backup carrying more than 300 entries is not a backup this app wrote.
+  const huge = {};
+  for (let i = 0; i < 301; i += 1) huge[`int|k${i}`] = { openOn: '2026-07-01', closedOn: null };
+  assert.throws(
+    () => store.importSettings(JSON.stringify({ schemaVersion: 6, taskLog: huge })),
+    /taskLog/,
+    'over the 300-entry cap',
+  );
+  // …and exactly 300 is fine.
+  delete huge['int|k300'];
+  assert.doesNotThrow(() => store.importSettings(JSON.stringify({ schemaVersion: 6, taskLog: huge })));
+  assert.equal(Object.keys(store.loadSettings().taskLog).length, 300);
+});
+
+test('importSettings round-trips a valid taskLog with a per-key union', () => {
+  const mock = fresh();
+  mock.setItem(SETTINGS_KEY, JSON.stringify({
+    schemaVersion: 6,
+    taskLog: { 'int|أ': { ...LOG_A }, 'ext|ب': { ...LOG_B } },
+  }));
+  store.loadSettings();
+  store.importSettings(JSON.stringify({
+    schemaVersion: 6,
+    taskLog: {
+      'ext|ب': { openOn: '2026-06-20', closedOn: null },  // import wins on the shared key
+      'ext|ج': { openOn: '2026-07-05', closedOn: null },  // new key
+    },
+  }));
+  const s = store.loadSettings();
+  assert.deepEqual(s.taskLog, {
+    'int|أ': LOG_A,                                        // untouched local entry survives
+    'ext|ب': { openOn: '2026-06-20', closedOn: null },      // import wins
+    'ext|ج': { openOn: '2026-07-05', closedOn: null },
+  });
+});
+
+test('pickImportKeys sanitizes taskLog entries down to {openOn, closedOn}', () => {
+  fresh();
+  store.loadSettings();
+  store.importSettings(JSON.stringify({
+    schemaVersion: 6,
+    taskLog: { 'int|أ': { openOn: '2026-07-01', closedOn: null, note: 'junk', shownOn: 3 } },
+  }));
+  assert.deepEqual(store.loadSettings().taskLog, { 'int|أ': { openOn: '2026-07-01', closedOn: null } });
+});
+
+test('export → import → export is identity for the taskLog', async () => {
+  const mock = fresh();
+  mock.setItem(SETTINGS_KEY, JSON.stringify({
+    schemaVersion: 6,
+    taskLog: { 'int|أ': { ...LOG_A }, 'ext|ب': { ...LOG_B } },
+  }));
+  store.loadSettings();
+  const first = JSON.parse(await store.exportSettings().blob.text());
+  assert.deepEqual(first.taskLog, { 'int|أ': LOG_A, 'ext|ب': LOG_B }, 'the export carries the log');
+
+  fresh(); // a different device
+  store.loadSettings();
+  store.importSettings(JSON.stringify(first));
+  const second = JSON.parse(await store.exportSettings().blob.text());
+  assert.deepEqual(second.taskLog, first.taskLog, 'restored verbatim on the new device');
+});
+
+test('importSettings accepts v4 and v5 backups (version-gate fix)', () => {
+  // PRE-EXISTING BUG, fixed with this feature: validateImport gated on {1,2,3,current},
+  // so every schema bump silently orphaned the previous version's backups — v4 was
+  // already unimportable and v5 would have joined it. IMPORTABLE_VERSIONS = {1..5, current}.
+  for (const v of [1, 2, 3, 4, 5, 6]) {
+    fresh();
+    store.loadSettings();
+    assert.doesNotThrow(
+      () => store.importSettings(JSON.stringify({ schemaVersion: v, displayNames: { [`v${v}`]: 'x' } })),
+      `v${v} backup must import`,
+    );
+    assert.equal(store.loadSettings().displayNames[`v${v}`], 'x', `v${v} content landed`);
+    assert.equal(store.loadSettings().schemaVersion, 6, 'and the doc is stamped current');
+  }
+  assert.throws(
+    () => store.importSettings(JSON.stringify({ schemaVersion: 0 })),
+    /إصدار المخطط غير مدعوم|schemaVersion/,
+  );
+  assert.throws(
+    () => store.importSettings(JSON.stringify({ schemaVersion: 99 })),
+    /إصدار المخطط غير مدعوم|schemaVersion/,
+  );
+});

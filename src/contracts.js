@@ -73,7 +73,10 @@
  * @property {EngineOutput} kpi
  * @property {{supportRequired:string[], completedTasks:string[], plannedTasks:string[]}} panels - slide-2 bullets (auto-drafted, user-edited)
  * @property {TrackerTask[]} tasksCurrent  - slide 7 rows (status != مغلق, external)
- * @property {TrackerTask[]} tasksInternal - slide 8 rows (internal category)
+ * @property {TrackerTask[]} tasksInternal - internal-variant task rows (category 'لين').
+ *     Both task lists follow the SAME membership rule (model/drafts.js
+ *     splitTaskLists, user decision 2026-08-04): non-closed rows, plus a مغلق row
+ *     for exactly ONE report after it closes. Superseded: "the complete لين log".
  * @property {TrackerModel['challenges']} challenges
  * @property {TrackerModel['risks']} risks
  * @property {Settings['scorecard']} scorecard
@@ -136,6 +139,16 @@
  *     which selects the comparison baseline per reportOptions.deltaMode. An entry
  *     may carry an optional numeric `defVersion` LEAF alongside its numbers (same
  *     meaning as snapshot.defVersion); with no stamp the entry's own date decides.
+ * @property {Object<string,{openOn:string, closedOn:(string|null)}>} taskLog
+ *   - v6 closed-task grace log (model/task-lifecycle.js). Key = the list a row was
+ *     shown in ('ext' = tasksCurrent / نوبكو, 'int' = tasksInternal / لين) + '|' +
+ *     the whitespace-normalized task text, capped at 160 chars — tracker rows have
+ *     no stable id, so the text IS the identity. openOn = the report date the task
+ *     was last shown NON-closed (a reopen resets it); closedOn = the single report
+ *     date on which it was shown مغلق, or null while that grace is unspent.
+ *     Written from the FINAL model after a successful generation (automation
+ *     included), pruned to at most 300 entries. EMPTY MEANS "nothing remembered",
+ *     which is exactly what keeps pre-existing مغلق tracker rows off the deck.
  * @property {{baseUrl:string, accessToken:string, panelId:number, enabled:boolean}} grafana
  *   - live data source (Grafana PUBLIC-dashboard query API). baseUrl like
  *     'https://elab.seha.sa/hpapm'. Empty/disabled → CSV drop only. The access
@@ -144,7 +157,7 @@
  * @property {{excludeNoTat:boolean, slides:Object<string,boolean>, kpiCards:Object<string,boolean>, labels:Object<string,string>, deltaMode:('daily'|'weekly-sun'|'weekly-thu')}} reportOptions
  *   - presentation defaults: excludeNoTat drops rows with no TAT from ANY source
  *     (lookup + CSV fallback = null → 'No Match') before aggregation; slides keys
- *     'execFunnel'|'monthly'|'compliance'|'action'|'definitions' toggle the middle
+ *     'execFunnel'|'monthly'|'compliance'|'action'|'challenges'|'definitions' toggle the middle
  *     slides (cover/thanks always render; page numbers renumber) — 'definitions'
  *     ('منهجية الأرقام') defaults OFF, so the delivered deck is the simple six-slide
  *     shape; kpiCards keys mirror the deltas

@@ -14,10 +14,10 @@
 // (window.__misbarAutoRun / misbar:autorun / misbar:autodone — AUTOMATION.md §4)
 // so an unattended run paints its progress here and its produced files get
 // download rows. It never starts a second run on top of one it can see.
-import { el, toast, progressBar } from './components.js?v=v2026-07-23.7';
-import { triggerDownload } from './late-labs-section.js?v=v2026-07-23.7';
+import { el, toast, progressBar } from './components.js?v=v2026-08-04.1';
+import { triggerDownload } from './late-labs-section.js?v=v2026-08-04.1';
 
-const PIPELINE_URL = '../automation/pipeline.js?v=v2026-07-23.7';
+const PIPELINE_URL = '../automation/pipeline.js?v=v2026-08-04.1';
 const SHEET_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 /* ---- the ?auto= run bus published by main.js (AUTOMATION.md §4) ---------- */

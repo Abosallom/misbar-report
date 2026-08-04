@@ -107,6 +107,7 @@ export const STR = {
       monthly: 'الشهرية',
       compliance: 'الالتزام',
       action: 'المهام',
+      challenges: 'التحديات والمخاطر',
     },
     // Editable KPI overrides (per-run, never saved to settings).
     kpiEditTitle: 'المؤشرات (قابلة للتحرير)',

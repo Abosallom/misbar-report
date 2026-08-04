@@ -11,6 +11,11 @@ import assert from 'node:assert/strict';
 import {
   AUTOMATION_DEFAULTS, AUTOMATION_STEPS, runAutomation,
 } from '../src/automation/pipeline.js';
+// The lifecycle module is pure and tiny — injected through the same deps seam so the
+// taskLog cases assert the REAL key/entry shape rather than a re-implementation.
+import * as taskLifecycle from '../src/model/task-lifecycle.js';
+
+const { taskKey } = taskLifecycle;
 
 /* ------------------------------------------------------------------ *
  * Fixtures
@@ -39,9 +44,13 @@ function makeStore(settingsOver = {}) {
       ...settingsOver,
     },
     snapshots: [],
+    // Docs handed to saveSettings, so a case can assert what the run persisted.
+    // The stub deliberately stays minimal (loadSettings returns a doc with NO taskLog
+    // key): the lifecycle write must tolerate exactly this shape.
+    docs: [],
     updateSnapshot(s) { this.snapshots.push(s); },
     loadSettings() { return { snapshotHistory: {} }; },
-    saveSettings() {},
+    saveSettings(doc) { this.docs.push(doc); },
     setTat() {},
   };
 }
@@ -403,4 +412,68 @@ test('the snapshot fallback runs when the direct query fails with a TypeError', 
   assert.equal(statusOf(res, 'pull'), 'done');
   assert.equal(state.parsed.orders, ROWS);
   assert.equal(res.ok, true);
+});
+
+/* ------------------------------------------------------------------ *
+ * Task-lifecycle state (settings.taskLog)
+ *
+ * A successful automated run owes the lifecycle the same write the manual generate
+ * screen makes — otherwise the unattended path would keep showing a task as open
+ * forever, and a task closed overnight would never get its one grace report.
+ * The write reads the FINAL model (manual review edits are recorded exactly as
+ * published) and only happens once files were actually produced.
+ * ------------------------------------------------------------------ */
+
+const LIFECYCLE_ROWS = {
+  tasksCurrent: [{ task: 'مهمة خارجية', status: 'قيد التنفيذ', category: 'نوبكو', hidden: false }],
+  tasksInternal: [{ task: 'مهمة داخلية', status: 'مستمر', category: 'لين', hidden: false }],
+};
+
+// A model fake that DOES carry the two task arrays (the real report-model always does).
+const withTasksDeps = (over = {}) => fakeDeps({
+  loadReportModel: async () => ({
+    buildReportModel: ({ engineOutput, reportDate }) => ({
+      reportDate, kpi: engineOutput, ...LIFECYCLE_ROWS,
+    }),
+  }),
+  loadTaskLifecycle: async () => taskLifecycle,
+  ...over,
+});
+
+test('a successful run records the shown tasks into settings.taskLog', async () => {
+  const store = makeStore();
+  const res = await run({ store, deps: withTasksDeps() });
+  assert.equal(statusOf(res, 'generate'), 'done');
+
+  // loadDeltaBaseline is null in the fakes, so the snapshotHistory block writes
+  // nothing: every saveSettings here belongs to the lifecycle write.
+  assert.equal(store.docs.length, 1, 'exactly one settings write');
+  const doc = store.docs[0];
+  assert.deepEqual(doc.taskLog, {
+    [taskKey('ext', LIFECYCLE_ROWS.tasksCurrent[0])]: { openOn: '2026-07-20', closedOn: null },
+    [taskKey('int', LIFECYCLE_ROWS.tasksInternal[0])]: { openOn: '2026-07-20', closedOn: null },
+  }, 'both lists recorded under the run’s report date');
+  // The existing snapshot path is untouched by the new block.
+  assert.equal(store.snapshots.length, 1);
+  assert.equal(store.snapshots[0].asOf, '2026-07-20');
+});
+
+test('the minimal model fake (no task arrays) triggers NO taskLog write', async () => {
+  // Regression guard for the store stub the rest of this suite uses: a model without
+  // tasksCurrent/tasksInternal must not persist an empty log (that would look like a
+  // report in which every task vanished) and must not throw.
+  const store = makeStore();
+  const res = await run({ store });
+  assert.equal(statusOf(res, 'generate'), 'done');
+  assert.deepEqual(store.docs, [], 'nothing written when the model carries no task lists');
+  assert.equal(store.snapshots.length, 1, 'the snapshot path still ran');
+});
+
+test('a failed generate writes no taskLog at all', async () => {
+  const store = makeStore();
+  const deps = withTasksDeps({ produceReportFiles: async () => [] });
+  const res = await run({ store, deps });
+  assert.equal(statusOf(res, 'generate'), 'error');
+  assert.deepEqual(store.docs, [], 'no files produced → no lifecycle write');
+  assert.deepEqual(store.snapshots, [], 'and no snapshot, as before');
 });

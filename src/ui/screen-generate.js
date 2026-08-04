@@ -2,15 +2,15 @@
 // The file-producing core now lives in automation/pipeline.js (produceReportFiles) so
 // an unattended run makes byte-identical files; this screen drives it and paints the
 // very same progress bar, file rows and live slide thumbnails it always has.
-import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-07-23.7';
-import { el, progressBar, toast } from './components.js?v=v2026-07-23.7';
-import { resetRunData } from '../state.js?v=v2026-07-23.7';
-import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-07-23.7';
-import { autoDraft } from '../model/drafts.js?v=v2026-07-23.7';
-import { buildLateLabsSection, triggerDownload } from './late-labs-section.js?v=v2026-07-23.7';
+import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-08-04.1';
+import { el, progressBar, toast } from './components.js?v=v2026-08-04.1';
+import { resetRunData } from '../state.js?v=v2026-08-04.1';
+import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-08-04.1';
+import { autoDraft, splitTaskLists } from '../model/drafts.js?v=v2026-08-04.1';
+import { buildLateLabsSection, triggerDownload } from './late-labs-section.js?v=v2026-08-04.1';
 import {
   applyDeltaBaseline, buildFileDefs, produceReportFiles, recordRunSnapshot,
-} from '../automation/pipeline.js?v=v2026-07-23.7';
+} from '../automation/pipeline.js?v=v2026-08-04.1';
 
 async function tryImport(path) { try { return await import(path); } catch { return null; } }
 const isMobile = () => /iP(hone|ad|od)|Android/i.test(navigator.userAgent);
@@ -19,16 +19,17 @@ function fallbackModel(state, store) {
   const kpi = state.engineOutput || buildMockEngineOutput(store.settings);
   const tracker = state.parsed.tracker || buildMockTracker();
   const reportDate = state.reportDate || todayISO();
-  // CANONICAL task split via model/drafts.js (internal = فئة التقرير 'لين') —
-  // a local regex here once diverged and emptied the internal task table.
+  // CANONICAL task split via model/drafts.js (internal = فئة التقرير 'لين', plus the
+  // one-report grace for مغلق rows) — a local regex here once diverged and emptied
+  // the internal task table, so nothing is re-derived on this screen any more.
   let d;
-  try { d = autoDraft(tracker, reportDate); } catch { d = null; }
-  const visible = (tracker.tasks || []).filter((t) => !t.hidden && t.status !== 'مغلق');
-  // Canonical internal fallback: the complete لين log (hidden + مغلق included),
-  // same مفتوح→قيد التنفيذ display mapping autoDraft applies.
-  const linAll = (tracker.tasks || [])
-    .filter((t) => t.category === 'لين')
-    .map((t) => (t.status === 'مفتوح' ? { ...t, status: 'قيد التنفيذ' } : t));
+  try {
+    d = autoDraft(tracker, reportDate, { taskLog: store.settings && store.settings.taskLog });
+  } catch { d = null; }
+  // If autoDraft itself threw, splitTaskLists with an empty bag is the degradation:
+  // non-closed rows only (a subset of the real answer), never every closed task.
+  let split = { tasksCurrent: [], tasksInternal: [] };
+  try { split = splitTaskLists(tracker.tasks || [], {}); } catch { /* keep the empties */ }
   return {
     reportDate,
     kpi,
@@ -37,8 +38,8 @@ function fallbackModel(state, store) {
       completedTasks: (d && d.completedTasks) || [],
       plannedTasks: (d && d.plannedTasks) || [],
     },
-    tasksCurrent: (d && d.tasksCurrent) || visible,
-    tasksInternal: (d && d.tasksInternal) || linAll,
+    tasksCurrent: (d && d.tasksCurrent) || split.tasksCurrent,
+    tasksInternal: (d && d.tasksInternal) || split.tasksInternal,
     challenges: tracker.challenges || [],
     risks: tracker.risks || [],
     scorecard: (store.settings && store.settings.scorecard) || [],
@@ -169,7 +170,7 @@ export async function render(container, ctx) {
   // generated files' exec legend/chips match the review preview. recordSnapshot (below)
   // appends this run to snapshotHistory on success. Guarded → legacy engine deltas if the
   // module isn't present at runtime.
-  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-07-23.7');
+  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-08-04.1');
   const pickBaseline = dbMod && dbMod.pickDeltaBaseline;
   const recordSnapshot = dbMod && dbMod.recordSnapshot;
   applyDeltaBaseline(model, store, pickBaseline);
@@ -273,7 +274,18 @@ export async function render(container, ctx) {
     // Persist the FULL number snapshot — next run's "+N" chips (E6 rule) compare
     // every exec/journey number against these. Shared with automated runs so an
     // unattended generation feeds the same delta/history features.
-    recordRunSnapshot({ model, store, state, date, recordSnapshot });
+    // recordShownTasks also writes the closed-task grace log (v6) from this very
+    // model — guarded import, so an older/partial build just keeps the numbers path.
+    const tlMod = await tryImport('../model/task-lifecycle.js?v=v2026-08-04.1');
+    recordRunSnapshot({
+      model, store, state, date, recordSnapshot,
+      recordShownTasks: tlMod && tlMod.recordShownTasks,
+      // Per-variant grace consumption: only a variant that actually produced a file
+      // gets its task list recorded. Without this, an internal-only success would
+      // consume the NUPCO closures' one-shot appearance on a deck NUPCO never saw
+      // (produceReportFiles swallows per-file failures, so produced can be partial).
+      shippedVariants: produced.map((p) => p.def && p.def.variant).filter(Boolean),
+    });
 
     // Auto-download works on desktop; iOS/Safari may drop programmatic clicks
     // that fire without recent user activation, so it's attempted on desktop only

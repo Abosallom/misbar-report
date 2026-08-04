@@ -1,6 +1,6 @@
 // model/report-model.js — assemble the single ReportModel consumed by build-spec.
 // Auto-drafts from the tracker are shallow-merged with the reviewer's edits.
-import { autoDraft } from './drafts.js?v=v2026-07-23.7';
+import { autoDraft } from './drafts.js?v=v2026-08-04.1';
 
 /**
  * buildReportModel({engineOutput, tracker, settings, reportDate, edits}) -> ReportModel
@@ -13,7 +13,10 @@ import { autoDraft } from './drafts.js?v=v2026-07-23.7';
  * @returns {import('../contracts.js').ReportModel}
  */
 export function buildReportModel({ engineOutput, tracker, settings, reportDate, edits = {} }) {
-  const draft = autoDraft(tracker, reportDate);
+  // settings.taskLog drives the closed-task grace rule (model/task-lifecycle.js).
+  // Threading it here covers the automation path for free — the unattended run
+  // builds its model through this very function.
+  const draft = autoDraft(tracker, reportDate, { taskLog: settings && settings.taskLog });
 
   const draftPanels = {
     supportRequired: draft.supportRequired,

@@ -1,5 +1,8 @@
 // model/drafts.js — auto-draft the editable report content from the tracker.
 // Every output is a heuristic seed the user edits on the review screen.
+import {
+  LIST_EXTERNAL, LIST_INTERNAL, isGraceRow, taskKey,
+} from './task-lifecycle.js?v=v2026-08-04.1';
 
 const CLOSED = 'مغلق'; // closed/done
 const CAT_INTERNAL = 'لين'; // فئة التقرير value that routes a task to the internal slide (داخلي)
@@ -39,38 +42,96 @@ function lastDate(due) {
 const dayDiff = (a, b) => Math.round((a.getTime() - b.getTime()) / 86400000);
 
 /**
- * autoDraft(tracker, reportDate) -> draft panels + task splits.
+ * splitTaskLists(tasks, {taskLog, reportDate}) -> {tasksCurrent, tasksInternal}
  *
- * The two task lists follow DIFFERENT rules (user decision 2026-07-22):
- *  - tasksCurrent (NUPCO/نوبكو, external deck): non-closed AND scheduled/active,
- *    excluding the لين category. This is the published-deck filter (reproduces the
- *    09-07 split of 8 current tasks). UNCHANGED.
- *  - tasksInternal (داخلي, internal deck): the COMPLETE لين log — EVERY task whose
- *    category === 'لين', in tracker order, at every status (مغلق included) and
- *    including unscheduled rows and hidden (collapsed done-work) rows. 'All actions'
- *    means all: nothing is filtered out. The `hidden` flag stays on each object.
- * Status display mapping (مفتوح -> قيد التنفيذ) applies to internal rows too; the
- * مغلق status is kept verbatim (displayStatus only rewrites مفتوح).
+ * THE SINGLE OWNER of the task split + the closed-task lifecycle. Every caller —
+ * autoDraft, the review screen's fallback, the generate screen's fallback — goes
+ * through here, so the rule cannot drift again (two hand-written duplicates once
+ * did, and one of them emptied the internal table).
+ *
+ * Membership, per list, in TRACKER ORDER (one filter, nothing appended):
+ *  - non-closed rows: the NUPCO side additionally requires isScheduled (the
+ *    published-deck filter, unchanged since 2026-07-22); the internal side takes
+ *    EVERY non-closed لين row, scheduled or not.
+ *  - closed rows: included only as a GRACE row — the task was shown non-closed in
+ *    an earlier report and has not yet had its single closed appearance
+ *    (model/task-lifecycle.js isGraceRow) — AND only when no open twin with the
+ *    same text is already in that list, so "X قيد التنفيذ" and "X مغلق" can never
+ *    render side by side.
+ *    A grace row BYPASSES isScheduled deliberately: it already earned its slot,
+ *    and filtering it out would leave the grace unconsumed forever (the row would
+ *    pop back up months later). The real tracker has exactly this shape — a closed
+ *    نوبكو row whose due date is the prose 'يومان بعد تسليم…'.
+ * Called with an empty bag ({}), it degrades safely to non-closed-only — never to
+ * the old "show everything" behaviour.
+ *
+ * The `hidden` flag and every other field survive the {...t} spread; the status
+ * display mapping (مفتوح → قيد التنفيذ) is applied to both lists, leaving مغلق
+ * verbatim so a grace row renders green.
+ *
+ * @param {import('../contracts.js').TrackerTask[]} tasks
+ * @param {{taskLog?:Object, reportDate?:string}} [opts]
+ * @returns {{tasksCurrent:import('../contracts.js').TrackerTask[],
+ *            tasksInternal:import('../contracts.js').TrackerTask[]}}
+ */
+export function splitTaskLists(tasks, opts = {}) {
+  // Junk rows (null holes, stray primitives) are dropped up front so every filter
+  // below can read .category/.status straight off the object.
+  const rows = (Array.isArray(tasks) ? tasks : []).filter((t) => t && typeof t === 'object');
+  const log = (opts && opts.taskLog) || null;
+  const reportDate = (opts && opts.reportDate) || null;
+  const toDisplay = (t) => ({ ...t, status: displayStatus(t.status) });
+
+  const pick = (listId, inList, keepOpen) => {
+    const own = rows.filter(inList);
+    // Open keys FIRST: an included non-closed row suppresses its closed twin.
+    const openKeys = new Set();
+    for (const t of own) {
+      if (t.status !== CLOSED && keepOpen(t)) openKeys.add(taskKey(listId, t));
+    }
+    return own
+      .filter((t) => (t.status === CLOSED
+        ? isGraceRow(log, listId, t, reportDate) && !openKeys.has(taskKey(listId, t))
+        : keepOpen(t)))
+      .map(toDisplay);
+  };
+
+  return {
+    tasksCurrent: pick(LIST_EXTERNAL, (t) => t.category !== CAT_INTERNAL, isScheduled),
+    tasksInternal: pick(LIST_INTERNAL, (t) => t.category === CAT_INTERNAL, () => true),
+  };
+}
+
+/**
+ * autoDraft(tracker, reportDate, {taskLog}) -> draft panels + task splits.
+ *
+ * SUPERSESSION (user decision 2026-08-04): the 2026-07-22 rule "tasksInternal is
+ * the COMPLETE لين log — every task at every status, مغلق and hidden included" is
+ * REPLACED. Both variants now follow ONE rule — non-closed rows, plus a closed row
+ * for exactly ONE report after it closes ("…it applies for both داخلي and the
+ * other one"). The internal table therefore drops from 31 rows to the ~8 that are
+ * actually live, and the reader still sees each task's completion once.
+ * The split itself lives in splitTaskLists above; the NUPCO isScheduled filter is
+ * unchanged for non-closed rows.
  *
  * @param {import('../contracts.js').TrackerModel} tracker
  * @param {string} reportDate - 'YYYY-MM-DD'
+ * @param {{taskLog?:Object}} [opts] - settings.taskLog; OPTIONAL, so the existing
+ *   two-argument callers stay valid and simply get the non-closed-only degradation.
  * @returns {{supportRequired:string[], completedTasks:string[], plannedTasks:string[],
  *            tasksCurrent:import('../contracts.js').TrackerTask[],
  *            tasksInternal:import('../contracts.js').TrackerTask[]}}
  */
-export function autoDraft(tracker, reportDate) {
+export function autoDraft(tracker, reportDate, opts = {}) {
   const tasks = (tracker && tracker.tasks) || [];
   const challenges = (tracker && tracker.challenges) || [];
   const rd = parseISO(reportDate);
 
   // ---- Task slides ----
-  const toDisplay = (t) => ({ ...t, status: displayStatus(t.status) });
-  // Current (external/NUPCO): non-closed + scheduled, non-لين. UNCHANGED rule.
-  const active = tasks.filter((t) => t.status !== CLOSED && isScheduled(t));
-  const tasksCurrent = active.filter((t) => t.category !== CAT_INTERNAL).map(toDisplay);
-  // Internal (داخلي): the complete لين log — all statuses, unscheduled + hidden rows
-  // included, tracker order preserved. hidden flag survives via the {...t} spread.
-  const tasksInternal = tasks.filter((t) => t.category === CAT_INTERNAL).map(toDisplay);
+  const { tasksCurrent, tasksInternal } = splitTaskLists(tasks, {
+    taskLog: opts && opts.taskLog,
+    reportDate,
+  });
 
   // ---- supportRequired: solutions of OPEN (مفتوح) challenges ----
   const supportRequired = challenges

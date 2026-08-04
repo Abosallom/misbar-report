@@ -38,7 +38,12 @@ export const HISTORICAL_CONSTANTS_SEED = {
 // flipping this seed value cannot do it.
 export const REPORT_OPTIONS_SEED = {
   excludeNoTat: false,
-  slides: { execFunnel: true, monthly: true, compliance: true, action: true, definitions: false },
+  // 'challenges' is the «التحديات والمخاطر» slide split out of the old
+  // tasks-and-challenges slide (2026-08-04); it ships ON like the other content
+  // slides, and build-spec also renders it when the key is absent entirely.
+  slides: {
+    execFunnel: true, monthly: true, compliance: true, action: true, challenges: true, definitions: false,
+  },
   kpiCards: {
     total: true,
     awaitingDispatch: true,
@@ -81,6 +86,17 @@ export const AUTOMATION_SEED = {
 // install; the delta picker falls back to the legacy snapshot until it fills in.
 // recordSnapshot (model/delta-baseline.js) trims it to the most recent 45 dates.
 export const SNAPSHOT_HISTORY_SEED = {};
+
+// Closed-task lifecycle log (Settings.taskLog, v6): stable task key
+// ('ext'|'int' + '|' + normalized task text) → { openOn, closedOn|null }.
+// See model/task-lifecycle.js for the shape and the transitions.
+//
+// EMPTY IS THE MECHANISM, not just an initial value. A closed task is shown one
+// last time only if the log remembers it was shown non-closed earlier; a fresh
+// install (and every doc migrated to v6) therefore remembers nothing, so the
+// hundreds of already-مغلق rows sitting in the tracker never flood the first
+// report. The log fills itself from the FIRST generated report onward.
+export const TASK_LOG_SEED = {};
 
 // Snapshot of the 09-07-2026 published deck (E6 prompt): the previous report's
 // full number set, so the first real run's "+N" chips are correct. Keys mirror

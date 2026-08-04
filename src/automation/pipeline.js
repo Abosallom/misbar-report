@@ -14,9 +14,9 @@
 //
 // PHI rule unchanged: order rows live in `state` only. Nothing here logs a row
 // or writes one to storage — only aggregate numbers reach store.updateSnapshot.
-import { STR, todayISO, buildFileName } from '../i18n/ar.js?v=v2026-07-23.7';
-import { VARIANTS, normTest } from '../contracts.js?v=v2026-07-23.7';
-import { getGenLibs } from '../vendor-loader.js?v=v2026-07-23.7';
+import { STR, todayISO, buildFileName } from '../i18n/ar.js?v=v2026-08-04.1';
+import { VARIANTS, normTest } from '../contracts.js?v=v2026-08-04.1';
+import { getGenLibs } from '../vendor-loader.js?v=v2026-08-04.1';
 
 /* ------------------------------------------------------------------ *
  * Shared micro-helpers (same idioms the screens use)
@@ -90,12 +90,41 @@ export function applyDeltaBaseline(model, store, pickDeltaBaseline) {
   if ('anchored' in picked) model.deltaBaseline.anchored = !!picked.anchored;
 }
 
+/** Variant → the model task list THAT variant's deck publishes (build-spec.js:1213). */
+const VARIANT_TASK_LIST = Object.freeze({ nupco: 'tasksCurrent', internal: 'tasksInternal' });
+
+/**
+ * Normalize the "which variants actually shipped a file" hint into a Set — or null
+ * when the caller did not, or could not, say. null means "assume both shipped",
+ * which is byte-for-byte the behaviour this function had before the hint existed:
+ * a caller that omits it (screen-generate today) and a test double whose file defs
+ * carry no `variant` both keep recording both lists. Only a POSITIVE statement that
+ * a variant is missing withholds that variant's list.
+ */
+function shippedVariantSet(shippedVariants) {
+  if (!shippedVariants || typeof shippedVariants[Symbol.iterator] !== 'function') return null;
+  let raw;
+  try { raw = [...shippedVariants]; } catch { return null; }
+  const known = raw.filter((v) => Object.prototype.hasOwnProperty.call(VARIANT_TASK_LIST, v));
+  return known.length ? new Set(known) : null;
+}
+
 /**
  * Persist the FULL number snapshot + append it to snapshotHistory — the exact
  * store path (and warning strings) screen-generate has always used, shared so an
  * automated run feeds the delta/history features identically.
+ *
+ * ALSO records what this report SHOWED (`recordShownTasks`, the closed-task grace
+ * log) in a second, INDEPENDENT block below: the numbers write is unchanged and a
+ * failure in either one cannot take the other down.
+ * @param {{recordShownTasks?:Function, shippedVariants?:Iterable<string>}} args -
+ *   `recordShownTasks` is the task-lifecycle writer; omitted = numbers-only
+ *   behaviour, exactly as before. `shippedVariants` lists the deck variants that
+ *   actually produced at least one file (see shippedVariantSet); omitted = both.
  */
-export function recordRunSnapshot({ model, store, state, date, recordSnapshot } = {}) {
+export function recordRunSnapshot({
+  model, store, state, date, recordSnapshot, recordShownTasks, shippedVariants,
+} = {}) {
   try {
     const k = (model && model.kpi) || {};
     const numbers = {
@@ -126,6 +155,41 @@ export function recordRunSnapshot({ model, store, state, date, recordSnapshot } 
       if (state) state.settings = store.settings;
     }
   } catch (e) { console.warn('[generate] snapshot update failed', e); }
+
+  // ---- closed-task lifecycle (v6) — INDEPENDENT of the numbers block above ----
+  // Written from the FINAL model, so manual review edits are recorded exactly as
+  // published (a grace row the reviewer deleted keeps its grace for the next
+  // report — it was never actually shown). This runs only after files were really
+  // produced, and is NOT gated on numbers.completed: a report can legitimately
+  // publish tasks without a fresh number set.
+  // The length guard is what keeps the pipeline tests' minimal store/model stubs
+  // working — a model with no task arrays simply has nothing to record.
+  //
+  // PER VARIANT, not per run (review fix 2026-08-04): produceReportFiles skips a
+  // failed file instead of throwing, so a run can ship the internal pair while both
+  // نوبكو files time out. Recording BOTH lists then would stamp closedOn on every
+  // مغلق row of tasksCurrent — burning their single grace appearance on a deck the
+  // NUPCO audience never receives, and the next report prunes them for good. A
+  // variant that shipped nothing therefore contributes an EMPTY list: its entries
+  // keep openOn/closedOn:null and earn their grace on the next successful run.
+  try {
+    if (typeof recordShownTasks !== 'function' || !model || !date) return;
+    const shipped = shippedVariantSet(shippedVariants);
+    const listOf = (variant) => {
+      const rows = model[VARIANT_TASK_LIST[variant]];
+      if (!Array.isArray(rows)) return [];
+      return (shipped && !shipped.has(variant)) ? [] : rows;
+    };
+    const tasksCurrent = listOf('nupco');
+    const tasksInternal = listOf('internal');
+    if (!tasksCurrent.length && !tasksInternal.length) return; // nothing was shown
+    if (!store || typeof store.loadSettings !== 'function'
+        || typeof store.saveSettings !== 'function') return;
+    const doc = store.loadSettings();
+    doc.taskLog = recordShownTasks(doc.taskLog, { reportDate: date, tasksCurrent, tasksInternal });
+    store.saveSettings(doc);
+    if (state) state.settings = store.settings;
+  } catch (e) { console.warn('[generate] task lifecycle write failed', e); }
 }
 
 /* ------------------------------------------------------------------ *
@@ -168,7 +232,7 @@ function installFastTimers() {
 // Build the SlideSpec per VARIANT — the variant changes slide-5 content
 // (task rows), so one shared spec would leak internal tasks into NUPCO files.
 async function buildVariantSpec(model, variant) {
-  const mod = await tryImport('../slidespec/build-spec.js?v=v2026-07-23.7');
+  const mod = await tryImport('../slidespec/build-spec.js?v=v2026-08-04.1');
   const fn = pickFn(mod, ['buildSpec', 'build', 'makeSpec', 'toSpec']);
   if (!fn) return null;
   let spec = fn(model, { variant });
@@ -194,7 +258,7 @@ async function toBlob(result, kind) {
 // renderPptx(spec, {variant, PptxGenJS}) -> Promise<Blob>
 async function makePptx(spec, variant, libs) {
   if (!spec) return null;
-  const mod = await tryImport('../render/pptx-renderer.js?v=v2026-07-23.7');
+  const mod = await tryImport('../render/pptx-renderer.js?v=v2026-08-04.1');
   const fn = pickFn(mod, ['renderPptx', 'buildPptx', 'toPptx', 'makePptx', 'render']);
   if (!fn) return null;
   const r = await fn(spec, { variant, PptxGenJS: libs.PptxGenJS });
@@ -206,9 +270,9 @@ async function makePptx(spec, variant, libs) {
 // the host and before capture starts — screen-generate clones them into live thumbnails.
 async function makePdf(spec, variant, libs, host, onProgress, onSlides) {
   if (!spec) return null;
-  const rMod = await tryImport('../render/html-renderer.js?v=v2026-07-23.7');
+  const rMod = await tryImport('../render/html-renderer.js?v=v2026-08-04.1');
   const renderSlides = pickFn(rMod, ['renderSlides', 'renderSpec', 'renderHtml', 'render']);
-  const pMod = await tryImport('../render/pdf-export.js?v=v2026-07-23.7');
+  const pMod = await tryImport('../render/pdf-export.js?v=v2026-08-04.1');
   const exportPdf = pickFn(pMod, ['exportPdf', 'renderPdf', 'toPdf', 'buildPdf', 'render']);
   if (!renderSlides || !exportPdf) return null;
   host.innerHTML = '';
@@ -392,16 +456,17 @@ const PULL_REUSE_MS = 15000;
 
 /** Default heavy dependencies — every one overridable through `deps` (tests inject fakes). */
 const DEFAULT_DEPS = Object.freeze({
-  loadGrafana: () => import('../ingest/grafana.js?v=v2026-07-23.7'),
-  loadEngine: () => tryImport('../engine/engine.js?v=v2026-07-23.7'),
-  loadReportModel: () => import('../model/report-model.js?v=v2026-07-23.7'),
-  loadDeltaBaseline: () => tryImport('../model/delta-baseline.js?v=v2026-07-23.7'),
-  loadLateLabs: () => import('../export/late-labs.js?v=v2026-07-23.7'),
-  loadTatSuggest: () => tryImport('../ingest/tat-suggest.js?v=v2026-07-23.7'),
-  loadTatLoinc: () => tryImport('../seeds/tat-lookup.js?v=v2026-07-23.7'),
+  loadGrafana: () => import('../ingest/grafana.js?v=v2026-08-04.1'),
+  loadEngine: () => tryImport('../engine/engine.js?v=v2026-08-04.1'),
+  loadReportModel: () => import('../model/report-model.js?v=v2026-08-04.1'),
+  loadDeltaBaseline: () => tryImport('../model/delta-baseline.js?v=v2026-08-04.1'),
+  loadTaskLifecycle: () => tryImport('../model/task-lifecycle.js?v=v2026-08-04.1'),
+  loadLateLabs: () => import('../export/late-labs.js?v=v2026-08-04.1'),
+  loadTatSuggest: () => tryImport('../ingest/tat-suggest.js?v=v2026-08-04.1'),
+  loadTatLoinc: () => tryImport('../seeds/tat-lookup.js?v=v2026-08-04.1'),
   // Track 5's module; absent until it ships → the emails step reports 'skip'.
-  loadEmlDraft: () => tryImport('../export/eml-draft.js?v=v2026-07-23.7'),
-  loadDownload: () => tryImport('../ui/late-labs-section.js?v=v2026-07-23.7'),
+  loadEmlDraft: () => tryImport('../export/eml-draft.js?v=v2026-08-04.1'),
+  loadDownload: () => tryImport('../ui/late-labs-section.js?v=v2026-08-04.1'),
   produceReportFiles,
   now: () => Date.now(),
 });
@@ -638,8 +703,14 @@ export async function runAutomation({
     const produced = await D.produceReportFiles({
       model, ctx: ctx || { state: theState, store: theStore }, onProgress: null, host: null, signal,
     });
+    // Which VARIANTS actually shipped: a file whose render failed is skipped by
+    // produceReportFiles (logged, never thrown), so "some files landed" is not
+    // "both decks landed". The lifecycle write below is gated on this set.
+    const shippedVariants = new Set();
     for (const p of (produced || [])) {
-      if (p && p.blob) files.push({ name: (p.def && p.def.name) || '', blob: p.blob });
+      if (!p || !p.blob) continue;
+      files.push({ name: (p.def && p.def.name) || '', blob: p.blob });
+      if (p.def && p.def.variant) shippedVariants.add(p.def.variant);
     }
     // A stop pressed mid-generation is a cancellation, not a failure.
     if (!files.length) {
@@ -649,12 +720,17 @@ export async function runAutomation({
     }
 
     const db = await D.loadDeltaBaseline();
+    // Guarded import, like the delta module: a build without task-lifecycle.js
+    // records the numbers and simply keeps the previous grace log.
+    const tl = typeof D.loadTaskLifecycle === 'function' ? await D.loadTaskLifecycle() : null;
     recordRunSnapshot({
       model,
       store: theStore,
       state: theState,
       date: model.reportDate || todayISO(),
       recordSnapshot: db && db.recordSnapshot,
+      recordShownTasks: tl && tl.recordShownTasks,
+      shippedVariants,
     });
 
     if (opts.autoDownload) {
