@@ -14,10 +14,10 @@
 // (window.__misbarAutoRun / misbar:autorun / misbar:autodone — AUTOMATION.md §4)
 // so an unattended run paints its progress here and its produced files get
 // download rows. It never starts a second run on top of one it can see.
-import { el, toast, progressBar } from './components.js?v=v2026-08-04.2';
-import { triggerDownload } from './late-labs-section.js?v=v2026-08-04.2';
+import { el, toast, progressBar } from './components.js?v=v2026-08-05.1';
+import { triggerDownload } from './late-labs-section.js?v=v2026-08-05.1';
 
-const PIPELINE_URL = '../automation/pipeline.js?v=v2026-08-04.2';
+const PIPELINE_URL = '../automation/pipeline.js?v=v2026-08-05.1';
 const SHEET_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 /* ---- the ?auto= run bus published by main.js (AUTOMATION.md §4) ---------- */
@@ -114,13 +114,16 @@ const STATUS_VIEW = {
 const STATUS_TEXT = { idle: '', start: 'جارٍ التنفيذ…', done: 'تم', skip: 'تخطّي', error: 'فشل' };
 
 /* ---- weekly-report schedule: READ-ONLY note ------------------------------ */
-// The weekly report is issued on the two days of the Saudi work week the user
-// reports on: Sunday and Thursday. The REAL schedule is the launchd agent
-// com.misbar.weekly-report (scripts/com.misbar.weekly-report.plist.template,
-// AUTOMATION.md §3) — a web page cannot install a LaunchAgent, so this is a
-// label plus the command to copy, never an in-page scheduler. No toggle, no
-// persisted key: nothing here can drift out of sync with the installed agent.
-const WEEKLY_DAYS_TEXT = 'التقرير الأسبوعي: الأحد والخميس';
+// ONE weekly report, on THURSDAY (Talal, 2026-08-05 — was Sunday + Thursday).
+// Thursday is the LAST business day of the Saudi work week (Sun–Thu; weekend =
+// Friday + Saturday), so a Thursday run closes the whole just-ended week — the
+// same Sunday..report-day window the green delta chips now count activity over.
+// The REAL schedule is the launchd agent com.misbar.weekly-report
+// (scripts/com.misbar.weekly-report.plist.template, AUTOMATION.md §3) — a web
+// page cannot install a LaunchAgent, so this is a label plus the command to
+// copy, never an in-page scheduler. No toggle, no persisted key: nothing here
+// can drift out of sync with the installed agent.
+const WEEKLY_DAYS_TEXT = 'التقرير الأسبوعي: كل خميس';
 const WEEKLY_INSTALL_CMD = 'bash scripts/misbar-automation-install.sh weekly on 08:15';
 
 function weeklyScheduleNote() {

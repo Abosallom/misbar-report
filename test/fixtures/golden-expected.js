@@ -62,8 +62,12 @@ export const GOLDEN_EXPECTED = {
     // PARTITION: 10 + 12 + 159 + 437 = 618 = totals.total.
     completed: 437,
     rejected: 15, // own value; now a SUBSET of completed. {05:14, 06:1}
-    lateNoResult: 67,
-    latePct: 42.1,
+    // RE-BASELINED 2026-08-05 (rule 2, late = due today or overdue): 67 → 73.
+    // The 6 added rows are due exactly ON asOf 2026-07-09 with no result. The
+    // weekend flip (rule 1) alone left this at 67 on this fixture — every golden
+    // due date it moved is far in the past relative to asOf.
+    lateNoResult: 73,
+    latePct: 45.9, // 73/159; was 42.1 (67/159). Denominator awaitingResults unchanged.
   },
 
   // order-month, excl. cancelled; cancelled = additive (in-data + manual constant).
@@ -89,14 +93,17 @@ export const GOLDEN_EXPECTED = {
   // resulted rows excl. Rejected (n = 422 — NOT completed 437: a rejected row has
   // no result timestamp, so it cannot contribute a duration); 1-decimal rounding
   turnaround: {
-    overallActual: 12.0,
-    overallExpected: 7.0,
-    measuredCount: 422,
+    overallActual: 12.0,   // ACTUAL durations are measured between two timestamps — no due date involved, unchanged.
+    // RE-BASELINED 2026-08-05 (rule 1, Fri+Sat weekend): 7.0 → 7.4. `expected` is
+    // the CALENDAR span of the received→due window, and a window that straddles
+    // Fri+Sat is longer in calendar days than the same window over Sat+Sun.
+    overallExpected: 7.4,
+    measuredCount: 422,    // unchanged — the measured set is "has a result timestamp".
     perMonth: [
-      { month: '2026-04', actual: 20.3, expected: 4.4 },
-      { month: '2026-05', actual: 23.3, expected: 7.6 },
-      { month: '2026-06', actual: 9.4, expected: 7.0 },
-      { month: '2026-07', actual: 2.0, expected: 2.5 },
+      { month: '2026-04', actual: 20.3, expected: 4.4 },  // unchanged
+      { month: '2026-05', actual: 23.3, expected: 7.7 },  // expected was 7.6 (rule 1)
+      { month: '2026-06', actual: 9.4, expected: 7.4 },   // expected was 7.0 (rule 1)
+      { month: '2026-07', actual: 2.0, expected: 2.5 },   // unchanged
     ],
   },
 
@@ -108,23 +115,41 @@ export const GOLDEN_EXPECTED = {
   // FINER SPLIT of completed (all SUBSETS — never add these next to completed):
   //   resulted     = onTime + resultedLate (non-rejected rows with a result); sums to 422.
   //   resultedLate = resulted − onTime (issued after due + No-Match resulted); sums to 252.
-  //   rejected per lab: Advanced 14, Fal 1, others 0 (sums to 15). onTime sums to 170.
+  //   rejected per lab: Advanced 14, Fal 1, others 0 (sums to 15). onTime sums to 195
+  //   (was 170) and resultedLate to 227 (was 252) — RE-BASELINED 2026-08-05, rule 1.
   //   The old 5-way identity (pipeline + awaitingResult + onTime + resultedLate +
   //   rejected = total) is still exactly true — completed just groups its last three.
   // latePct = late / awaitingResult (0 when awaitingResult = 0); late is a subset of awaitingResult.
   byLab: [
-    { lab: 'Advanced Laboratory Services .Co', total: 301, pipeline: 11, awaitingResult: 89, completed: 201, onTime: 29, resulted: 187, resultedLate: 158, rejected: 14, late: 60, latePct: 67.4 },
-    { lab: 'Fal Specialized Medical Lab', total: 151, pipeline: 6, awaitingResult: 21, completed: 124, onTime: 75, resulted: 123, resultedLate: 48, rejected: 1, late: 2, latePct: 9.5 },
-    { lab: 'king Abdullaziz Medical city in Riyadh', total: 113, pipeline: 1, awaitingResult: 35, completed: 77, onTime: 42, resulted: 77, resultedLate: 35, rejected: 0, late: 3, latePct: 8.6 },
+  // RE-BASELINED 2026-08-05. `total`/`pipeline`/`awaitingResult`/`completed`/
+  // `resulted`/`rejected` are byte-identical to the previous baseline (THE
+  // INVARIANT). Only onTime/resultedLate (rule 1) and late/latePct (rule 2) move;
+  // onTime + resultedLate === resulted still holds for every lab.
+  //   onTime:       Advanced 29→31, Fal 75→98, KAMC 42, Eurofins 20, Saudi 4, Anwa 0
+  //   resultedLate: Advanced 158→156, Fal 48→25, KAMC 35, Eurofins 4, Saudi 7, Anwa 0
+  //   late:         Advanced 60→64, Fal 2, KAMC 3→4, Eurofins 0, Saudi 2→3, Anwa 0
+    { lab: 'Advanced Laboratory Services .Co', total: 301, pipeline: 11, awaitingResult: 89, completed: 201, onTime: 31, resulted: 187, resultedLate: 156, rejected: 14, late: 64, latePct: 71.9 },
+    { lab: 'Fal Specialized Medical Lab', total: 151, pipeline: 6, awaitingResult: 21, completed: 124, onTime: 98, resulted: 123, resultedLate: 25, rejected: 1, late: 2, latePct: 9.5 },
+    { lab: 'king Abdullaziz Medical city in Riyadh', total: 113, pipeline: 1, awaitingResult: 35, completed: 77, onTime: 42, resulted: 77, resultedLate: 35, rejected: 0, late: 4, latePct: 11.4 },
     { lab: 'Eurofins clinical', total: 27, pipeline: 3, awaitingResult: 0, completed: 24, onTime: 20, resulted: 24, resultedLate: 4, rejected: 0, late: 0, latePct: 0 },
-    { lab: 'Saudi Diagnostics Limited Company', total: 19, pipeline: 1, awaitingResult: 7, completed: 11, onTime: 4, resulted: 11, resultedLate: 7, rejected: 0, late: 2, latePct: 28.6 },
+    { lab: 'Saudi Diagnostics Limited Company', total: 19, pipeline: 1, awaitingResult: 7, completed: 11, onTime: 4, resulted: 11, resultedLate: 7, rejected: 0, late: 3, latePct: 42.9 },
     { lab: 'Anwa Medical Company', total: 7, pipeline: 0, awaitingResult: 7, completed: 0, onTime: 0, resulted: 0, resultedLate: 0, rejected: 0, late: 0, latePct: 0 },
   ],
-  byLabTotals: { total: 618, pipeline: 22, awaitingResult: 159, completed: 437, onTime: 170, resulted: 422, resultedLate: 252, rejected: 15, late: 67, latePct: 42.1 },
+  // onTime 170→195, resultedLate 252→227 (rule 1); late 67→73, latePct 42.1→45.9
+  // (rule 2). Everything else identical.
+  byLabTotals: { total: 618, pipeline: 22, awaitingResult: 159, completed: 437, onTime: 195, resulted: 422, resultedLate: 227, rejected: 15, late: 73, latePct: 45.9 },
 
   // curated catalog restricted; a row appears when late>0 OR onTime>0. Sorted
   // late-ascending (ties: reverse catalog order); onTime rides that order.
-  // late sums to 56 (unchanged); catalog onTime ("success") sums to 58.
+  // RE-BASELINED 2026-08-05 (rules 1+2), re-derived by running the engine:
+  //   • late sums 56 → 58; catalog onTime ("success") sums 58 → 60.
+  //   • ONE NEW ROW: 17-HYDROXYPROGESTERONE (late 1, onTime 0) — a row that was
+  //     on time under the Sat/Sun weekend is late under Fri+Sat, so the test
+  //     crosses the "late>0 OR onTime>0" threshold and enters the table.
+  //   • TREPONEMA PALLIDUM late 2 → 3 ; OLIGOCLONAL onTime 0 → 1 ;
+  //     Kappa light chains onTime 1 → 2.
+  //   • The row ORDER shifts with the new late values (late-ascending):
+  //     TREPONEMA moves down past KIDNEY STONE and IMMUNOFIXATION's neighbours.
   byTest: [
     { testName: 'SEND OUT TEST BK VIRUS MOLECULAR DETECTION QUANTITATIVE PCR PLASMA', late: 0, onTime: 20 },
     { testName: 'SEND OUT TEST MYELIN OLIGODENDROCYTE GLYCOPROTEIN (MOG) ABS IGG IFT BLOOD', late: 0, onTime: 1 },
@@ -134,18 +159,20 @@ export const GOLDEN_EXPECTED = {
     { testName: 'SEND OUT TEST HLA PRA SCREENING SERUM ELISA', late: 1, onTime: 2 },
     { testName: 'SEND OUT TEST HLA PRA II SINGLE ANTIGEN SERUM ELISA', late: 1, onTime: 3 },
     { testName: 'SEND OUT TEST HLA PRA I SA SINGLE ANTIGEN SERUM ELISA', late: 1, onTime: 3 },
-    { testName: 'SEND OUT TEST OLIGOCLONAL BANDING CSF AND SERUM TEST IMMUNOBLOT (IB)', late: 2, onTime: 0 },
+    // NEW row (2026-08-05 re-baseline) — was absent when its only row was on time.
+    { testName: 'SEND OUT TEST 17-HYDROXYPROGESTERONE BLOOD LC-MS/MS', late: 1, onTime: 0 },
+    { testName: 'SEND OUT TEST OLIGOCLONAL BANDING CSF AND SERUM TEST IMMUNOBLOT (IB)', late: 2, onTime: 1 },
     { testName: 'SEND OUT TEST GAD65 AB ASSAY SERUM RADIOIMMUNOASSAY (RIA)', late: 2, onTime: 0 },
-    { testName: 'SEND OUT TEST TREPONEMA PALLIDUM (VDRL) ABS IGG IGM BLOOD EIA', late: 2, onTime: 0 },
     { testName: 'SEND OUT TEST KIDNEY STONE ANALYSIS INFRARED SPECTRUM ANALYSIS', late: 2, onTime: 0 },
+    { testName: 'SEND OUT TEST TREPONEMA PALLIDUM (VDRL) ABS IGG IGM BLOOD EIA', late: 3, onTime: 0 },
     { testName: 'SEND OUT TEST IMMUNOFIXATION 24 HOUR URINE TURBIDIMETRIC IMMUNOASSAY', late: 3, onTime: 4 },
     { testName: 'SEND OUT TEST COPPER BLOOD DRC-ICP-MS', late: 4, onTime: 1 },
     { testName: 'SEND OUT TEST URINE ELECTROPHORESIS PROTEIN ELECTROPHORESIS 24 HOUR URINE', late: 7, onTime: 9 },
     { testName: 'SEND OUT TEST IMMUNOGLOBULIN FREE LIGHT CHAIN 24 HOURS URINE NEPHELOMETRY', late: 15, onTime: 4 },
-    { testName: 'Kappa light chains.free/Lambda light chains.free [Mass Ratio] in Serum', late: 15, onTime: 1 },
+    { testName: 'Kappa light chains.free/Lambda light chains.free [Mass Ratio] in Serum', late: 15, onTime: 2 },
   ],
-  byTestSum: 56,
-  byTestOnTimeSum: 58,
+  byTestSum: 58,        // was 56 (rules 1+2)
+  byTestOnTimeSum: 60,  // was 58 (rule 1)
 
   unmatchedTests: [], // every test in the data resolves in the TAT lookup
 

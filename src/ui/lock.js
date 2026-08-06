@@ -59,7 +59,7 @@ export const SEAL_URL = 'data/access.seal';
 /** Per-user account file, same relative-URL rules as SEAL_URL. PUBLIC by nature. */
 export const USERS_URL = 'data/users.json';
 /** Track 1's auth module. Imported lazily so its absence degrades, not breaks. */
-export const AUTH_MODULE_URL = '../auth/users.js?v=v2026-08-04.2';
+export const AUTH_MODULE_URL = '../auth/users.js?v=v2026-08-05.1';
 
 /** Longest display username we will store or paint. Guards the app bar chip. */
 const MAX_USERNAME = 64;

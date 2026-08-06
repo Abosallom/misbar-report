@@ -6,21 +6,31 @@
 // formulas (test/fixtures/summary-tables.json) and verified row-by-row against
 // the 628 cached rows in test/fixtures/golden-orders.js. Key semantics:
 //   • StdTAT   = XLOOKUP(Test → lookup); miss → CSV "TAT - Days" fallback.
-//   • DueDate  = WORKDAY(INT(Received), StdTAT)  (excl. start, skip weekends).
+//   • DueDate  = workday(INT(Received), StdTAT)  (excl. start, skip weekends).
 //   • Delay    = asOf − DueDate  (whole days).  asOf mirrors the sheet's TODAY().
 //   • Status cascade (the sheet's "T" column, incl. resulted rows):
 //       Order Cancelled → Cancelled ; Result Rejected → Rejected ;
 //       no Received → In Progress / Not Received ; no StdTAT → No Match ;
-//       Delay ≤ 0 → On Time ; else → Late.
+//       Delay < 0 → On Time ; else → Late.
 //     NB: a resulted row is still labelled On Time / Late off asOf−Due, exactly
 //     as the workbook does (verified against every _cachedStatus).
+//
+// TWO STAKEHOLDER RULE CHANGES (Talal, 2026-08-05) DIVERGE FROM THE WORKBOOK:
+//   1. WEEKEND = Friday+Saturday (business days Sun–Thu), not Excel's Sat+Sun.
+//      See src/engine/workday.js — every DueDate above is computed under the
+//      Saudi weekend now, so 189/628 golden due dates moved.
+//   2. LATE = due TODAY or overdue (Delay ≥ 0), was strictly past due (Delay > 0).
+//      "Due today with no result" means less than 24h of TAT remain and nothing
+//      has come back, which the business counts as late.
+// Both changes make the golden workbook's _cachedDue/_cachedDelay/_cachedStatus
+// an OUT-OF-DATE external oracle for due-derived fields — deliberately.
 
-import { normTest, normFacility } from '../contracts.js?v=v2026-08-04.2';
+import { normTest, normFacility } from '../contracts.js?v=v2026-08-05.1';
 import {
   parseDateTime, toEpochDay, workday, dayDiff, calDaysBetween, monthKey,
-} from './workday.js?v=v2026-08-04.2';
-import { buildTatIndex, resolveTat, CHART_TEST_CATALOG } from './tat.js?v=v2026-08-04.2';
-import { dedupeRows } from './dedupe.js?v=v2026-08-04.2';
+} from './workday.js?v=v2026-08-05.1';
+import { buildTatIndex, resolveTat, CHART_TEST_CATALOG } from './tat.js?v=v2026-08-05.1';
+import { dedupeRows } from './dedupe.js?v=v2026-08-05.1';
 
 export const STATUS = Object.freeze({
   CANCELLED: 'Cancelled',
@@ -64,12 +74,25 @@ function enrichRow(row, tatIndex, asOfMs, opts) {
   else if (rejected) status = STATUS.REJECTED;
   else if (receivedMs == null) status = STATUS.IN_PROGRESS;
   else if (tat == null) status = STATUS.NO_MATCH;
-  else if (delay <= 0) status = STATUS.ON_TIME;
+  // LATE BOUNDARY (Talal 2026-08-05): due TODAY counts as LATE, not On Time.
+  // Was `delay <= 0 → ON_TIME` (strictly-past-due), now `delay < 0` — i.e. only
+  // a row whose due day is still in the FUTURE is On Time here.
+  else if (delay < 0) status = STATUS.ON_TIME;
   else status = STATUS.LATE;
 
   // "success" = resulted within TAT, DAY-granular: non-cancelled, non-rejected
   // row that has both a Result report date and a Due date, with the resulted
   // calendar day on or before the due calendar day. Independent of asOf/status.
+  //
+  // THE ASYMMETRY, ON PURPOSE (Talal 2026-08-05) — the due day belongs to the
+  // lab until it ends:
+  //   • RESULTED on the due day  → onTime  (`resulted ≤ due`, ≤ kept below): the
+  //     lab delivered inside its TAT, the last day included.
+  //   • UNRESULTED on the due day → LATE   (`delay < 0` cascade above): fewer
+  //     than 24h of TAT remain and nothing has come back, which is exactly the
+  //     "TAT below 24h AND no result" alarm the business asked for.
+  // So the same calendar day reads as a success for a delivered test and as a
+  // late one for an undelivered test. That is intended, not a boundary bug.
   const onTime = !cancelled && !rejected && resultedMs != null && dueMs != null
     && toEpochDay(resultedMs) <= toEpochDay(dueMs);
 

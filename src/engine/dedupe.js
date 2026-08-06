@@ -30,8 +30,12 @@ function progress(r) {
   if (r.dispatched) p++;
   if (r.received) p++;
   if (r.resulted) p++;
-  // A terminal status (resulted / rejected / cancelled) outranks an in-flight one.
-  if (r.rawStatus && /Approved|Rejected|Cancelled/i.test(r.rawStatus)) p += 0.5;
+  // DATES, NOT STATUSES (Talal rule 3, enforced 2026-08-05): progress is scored
+  // purely by which milestone DATE columns the row carries. A rawStatus regex
+  // bonus (+0.5 for Approved/Rejected/Cancelled) used to sit here; it was deleted
+  // because the free-text status field must never decide what the report counts —
+  // the same reason the engine keys off timestamps and touches rawStatus only for
+  // the two exact literals 'Order Cancelled' / 'Result Rejected'.
   return p;
 }
 

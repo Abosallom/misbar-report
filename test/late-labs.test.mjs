@@ -53,8 +53,16 @@ function independentInclude(rows) {
     if (tat == null) continue;
     const dueMs = workday(receivedMs, tat);
     const delay = dayDiff(asOfDay, dueMs);
-    const late = delay > 0;
-    const dueSoon = !late && delay >= -1 && delay <= 0;
+    // RE-IMPLEMENTED under Talal's 2026-08-05 rules:
+    //   LATE = due TODAY or overdue -> `delay >= 0` (was `delay > 0`).
+    //   DUE-SOON = not late AND due on the NEXT BUSINESS DAY. Expressed in
+    //   BUSINESS terms, not `delay === -1`: because due dates come out of
+    //   workday(), the next calendar day may be Friday or Saturday, in which case
+    //   the next due-able day is Sunday and delay is −3, not −1. Comparing
+    //   `dueMs === workday(asOfDay, 1)` is the only formulation that survives the
+    //   weekend flip.
+    const late = delay >= 0;
+    const dueSoon = !late && dueMs === workday(asOfDay, 1);
     if (!late && !dueSoon) continue;
     const lab = row.facility;
     if (lab == null || String(lab).trim() === '') continue;
@@ -125,28 +133,51 @@ test('counts are per TEST line, not per order', () => {
     orderRow({ orderId: '000501', lineNo: 1, testName: 'ALPHA TEST', received: '2026-06-01 08:00:00', tatDaysCsv: 1 }),
     orderRow({ orderId: '000501', lineNo: 2, testName: 'BETA TEST',  received: '2026-06-01 09:00:00', tatDaysCsv: 1 }),
     orderRow({ orderId: '000501', lineNo: 3, testName: 'GAMMA TEST', received: '2026-06-01 10:00:00', tatDaysCsv: 1 }),
-    // A DIFFERENT order with a single DUE-SOON line — due on asOf day (delay 0).
-    orderRow({ orderId: '000777', lineNo: 1, testName: 'DELTA TEST', received: '2026-07-09 09:00:00', tatDaysCsv: 0 }),
+    // A DIFFERENT order with a single line that is DUE-SOON. RE-BASELINED
+    // 2026-08-05: this used to be "due on the asOf day (delay 0)", which is now
+    // LATE, not due-soon. asOf is Thu 2026-07-09, so the next BUSINESS day is Sun
+    // 2026-07-12 (Fri+Sat are the weekend) — received on the asOf day with a
+    // 1-business-day TAT lands exactly there.
+    orderRow({ orderId: '000777', lineNo: 1, testName: 'DELTA TEST', received: '2026-07-09 09:00:00', tatDaysCsv: 1 }),
+    // …and one line due EXACTLY on the asOf day with no result: under the new
+    // rule that is LATE (under 24h of TAT left, nothing to show), not 'On Time'
+    // with a ⚠ flag. This is the boundary, pinned in the export surface too.
+    orderRow({ orderId: '000888', lineNo: 1, testName: 'EPSILON TEST', received: '2026-07-09 09:00:00', tatDaysCsv: 0 }),
   ];
 
   const wbs = buildLateLabWorkbooks({ rows, tatTests: {}, asOfMs });
   assert.equal(wbs.length, 1, 'all rows share one facility ⇒ a single workbook');
   const w = wbs[0];
   assert.equal(w.lab, 'Synthetic Lab');
-  assert.equal(w.late, 3, 'three LATE test LINES counted (order not collapsed to 1)');
-  assert.equal(w.dueSoon, 1, 'one due-soon test line');
+  assert.equal(w.late, 4, 'four LATE test LINES counted (order not collapsed to 1) — 3 overdue + 1 due TODAY');
+  assert.equal(w.dueSoon, 1, 'one due-soon test line (due on the NEXT BUSINESS day, Sun 07-12)');
   assert.ok(w.xlsxBytes instanceof Uint8Array, 'workbook returned as raw bytes');
   assert.doesNotThrow(() => XLSX.read(w.xlsxBytes, { type: 'array' }), 'SheetJS re-reads the bytes');
 
   const ws = readWs(w);
   const rng = usedRange(ws);
-  assert.equal(rng.e.r - rng.s.r, 4, 'four data rows = 3 late + 1 due-soon (per LINE, order never deduped)');
+  assert.equal(rng.e.r - rng.s.r, 5, 'five data rows = 4 late + 1 due-soon (per LINE, order never deduped)');
 
   // Order ID column (col 4): the SAME order (000501 → 501) appears on THREE rows.
   const orderIds = [];
   for (let r = rng.s.r + 1; r <= rng.e.r; r++) orderIds.push(cellAt(ws, r, 4)?.v);
   assert.equal(orderIds.filter((v) => v === 501).length, 3, 'one order contributes three rows');
-  assert.equal(orderIds.filter((v) => v === 777).length, 1, 'the other order contributes one row');
+  assert.equal(orderIds.filter((v) => v === 777).length, 1, 'the due-soon order contributes one row');
+  assert.equal(orderIds.filter((v) => v === 888).length, 1, 'the due-TODAY order contributes one row');
+
+  // The boundary, read straight out of the sheet: the due-TODAY line is 'Late'
+  // with delay 0 and NO ⚠ flag; the next-business-day line is 'On Time' + ⚠.
+  const rowOf = (id) => {
+    for (let r = rng.s.r + 1; r <= rng.e.r; r++) if (cellAt(ws, r, 4)?.v === id) return r;
+    return -1;
+  };
+  const dueToday = rowOf(888);
+  assert.equal(cellAt(ws, dueToday, 17).v, 0, 'due TODAY ⇒ delay 0');
+  assert.equal(cellAt(ws, dueToday, 18).v, 'Late', 'delay 0 with no result is LATE (2026-08-05 rule)');
+  assert.equal(cellAt(ws, dueToday, 19)?.v ?? '', '', 'a LATE row never carries the ⚠ due-soon flag');
+  const dueNext = rowOf(777);
+  assert.equal(cellAt(ws, dueNext, 18).v, 'On Time', 'due on the next business day is not late yet');
+  assert.equal(cellAt(ws, dueNext, 19).v, '⚠ DUE ≤24H', 'and it is the row that carries the flag');
 });
 
 test('reference styling — styles.xml + sheet1.xml reproduce the navy computed block', () => {
@@ -159,12 +190,17 @@ test('reference styling — styles.xml + sheet1.xml reproduce the navy computed 
       dispatched: '2026-06-01 08:00:00', received: '2026-06-01 08:30:00',
       specimenNo: '9900000526', rawStatus: 'Received', tatDaysCsv: 1,
     }),
+    // RE-BASELINED 2026-08-05: tatDaysCsv was 0 (due ON the asOf day), which now
+    // classifies as LATE and therefore carries NO ⚠ flag — the flag assertion at
+    // the end of this test needs a genuinely due-soon row. asOf is Thu 07-09, so
+    // 1 business day out is Sun 07-12 (Fri+Sat off) = the next business day.
     orderRow({
       orderId: '000777', lineNo: 1, testName: 'DELTA TEST',
-      received: '2026-07-09 09:00:00', tatDaysCsv: 0,
+      received: '2026-07-09 09:00:00', tatDaysCsv: 1,
     }),
   ];
   const [w] = buildLateLabWorkbooks({ rows, tatTests: {}, asOfMs });
+  assert.deepEqual({ late: w.late, dueSoon: w.dueSoon }, { late: 1, dueSoon: 1 }, 'one of each, so both style paths are exercised');
   const styles = unzipEntry(w.xlsxBytes, 'xl/styles.xml');
   const sheet = unzipEntry(w.xlsxBytes, 'xl/worksheets/sheet1.xml');
   assert.ok(styles && sheet, 'styles.xml and sheet1.xml present in the STORE zip');
@@ -217,7 +253,19 @@ test('per-lab counts + which labs qualify (deterministic, CSV-fallback TAT)', { 
 
   // Exactly three labs get a file (labs with zero qualifying rows are absent).
   assert.equal(wbs.length, 3, 'three labs qualify');
-  assert.deepEqual(byLab['Advanced Laboratory Services .Co'], { late: 38, dueSoon: 9 });
+  // RE-BASELINED 2026-08-05, re-derived by RUNNING the real module on the sample
+  // CSV at asOf 2026-07-09 (a Thursday). Advanced: late 38 → 41, dueSoon 9 → 6.
+  //   • The weekend flip alone was measured at dueSoon 9 → 3: with Fri+Sat off,
+  //     the "next business day" after Thursday is SUNDAY, so the set of rows due
+  //     on it is a different (smaller) set than the old Friday one.
+  //   • The late boundary (due today ⇒ late) then moves 3 rows that were due
+  //     EXACTLY on 07-09 out of dueSoon and into late: 38 + 3 = 41, and the
+  //     dueSoon side lands at 6 rather than 3 because the Sunday due-date set
+  //     picked up rows the Friday one did not.
+  //   • Included rows total 47 either way (38+9 = 41+6): the union of "late or
+  //     due-soon" is unchanged here, only the split between the two columns moved.
+  // The other two labs are unaffected (1 late, 0 due-soon each).
+  assert.deepEqual(byLab['Advanced Laboratory Services .Co'], { late: 41, dueSoon: 6 });
   assert.deepEqual(byLab['Fal Specialized Medical Lab'], { late: 1, dueSoon: 0 });
   assert.deepEqual(byLab['Saudi Diagnostics Limited Company'], { late: 1, dueSoon: 0 });
   // Labs present in the data but with no qualifying rows must NOT get a file.
@@ -277,12 +325,20 @@ test('every included row is in scope (received && !resulted, not cancelled/rejec
       assert.equal(resultCell, undefined, 'no result-report cell (scope: not yet resulted)');
       assert.equal(typeof delay, 'number', 'Delay written as a number');
       if (status === 'Late') {
-        assert.ok(delay > 0, 'Late ⇒ delay > 0');
+        // RE-BASELINED 2026-08-05: `>= 0`, not `> 0` — due TODAY is late.
+        assert.ok(delay >= 0, 'Late ⇒ delay >= 0 (due today or overdue)');
         assert.equal(risk, '', 'Late rows carry no due-soon flag');
         lateSeen += 1;
       } else {
         assert.equal(status, 'On Time', 'non-Late status is "On Time"');
-        assert.ok(delay >= -1 && delay <= 0, 'due-soon ⇒ −1 ≤ delay ≤ 0');
+        // The flag means "due on the NEXT BUSINESS DAY", so delay is −1 on a
+        // normal midweek day but −3 when asOf is a Thursday (next business day is
+        // Sunday). The invariant that survives the Fri+Sat weekend is
+        // `due === workday(asOf, 1)`, which is what the module actually tests.
+        // due day reconstructed from the Delay cell: delay = asOfDay − due.
+        const dueDay = toEpochDay(asOfMs) - delay * 86400000;
+        assert.equal(dueDay, workday(toEpochDay(asOfMs), 1), 'due-soon ⇒ due on the NEXT BUSINESS day');
+        assert.ok(delay < 0, 'due-soon ⇒ not yet due');
         assert.equal(risk, '⚠ DUE ≤24H', 'due-soon rows are flagged');
         dueSoonSeen += 1;
       }

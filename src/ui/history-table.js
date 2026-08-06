@@ -30,9 +30,9 @@
 // نسبة الاكتمال nonsense). The published entry is still shown when nothing can be
 // computed, marked `staleDef` so the footnote says the number is old-definition.
 // Stored history itself is NEVER rewritten here — this module only reads it.
-import { el } from './components.js?v=v2026-08-04.2';
-import { formatDateAr } from '../i18n/ar.js?v=v2026-08-04.2';
-import { COMPLETED_DEF_SINCE } from '../model/delta-baseline.js?v=v2026-08-04.2';
+import { el } from './components.js?v=v2026-08-05.1';
+import { formatDateAr } from '../i18n/ar.js?v=v2026-08-05.1';
+import { COMPLETED_DEF_SINCE, LATE_DEF_SINCE } from '../model/delta-baseline.js?v=v2026-08-05.1';
 
 // Every relative specifier in this file — static AND the two guarded dynamic ones below —
 // carries its ?v= INLINE so scripts/stamp-version.mjs owns the whole literal (its SPEC_RE
@@ -48,7 +48,8 @@ async function tryImport(path) { try { return await import(path); } catch { retu
 const ISO_RE = /^\d{4}-\d{2}-\d{2}$/;
 const isIso = (s) => typeof s === 'string' && ISO_RE.test(s);
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
-// ISO ⇄ whole-UTC-day, matching model/delta-baseline.js — deterministic, no Date.now().
+// ISO ⇄ whole-UTC-day, matching model/delta-baseline.js (which now EXPORTS isoToDays /
+// weekStartDay for model/delta-window.js) — deterministic, no Date.now().
 const isoToDays = (iso) => Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10)) / 86400000;
 function daysToIso(n) {
   const dt = new Date(n * 86400000);
@@ -77,12 +78,15 @@ const headRow = (dateHead) => [dateHead || 'التاريخ', ...HEAD_TAIL];
 // deltaMode → the weekday the شهر rows anchor to. 0 = Sunday … 4 = Thursday (matching
 // Date#getUTCDay). Anything else (daily, absent, unknown) → null = the old weekly points.
 //
-// 'week' (the week-to-date default) anchors to THURSDAY, not Sunday. The week's baseline
-// is the report before its Sunday, so the report that carries a FULL week of accumulated
-// chips is Thursday's — the week-closing one, and the last one actually sent. Sampling
-// Thursdays therefore makes the row-to-row gap equal exactly one week's worth of chips,
-// so a شهر row's deltas line up with what the deck showed that day. Anchoring on Sunday
-// would sample the report whose chips are only one day old.
+// 'week' (the default) anchors to THURSDAY, not Sunday — UNCHANGED by the 2026-08-05
+// switch to activity windows, and for the same reason it always held. The 'week' window
+// runs [Sunday, report date], so the report carrying a FULL week of activity is
+// THURSDAY's — the week-closing one, and the last one actually sent. Sampling Thursdays
+// makes one row-to-row gap equal exactly one week's worth of chips, so a شهر row lines up
+// with what the deck showed that day. Anchoring on Sunday would sample the report whose
+// window is only one day wide.
+// (The vocabulary changed, not the anchor: the mode no longer picks a stored BASELINE to
+// diff against — it sizes the window the chips are counted over, model/delta-window.js.)
 // The two retired mode values keep their own mappings so a stale stored/cached value
 // still produces weekday-anchored rows instead of silently reverting to weekly points.
 const WEEKDAY_ANCHORS = {
@@ -123,8 +127,8 @@ const monthNote = (anchor) => (anchor
 // `restated` = those rows were recomputed under the new rule (the normal case, engine
 // present); `stale` = a published pre-change row is still on screen under the OLD rule
 // because nothing could be computed for it.
-const DEF_NOTE_RESTATED = (d) => `أرقام «مكتملة» للتواريخ السابقة لـ ${d} معروضة وفق التعريف الجديد (تشمل النتائج المرفوضة) لتكون السلسلة قابلة للمقارنة، وقد تختلف عن الرقم المنشور حينها.`;
-const DEF_NOTE_STALE = (d) => `تغيّر تعريف «مكتملة» في ${d} ليشمل النتائج المرفوضة؛ الصفوف المنشورة قبل هذا التاريخ ما زالت بالتعريف القديم، فلا تُقارن مباشرة بما بعدها.`;
+const DEF_NOTE_RESTATED = (d) => `أرقام «مكتملة» و«متأخرة بلا نتيجة» للتواريخ السابقة لـ ${d} معروضة وفق التعريفات الجديدة (المكتملة تشمل المرفوضة؛ عطلة الأسبوع الجمعة والسبت والمتأخر يشمل المستحق اليوم) لتكون السلسلة قابلة للمقارنة، وقد تختلف عن الرقم المنشور حينها.`;
+const DEF_NOTE_STALE = (d) => `تغيّرت تعريفات «مكتملة» و«متأخرة بلا نتيجة» قبل ${d}؛ الصفوف المنشورة قبل هذا التاريخ ما زالت بالتعريفات القديمة، فلا تُقارن مباشرة بما بعدها.`;
 // مرفوضة sits next to مكتملة and is a SUBSET of it — say so under every table so the
 // two columns can never be read as two separate quantities to be added together.
 const SUBSET_NOTE = 'الرفض نتيجة نهائية للمختبر، لذلك عمود «مرفوضة» محتسب ضمن «مكتملة» ومعروض للتفصيل فقط — لا يُضاف فوقها.';
@@ -286,7 +290,12 @@ function computeFirstDay(rows, history, endDay, parseFn, toDayFn) {
   return Math.min(min, endDay);
 }
 /** True for a sample date recorded before مكتملة changed meaning (see file header). */
-const isPreDefChange = (date) => isIso(date) && date < COMPLETED_DEF_SINCE;
+// The LATER of the two definition boundaries governs: rows published before it may
+// speak an old rule for at least one column (مكتملة before COMPLETED_DEF_SINCE;
+// متأخرة بلا نتيجة — weekend + due-today boundary — before LATE_DEF_SINCE), so the
+// COMPUTED row wins there and is marked `restated`. One boundary check, no zigzag.
+const DEF_SINCE_LATEST = LATE_DEF_SINCE > COMPLETED_DEF_SINCE ? LATE_DEF_SINCE : COMPLETED_DEF_SINCE;
+const isPreDefChange = (date) => isIso(date) && date < DEF_SINCE_LATEST;
 
 // One sample. A published snapshot is preferred — EXCEPT for a date before
 // COMPLETED_DEF_SINCE, whose stored مكتملة speaks the old definition: preferring it
@@ -316,9 +325,9 @@ function numbersForDate(date, ctx) {
 const resolveSamples = (dates, ctx) => dates.map((d) => numbersForDate(d, ctx)).filter(Boolean);
 
 // Per-(endIso, range, weekday-anchor) bundle cache — toggling ranges (or flipping the
-// weekly comparison back and forth) never recomputes (computeNumbersAsOf is O(rows) per
+// activity window back and forth) never recomputes (computeNumbersAsOf is O(rows) per
 // sample). Keyed by endIso|range|anchor, and the anchor only participates for شهر — the
-// only range that reads it — so flipping the weekly comparison reuses the أسبوع and منذ
+// only range that reads it — so flipping the window mode reuses the أسبوع and منذ
 // البداية bundles instead of minting a new key (and a new resolveSamples pass) per mode.
 // Within a review session rows + history are constant per report date, and a date change
 // mints fresh keys.
@@ -514,7 +523,9 @@ function renderRangeContent(bundle, range) {
  * guarded engine imports resolve. Never throws.
  * deltaMode ('daily' | 'week', anything else = unanchored) only affects the شهر rows:
  * 'week' samples the last ~5 THURSDAYS — the week-closing report, so one row-to-row gap
- * is exactly one week's chips — and the date column header names that weekday.
+ * is exactly one week's chips — and the date column header names that weekday. Since
+ * 2026-08-05 the mode sizes the deck's ACTIVITY WINDOW rather than picking a stored
+ * baseline; the Thursday anchor is unaffected (see WEEKDAY_ANCHORS).
  * `range` seeds the selected range pill (default أسبوع). The live selection is mirrored
  * on the returned element as `panel.dataset.range`, so a caller that rebuilds the panel
  * (e.g. on a delta-mode switch — the switch that drives the شهر rows) can read the old
@@ -536,8 +547,8 @@ export function buildHistoryPanel({ rows, tatTests, history, endIso, deltaMode, 
 
   (async () => {
     const [asofMod, wdMod] = await Promise.all([
-      tryImport('../engine/asof.js?v=v2026-08-04.2'),
-      tryImport('../engine/workday.js?v=v2026-08-04.2'),
+      tryImport('../engine/asof.js?v=v2026-08-05.1'),
+      tryImport('../engine/workday.js?v=v2026-08-05.1'),
     ]);
     const computeAsOf = asofMod && typeof asofMod.computeNumbersAsOf === 'function' ? asofMod.computeNumbersAsOf : null;
     const degraded = !computeAsOf;

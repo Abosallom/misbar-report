@@ -11,20 +11,37 @@
 //               cancelled ('Order Cancelled') / rejected ('Result Rejected'), and
 //               excluding rows with no resolvable StdTAT (engine's 'No Match').
 //   • StdTAT  = TAT lookup by test name, else CSV "TAT - Days" fallback (resolveTat).
-//   • dueMs   = workday(receivedMs, stdTat)   (business days, Sat–Sun weekend).
+//   • dueMs   = workday(receivedMs, stdTat)   (business days, FRI–SAT weekend).
 //   • delay   = dayDiff(asOfDay, dueMs)        (whole calendar days, asOf − due).
-//   • Status  = delay > 0 → 'Late', else 'On Time'.
-//   • Late Risk (next 24h) = '⚠ DUE ≤24H' when NOT late and −1 ≤ delay ≤ 0; else ''.
+//   • Status  = delay ≥ 0 → 'Late', else 'On Time'.
+//   • Late Risk (next 24h) = '⚠ DUE ≤24H' when NOT late and the due date is the
+//     NEXT BUSINESS DAY after asOf, i.e. dueMs === workday(asOfDay, 1); else ''.
 //   • A row is INCLUDED when Late OR flagged due-soon; a lab gets a file only if
 //     it has ≥1 included row.
+//
+// TWO STAKEHOLDER RULE CHANGES (Talal, 2026-08-05) — the columns and the file
+// format are byte-identical to the reference; only these two SEMANTICS moved:
+//   1. WEEKEND = Friday+Saturday (business days Sun–Thu). Inherited from
+//      workday.js, which deliberately replaced Excel's Sat/Sun convention, so
+//      every Due Date in column Q shifts with the engine's. Measured effect on
+//      the golden fixture: Advanced-lab dueSoon 9 → 3.
+//   2. LATE = due TODAY or overdue (delay ≥ 0), was strictly past due (delay > 0).
+//      A due-today row with no result has under 24h of TAT left, so it now
+//      reads 'Late' in column S instead of 'On Time' + a ⚠ flag.
+//   Because of (2) the ⚠ DUE ≤24H flag can no longer mean "delay ∈ {−1,0}":
+//   delay 0 is Late now, and delay −1 is not always the next WORKING day (from a
+//   Thursday as-of, delay −1 is Friday — a weekend day no due date can land on;
+//   the next business day is Sunday, delay −3). So the flag is in BUSINESS terms
+//   — due on workday(asOf, 1) — which is what "due within the next 24h of lab
+//   working time" actually means under a Fri/Sat weekend.
 //   • GRAIN = per test LINE (order line): counts (late/dueSoon) and data rows are
 //     NEVER deduplicated by order — one order with 3 qualifying tests contributes
 //     3 rows and counts as 3, not 1.
-import { buildTatIndex, resolveTat } from '../engine/tat.js?v=v2026-08-04.2';
+import { buildTatIndex, resolveTat } from '../engine/tat.js?v=v2026-08-05.1';
 import {
   parseDateTime, toEpochDay, workday, dayDiff,
-} from '../engine/workday.js?v=v2026-08-04.2';
-import { writeStyledXlsx } from './xlsx-styled.js?v=v2026-08-04.2';
+} from '../engine/workday.js?v=v2026-08-05.1';
+import { writeStyledXlsx } from './xlsx-styled.js?v=v2026-08-05.1';
 
 /** The 20 export columns, VERBATIM (keep the 'Lonic code' typo — established format). */
 export const LATE_LAB_HEADERS = Object.freeze([
@@ -139,7 +156,7 @@ export function labFileName(lab) {
  * (no receipt / already resulted / cancelled / rejected / no StdTAT) or neither
  * late nor due-soon. Otherwise returns the derived fields + the 20-cell array.
  */
-function classifyRow(row, tatIndex, asOfDay, opts) {
+function classifyRow(row, tatIndex, asOfDay, nextBusinessDay, opts) {
   const cancelled = row.rawStatus === 'Order Cancelled';
   const rejected = row.rawStatus === 'Result Rejected';
   if (cancelled || rejected) return null;
@@ -154,8 +171,13 @@ function classifyRow(row, tatIndex, asOfDay, opts) {
 
   const dueMs = workday(receivedMs, tat);
   const delay = dayDiff(asOfDay, dueMs);          // whole calendar days: asOf − due
-  const late = delay > 0;
-  const dueSoon = !late && delay >= -1 && delay <= 0;
+  // 2026-08-05: due TODAY is LATE (delay ≥ 0, was > 0) — under 24h of TAT left
+  // and no result. See the file header.
+  const late = delay >= 0;
+  // ⚠ DUE ≤24H = the due date is the NEXT BUSINESS DAY after asOf, computed with
+  // the same Fri/Sat workday() the due dates themselves use — NOT delay === -1,
+  // which would point at a weekend day on Wed/Thu as-of dates.
+  const dueSoon = !late && dueMs === nextBusinessDay;
   if (!late && !dueSoon) return null;             // neither late nor due-soon → excluded
 
   const status = late ? 'Late' : 'On Time';
@@ -240,12 +262,15 @@ export function buildLateLabWorkbooks({
     throw new Error('buildLateLabWorkbooks: asOfMs (epoch-ms) is required');
   }
   const asOfDay = toEpochDay(Number(asOfMs));
+  // Computed ONCE per export: the next business day after asOf under the Fri/Sat
+  // weekend — the ⚠ DUE ≤24H horizon (see classifyRow / the file header).
+  const nextBusinessDay = workday(asOfDay, 1);
   const tatIndex = buildTatIndex(tatTests);
 
   // Group included rows by lab (skip rows with no lab name — they cannot key a file).
   const byLab = new Map();
   for (const row of rows) {
-    const c = classifyRow(row, tatIndex, asOfDay, opts);
+    const c = classifyRow(row, tatIndex, asOfDay, nextBusinessDay, opts);
     if (!c) continue;
     const lab = row.facility;
     if (lab == null || String(lab).trim() === '') continue;

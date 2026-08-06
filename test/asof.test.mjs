@@ -70,6 +70,12 @@ test('CROWN identity: as-of @ 2026-07-09 == engine\'s own 10 numbers (GOLDEN_ORD
   }
   assert.deepEqual(numbers, eng);
   // And it equals the published 09-07 snapshot the app ships as its baseline.
+  // RE-BASELINE NOTE (2026-08-05): the late boundary rule (due TODAY counts as
+  // late) moves lateNoResult on this fixture from 67 to 73 — 6 rows are due
+  // exactly on asOf 2026-07-09 with no result. SNAPSHOT_SEED.numbers.lateNoResult
+  // must be re-baselined to 73 in src/seeds/defaults.js for this identity to hold;
+  // this is the ONE place the shipped seed is checked against the live engine, on
+  // purpose, so a stale seed surfaces here and nowhere else.
   assert.deepEqual(numbers, SNAPSHOT_SEED.numbers);
 });
 
@@ -260,7 +266,13 @@ test('buildWeekNumbers: correct oldest→newest date list, days param respected'
   assert.deepEqual(three.map((w) => w.date), ['2026-07-07', '2026-07-08', '2026-07-09']);
   // With no history, every day is computed and carries the newest date's identity.
   for (const w of three) assert.equal(w.source, 'computed');
-  assert.deepEqual(three.at(-1).numbers, SNAPSHOT_SEED.numbers);
+  // Compared against the ENGINE's own 07-09 numbers, not the shipped
+  // SNAPSHOT_SEED: the claim here is "the last computed day equals the report
+  // date's figures". Whether the seed constant still matches the engine is a
+  // separate claim, asserted once in the CROWN identity test above (2026-08-05 —
+  // this used to read SNAPSHOT_SEED.numbers and turned a stale-seed problem into
+  // a misleading buildWeekNumbers failure).
+  assert.deepEqual(three.at(-1).numbers, engineNumbers(GOLDEN_ORDERS, '2026-07-09'));
 });
 
 test('buildWeekNumbers: a published snapshot is preferred over the computed value', () => {
@@ -288,4 +300,89 @@ test('buildWeekNumbers: a published snapshot is preferred over the computed valu
 test('buildWeekNumbers: pure — identical inputs yield identical output (no Date.now)', () => {
   const args = { rows: GOLDEN_ORDERS, tatTests: TAT_LOOKUP, history: {}, endIso: '2026-07-09', days: 5 };
   assert.deepEqual(buildWeekNumbers(args), buildWeekNumbers(args));
+});
+
+// =============================================================================
+// LATE BOUNDARY (Talal 2026-08-05) — asof.js must agree with the engine
+// =============================================================================
+
+test('as-of LATE BOUNDARY: due exactly on the as-of day counts as late', () => {
+  // asof.js compares `asOfDay >= dueMs` (it was a strict `>`). Same synthetic row
+  // as engine.test.mjs's boundary suite: received Wed 2026-06-03 + tat 2 -> due
+  // Sun 2026-06-07 under the Fri+Sat weekend.
+  const row = {
+    orderDate: '2026-06-01', collected: '2026-06-01 08:00:00', dispatched: '2026-06-02 09:00:00',
+    received: '2026-06-03 10:00:00', resulted: '',
+    rawStatus: 'In Progress', facility: 'Lab X', testName: 'ANY TEST', tatDaysCsv: 2,
+  };
+  const at = (iso) => computeNumbersAsOf({ rows: [row], tatTests: {}, asOfIso: iso }).numbers;
+
+  // 06-06 (Saturday, the day before due) — not late yet.
+  assert.equal(at('2026-06-06').lateNoResult, 0, 'the day before due is not late');
+  // 06-07 — the DUE day itself, still no result -> LATE. This is the boundary.
+  assert.equal(at('2026-06-07').lateNoResult, 1, 'due TODAY with no result is LATE');
+  // 06-08 — overdue, obviously still late.
+  assert.equal(at('2026-06-08').lateNoResult, 1);
+  // late is always a subset of awaitingResults, at the boundary too.
+  for (const iso of ['2026-06-07', '2026-06-08']) {
+    const n = at(iso);
+    assert.ok(n.lateNoResult <= n.awaitingResults, `late ⊆ awaitingResults on ${iso}`);
+  }
+});
+
+test('as-of LATE BOUNDARY: a row RESULTED on its due day is never late on any day', () => {
+  // The asymmetry, from the as-of side: this row met its TAT, so no as-of date
+  // may ever report it as late-with-no-result — not even the due day itself.
+  const row = {
+    orderDate: '2026-06-01', collected: '2026-06-01 08:00:00', dispatched: '2026-06-02 09:00:00',
+    received: '2026-06-03 10:00:00', resulted: '2026-06-07 16:00:00',
+    rawStatus: 'Result Available', facility: 'Lab X', testName: 'ANY TEST', tatDaysCsv: 2,
+  };
+  const at = (iso) => computeNumbersAsOf({ rows: [row], tatTests: {}, asOfIso: iso }).numbers;
+  for (const iso of ['2026-06-06', '2026-06-07', '2026-06-08', '2026-06-30']) {
+    assert.equal(at(iso).lateNoResult, 0, `resulted-on-due-day must not be late on ${iso}`);
+  }
+  // …and from the due day onward it is simply completed.
+  assert.equal(at('2026-06-07').completed, 1);
+});
+
+test('as-of LATE BOUNDARY: rejected and cancelled rows are never late, due day or not', () => {
+  const base = {
+    orderDate: '2026-06-01', collected: '2026-06-01 08:00:00', dispatched: '2026-06-02 09:00:00',
+    received: '2026-06-03 10:00:00', resulted: '',
+    facility: 'Lab X', testName: 'ANY TEST', tatDaysCsv: 2,
+  };
+  const at = (row, iso) => computeNumbersAsOf({ rows: [row], tatTests: {}, asOfIso: iso }).numbers;
+  // Due day and well past it — the "no result AND not rejected/cancelled" clause.
+  for (const iso of ['2026-06-07', '2026-06-20']) {
+    assert.equal(at({ ...base, rawStatus: 'Result Rejected' }, iso).lateNoResult, 0, `rejected @ ${iso}`);
+    assert.equal(at({ ...base, rawStatus: 'Order Cancelled' }, iso).lateNoResult, 0, `cancelled @ ${iso}`);
+  }
+});
+
+test('as-of LATE BOUNDARY: the as-of series and the engine agree on the boundary day', () => {
+  // Cross-surface: whatever the boundary does, BOTH implementations must do it.
+  // Guards against flipping asof.js's `asOfDay >= dueMs` and engine.js's status
+  // cascade independently, or fixing one and forgetting the other.
+  //
+  // Every row here is UNRESULTED on purpose: the engine's buckets are CURRENT
+  // state while computeNumbersAsOf replays history, so the two are only
+  // comparable over a row set with no timestamp later than the compared date
+  // (the same precondition the CROWN identity test states). With no result dates
+  // at all, every date at or after receipt satisfies that — and the late boundary
+  // is precisely a claim about unresulted rows, so nothing is lost.
+  // Due dates (Fri+Sat weekend): T1 received Wed 06-03 + 2 -> Sun 06-07;
+  //                              T2 received Thu 06-04 + 2 -> Mon 06-08.
+  const rows = [
+    { orderDate: '2026-06-01', collected: '2026-06-01', dispatched: '2026-06-02', received: '2026-06-03 10:00:00', resulted: '', rawStatus: 'In Progress', facility: 'L', testName: 'T1', tatDaysCsv: 2 },
+    { orderDate: '2026-06-01', collected: '2026-06-01', dispatched: '2026-06-02', received: '2026-06-04 10:00:00', resulted: '', rawStatus: 'In Progress', facility: 'L', testName: 'T2', tatDaysCsv: 2 },
+  ];
+  const expectLate = { '2026-06-06': 0, '2026-06-07': 1, '2026-06-08': 2, '2026-06-09': 2 };
+  for (const [iso, late] of Object.entries(expectLate)) {
+    const asofN = computeNumbersAsOf({ rows, tatTests: {}, asOfIso: iso }).numbers;
+    const engN = engineNumbers(rows, iso);
+    assert.deepEqual(asofN, engN, `as-of and engine disagree on ${iso}`);
+    // …and they agree on the hand-counted value, not merely with each other.
+    assert.equal(asofN.lateNoResult, late, `lateNoResult on ${iso}`);
+  }
 });

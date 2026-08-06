@@ -2,16 +2,16 @@
 // The file-producing core now lives in automation/pipeline.js (produceReportFiles) so
 // an unattended run makes byte-identical files; this screen drives it and paints the
 // very same progress bar, file rows and live slide thumbnails it always has.
-import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-08-04.2';
-import { el, progressBar, toast } from './components.js?v=v2026-08-04.2';
-import { resetRunData } from '../state.js?v=v2026-08-04.2';
-import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-08-04.2';
-import { autoDraft, splitTaskLists } from '../model/drafts.js?v=v2026-08-04.2';
-import { buildLateLabsSection, triggerDownload } from './late-labs-section.js?v=v2026-08-04.2';
+import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-08-05.1';
+import { el, progressBar, toast } from './components.js?v=v2026-08-05.1';
+import { resetRunData } from '../state.js?v=v2026-08-05.1';
+import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-08-05.1';
+import { autoDraft, splitTaskLists } from '../model/drafts.js?v=v2026-08-05.1';
+import { buildLateLabsSection, triggerDownload } from './late-labs-section.js?v=v2026-08-05.1';
 import {
-  applyDeltaBaseline, buildFileDefs, produceReportFiles, recordRunSnapshot,
+  applyWindowDeltas, buildFileDefs, produceReportFiles, recordRunSnapshot,
   shouldAutoDownloadFiles,
-} from '../automation/pipeline.js?v=v2026-08-04.2';
+} from '../automation/pipeline.js?v=v2026-08-05.1';
 
 async function tryImport(path) { try { return await import(path); } catch { return null; } }
 const isMobile = () => /iP(hone|ad|od)|Android/i.test(navigator.userAgent);
@@ -167,14 +167,20 @@ export async function render(container, ctx) {
   const model = state.reportModel || fallbackModel(state, store);
   const date = model.reportDate || todayISO();
   model.reportDate = model.reportDate || date;
-  // deltaMode baseline (user decision B): recompute deltas + stamp deltaBaseline so the
-  // generated files' exec legend/chips match the review preview. recordSnapshot (below)
-  // appends this run to snapshotHistory on success. Guarded → legacy engine deltas if the
-  // module isn't present at runtime.
-  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-08-04.2');
-  const pickBaseline = dbMod && dbMod.pickDeltaBaseline;
+  // Delta chips = THE WEEK'S ACTIVITY (2026-08-05). Recompute kpi.deltas from the rows'
+  // own dates over the window and stamp model.deltaWindow, so the generated files' exec
+  // legend/chips match the review preview exactly. This re-runs the stamper on the very
+  // model object screen-review already stamped — SAFE by construction now: it is a pure
+  // function of (rows, reportDate, mode), so the second stamp is deep-equal to the first.
+  // (Under the retired baseline stamper the two copies could pick different baselines and
+  // the deck silently won.) THE INVARIANT: only the chips changed meaning — the big
+  // cumulative numbers on slides 2/3/4 are untouched.
+  // recordSnapshot (below) still appends this run's published numbers to snapshotHistory
+  // for the history panel. Both modules are guarded → engine deltas if either is absent.
+  const dwMod = await tryImport('../model/delta-window.js?v=v2026-08-05.1');
+  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-08-05.1');
   const recordSnapshot = dbMod && dbMod.recordSnapshot;
-  applyDeltaBaseline(model, store, pickBaseline);
+  applyWindowDeltas(model, state, store, dwMod && dwMod.stampWindowDeltas);
 
   // Same four definitions produceReportFiles will walk — one shared source.
   const fileDefs = buildFileDefs(date);
@@ -277,7 +283,7 @@ export async function render(container, ctx) {
     // unattended generation feeds the same delta/history features.
     // recordShownTasks also writes the closed-task grace log (v6) from this very
     // model — guarded import, so an older/partial build just keeps the numbers path.
-    const tlMod = await tryImport('../model/task-lifecycle.js?v=v2026-08-04.2');
+    const tlMod = await tryImport('../model/task-lifecycle.js?v=v2026-08-05.1');
     recordRunSnapshot({
       model, store, state, date, recordSnapshot,
       recordShownTasks: tlMod && tlMod.recordShownTasks,

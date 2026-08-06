@@ -1,43 +1,46 @@
-// model/delta-baseline.js — rolling per-date history of report numbers plus the
-// baseline picker that drives the exec-summary delta chips. PURE functions only:
+// model/delta-baseline.js — the published-report history (recordSnapshot), the
+// delta-MODE enum, and the Sun-based work-week calendar math. PURE functions only:
 // no I/O, no Date.now(); all date math is on ISO 'yyyy-mm-dd' strings so the same
 // inputs always yield the same output (golden-testable).
 //
-// The exec chips compare the current run against a chosen previous report. The
-// window is user-selectable in Settings (reportOptions.deltaMode) and has exactly
-// TWO values — the Saudi work week is Sun–Thu:
-//   • 'daily' → the most recent stored report STRICTLY BEFORE the report date.
-//   • 'week'  → WEEK-TO-DATE (the DEFAULT since 2026-08-04, user request): every
-//               report inside one Sun–Thu week compares against the SAME baseline —
-//               the most recent stored report strictly BEFORE that week's Sunday. So
-//               the chips ACCUMULATE through the week and Thursday's deck (the last
-//               one sent) shows the whole week's movement. The week's own Sunday
-//               report is NOT a candidate: using it would drop Sunday's own movement
-//               out of every later report in the week.
-// Fri/Sat report dates need no special case — weekStartDay() maps them to the Sunday
-// of the week that just ended, which is the week their numbers belong to.
-// The weekday-anchored 'weekly-sun' / 'weekly-thu' modes of the previous round are
+// 2026-08-05 — THE BASELINE PICKER IS GONE. pickDeltaBaseline (and the anchored /
+// definitionShift disclosures that hung off it) has been DELETED. The exec delta chips
+// no longer diff the current run against a STORED previous report; they are now THE
+// WEEK'S ACTIVITY, computed from the rows' own date columns by model/delta-window.js
+// (deltas[key] = asof(reportDate) − asof(the day before the window opens)). That kills
+// the whole disclosure family with it: there is no baseline to be un-anchored, and no
+// stored numbers speaking an older `completed` definition, because no stored numbers
+// are read at all. THE INVARIANT of that change — the big numbers on slides 2/3/4 stay
+// CUMULATIVE TOTALS; only the small green chips changed meaning — is stated in full at
+// the top of model/delta-window.js.
+//
+// What survives here, and why:
+//   • recordSnapshot + HISTORY_LIMIT — snapshotHistory is still WRITTEN after every
+//     successful run (it is the published record) and still READ by the history panel
+//     (ui/history-table.js: published vs computed vs restated numbers). Only the chips
+//     stopped consuming it.
+//   • COMPLETED_DEF_VERSION / COMPLETED_DEF_SINCE — the history panel imports
+//     COMPLETED_DEF_SINCE to mark rows recorded under the pre-2026-07-28 `completed`
+//     rule (a rejected result is a lab's final outcome, so rejected became a SUBSET of
+//     completed). Stored history is never rewritten, so that boundary date stays load-
+//     bearing for as long as pre-change entries are still on screen.
+//   • the deltaMode enum (DELTA_MODES / DEFAULT_DELTA_MODE / canonicalDeltaMode /
+//     normalizeDeltaMode / isWeekDeltaMode) — SAME two values, SAME storage key, and
+//     store.js imports the enum, so these exports must stay stable. Their SEMANTICS
+//     changed, though: the mode used to pick which stored report to compare against;
+//     it now picks the SIZE OF THE ACTIVITY WINDOW ('week' = Sunday..report-day,
+//     'daily' = the report day alone). See contracts.js reportOptions.deltaMode.
+//   • the Sun-based calendar math (isoToDays / isoWeekday / weekStartDay) — now
+//     EXPORTED. delta-window.js imports it instead of keeping a second copy, so there
+//     is exactly ONE definition of "which Sunday opens this week" behind the banner,
+//     the deck legend and the history panel.
+// The Saudi work week is Sun–Thu. Fri/Sat report dates need no special case anywhere:
+// weekStartDay() maps them back to the Sunday of the week that just ended, which is the
+// week their numbers belong to.
+// The weekday-anchored 'weekly-sun' / 'weekly-thu' modes of an earlier round are
 // RETIRED: they, and the older bare 'weekly', are aliases of 'week' now (see
 // DELTA_MODE_ALIASES) so no stored setting is orphaned. Any unknown value falls back
 // to DEFAULT_DELTA_MODE.
-// While history is still filling up, 'week' with no pre-week entry uses the most
-// recent prior report and says so via anchored:false (the flag predates this change
-// — build-spec downgrades to the daily legend wording on it and both stampers
-// forward it). When history has no qualifying entry at all we fall back to the single
-// legacy snapshot (settings.snapshot {asOf, numbers}); with neither, no baseline (null).
-
-// DEFINITION VERSIONING (2026-07-28). The `completed` number changed meaning on
-// 2026-07-28: a REJECTED result is a lab's final outcome, so completed now counts
-// non-cancelled rows that either carry a result date OR are rejected (rejected
-// became a SUBSET of completed instead of being excluded from it). Every number
-// already sitting in settings.snapshotHistory was recorded under the OLD rule, so
-// the first report after the change would show a completed delta inflated by ~the
-// rejected count — a definition change wearing the costume of progress.
-// Stored history is NEVER rewritten (it is the published record). Instead the
-// picker DISCLOSES: pickDeltaBaseline returns definitionShift:true when the chosen
-// baseline speaks the old definition, exactly as it already returns anchored:false
-// for a weekly baseline that missed its weekday, and the review banner / deck
-// legend can say so. See COMPLETED_DEF_VERSION below for how the version is read.
 
 const ISO_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -54,6 +57,18 @@ export const COMPLETED_DEF_VERSION = 2;
  * whole existing history — no stamp to backfill, no stored entry to rewrite.
  */
 export const COMPLETED_DEF_SINCE = '2026-07-28';
+
+/**
+ * First report date produced under the 2026-08-05 rules: the Fri/Sat weekend (due
+ * dates were Excel's Sat/Sun convention before) AND the due-today-or-overdue late
+ * boundary. Snapshots PUBLISHED before this date carry `lateNoResult` (and the
+ * due-derived splits) under the old rules; entries on/after it speak the new ones.
+ * Same role as COMPLETED_DEF_SINCE one rule-change earlier: the history panel uses
+ * the LATER of the two boundaries to decide when a published row must be recomputed
+ * (`restated`) instead of trusted, so one range never zigzags between definitions.
+ * Stored history is never rewritten.
+ */
+export const LATE_DEF_SINCE = '2026-08-05';
 
 /** The two valid reportOptions.deltaMode values, in UI order. */
 export const DELTA_MODES = ['daily', 'week'];
@@ -96,8 +111,8 @@ export function canonicalDeltaMode(v) {
 
 /**
  * Canonical delta mode with a guaranteed answer: unknown → DEFAULT_DELTA_MODE.
- * NOTE it falls back to the DEFAULT, not to 'daily'. This is the picker's own
- * entry point and it runs on paths with no backfill behind them (the ephemeral
+ * NOTE it falls back to the DEFAULT, not to 'daily'. This is the window builder's own
+ * entry point (model/delta-window.js) and it runs on paths with no backfill behind them (the ephemeral
  * in-memory doc, a hand-built model in a test), so falling back to 'daily' would
  * silently re-daily-ify a user who never asked for daily.
  * @param {*} mode
@@ -108,15 +123,16 @@ export function normalizeDeltaMode(mode) {
 }
 
 /**
- * True when a stored/user mode means the week-to-date comparison. Consumers MUST use
- * this rather than a startsWith('weekly') test: the canonical value is 'week', which
- * FAILS that prefix check, so every disclosure hanging off it (the review banner, the
- * week-window explainer) would silently vanish while the deck kept comparing weekly.
+ * True when a stored/user mode means the WEEK-WIDE activity window (Sunday..report-day)
+ * rather than the single report day. Consumers MUST use this rather than a
+ * startsWith('weekly') test: the canonical value is 'week', which FAILS that prefix
+ * check, so every surface hanging off it (the review banner heading, the week-window
+ * explainer) would silently vanish while the chips kept counting a whole week.
  *
  * It answers for the EFFECTIVE mode (normalizeDeltaMode), not just the canonical one,
- * so it can never disagree with the baseline the picker actually chose: an
+ * so it can never disagree with the window delta-window.js actually built: an
  * unrecognized stored value resolves to DEFAULT_DELTA_MODE ('week') in both places.
- * A UI that says "daily" over week-to-date numbers is the bug this guards against.
+ * A UI that says "daily" over a week's activity is the bug this guards against.
  * @param {*} mode
  * @returns {boolean}
  */
@@ -136,8 +152,15 @@ function isPlainObject(v) {
   return v !== null && typeof v === 'object' && !Array.isArray(v);
 }
 
-/** Whole UTC-day count for an ISO date — deterministic, no Date.now(). */
-function isoToDays(iso) {
+/**
+ * Whole UTC-day count for an ISO date — deterministic, no Date.now(). EXPORTED as of
+ * 2026-08-05: model/delta-window.js builds the activity window on this same primitive
+ * rather than re-deriving it, so the banner, the deck legend and the history panel can
+ * never disagree about what day a date is.
+ * @param {string} iso - 'yyyy-mm-dd'
+ * @returns {number} whole-UTC-day count
+ */
+export function isoToDays(iso) {
   const y = Number(iso.slice(0, 4));
   const m = Number(iso.slice(5, 7));
   const d = Number(iso.slice(8, 10));
@@ -153,7 +176,7 @@ function isoToDays(iso) {
  * @param {string} iso - 'yyyy-mm-dd'
  * @returns {number} 0..6
  */
-function isoWeekday(iso) {
+export function isoWeekday(iso) {
   return (((isoToDays(iso) + 4) % 7) + 7) % 7;
 }
 
@@ -164,11 +187,11 @@ function isoWeekday(iso) {
  * this" in the module.
  * A Sunday maps to ITSELF. Friday and Saturday map back to the Sunday of the week that
  * just ended, which is the week their numbers belong to — that is why Fri/Sat report
- * dates need no special case anywhere in the picker.
+ * dates need no special case anywhere in the window math.
  * @param {string} iso - 'yyyy-mm-dd'
  * @returns {number} whole-UTC-day count of that week's Sunday
  */
-function weekStartDay(iso) {
+export function weekStartDay(iso) {
   return isoToDays(iso) - isoWeekday(iso);
 }
 
@@ -212,132 +235,4 @@ export function recordSnapshot(history, isoDate, numbers) {
   const out = {};
   for (const d of kept) out[d] = next[d];
   return out;
-}
-
-/**
- * Definition version a stored number set speaks. An EXPLICIT numeric `defVersion`
- * always wins — a history entry may carry it as a numeric leaf (store.js validates
- * snapshotHistory values as finite numbers, so a stamp survives save/load/import)
- * and the legacy snapshot carries it as a sibling of `numbers` (see
- * seeds/defaults.js SNAPSHOT_SEED). With no stamp the entry's own report DATE
- * decides: on/after COMPLETED_DEF_SINCE it was produced by the new engine, before
- * it by the old one. Unknown/undated → treated as OLD (disclose rather than hide).
- * @param {Object<string,number>} numbers
- * @param {string|null} isoDate
- * @param {*} [explicit]  stamp found outside the numbers map (legacy snapshot)
- * @returns {number}
- */
-function definitionVersionOf(numbers, isoDate, explicit) {
-  const stamp = [explicit, isPlainObject(numbers) ? numbers.defVersion : undefined]
-    .find((v) => typeof v === 'number' && Number.isFinite(v));
-  if (stamp !== undefined) return stamp;
-  return isIso(isoDate) && isoDate >= COMPLETED_DEF_SINCE ? COMPLETED_DEF_VERSION : 1;
-}
-
-/**
- * True when this baseline would make the completed delta partly definitional.
- * Requires an actual `completed` number: a baseline that carries none produces no
- * completed delta, so there is nothing definitional to disclose about it.
- */
-function isDefinitionShift(numbers, isoDate, explicit) {
-  if (!isPlainObject(numbers)) return false;
-  const c = numbers.completed;
-  if (typeof c !== 'number' || !Number.isFinite(c)) return false;
-  return definitionVersionOf(numbers, isoDate, explicit) < COMPLETED_DEF_VERSION;
-}
-
-/** Attach definitionShift:true to a result — the key is ABSENT when there is
- *  nothing to disclose, so a caller can test it with a plain truthiness check. */
-function withDefinitionShift(result, explicit) {
-  if (isDefinitionShift(result.numbers, result.baselineDate, explicit)) {
-    result.definitionShift = true;
-  }
-  return result;
-}
-
-/** The largest (most recent) ISO date in a list, or null for an empty list. */
-function mostRecent(dates) {
-  return dates.reduce((best, d) => (best == null || d > best ? d : best), null);
-}
-
-/**
- * pickDeltaBaseline({history, legacySnapshot, reportDate, mode}) → the baseline
- * numbers the delta chips compare against, or null. Every candidate is STRICTLY
- * BEFORE reportDate (never the same day, never a future date).
- *   mode 'daily' → the most recent such history date.
- *   mode 'week'  → WEEK-TO-DATE: the most recent history date strictly BEFORE the
- *                  Sunday that opens reportDate's work week (weekStartDay). Every
- *                  report Sun→Thu therefore shares ONE baseline and the chips
- *                  accumulate across the week; Fri/Sat fall in the week just ended.
- *                  With no pre-week entry yet (history still filling up) it degrades
- *                  to the most recent prior report and returns anchored:false;
- *                  anchored:true when a genuine pre-week baseline was found.
- *   'weekly' / 'weekly-sun' / 'weekly-thu' are accepted as retired aliases of 'week';
- *   anything unknown → DEFAULT_DELTA_MODE.
- * `anchored` is present for 'week' only. Fallback (no qualifying history
- * entry): legacySnapshot {asOf, numbers} → { numbers, baselineDate: asOf,
- * mode: 'legacy' }. Null when that is absent too.
- *
- * `definitionShift` is present (and always true) ONLY when the chosen baseline
- * carries a `completed` number recorded under a PRE-2026-07-28 definition, i.e.
- * before rejected results counted as completed — so part of that key's delta is a
- * definition change, not movement. It is left off entirely when there is nothing to
- * disclose (current-definition baseline, or one with no completed number at all).
- * Callers disclose it the way anchored:false is disclosed. Stored history is never
- * rewritten to make the flag go away.
- * @param {{history?:Object<string,Object<string,number>>,
- *          legacySnapshot?:{asOf?:string, numbers?:Object<string,number>, defVersion?:number},
- *          reportDate?:string,
- *          mode?:('daily'|'week'|'weekly'|'weekly-sun'|'weekly-thu')}} args
- * @returns {{numbers:Object<string,number>, baselineDate:(string|null),
- *            mode:('daily'|'week'|'legacy'),
- *            anchored?:boolean, definitionShift?:true}|null}
- */
-export function pickDeltaBaseline({ history, legacySnapshot, reportDate, mode } = {}) {
-  const hist = isPlainObject(history) ? history : {};
-  const wantMode = normalizeDeltaMode(mode);
-
-  // Candidate dates: valid ISO keys strictly before the (valid ISO) report date.
-  const candidates = isIso(reportDate)
-    ? Object.keys(hist).filter((d) => isIso(d) && isPlainObject(hist[d]) && d < reportDate)
-    : [];
-
-  if (candidates.length > 0) {
-    if (wantMode === 'daily') {
-      // daily: the most recent date strictly before reportDate.
-      const chosen = mostRecent(candidates);
-      return withDefinitionShift({ numbers: hist[chosen], baselineDate: chosen, mode: 'daily' });
-    }
-    // week (default): ONE baseline for the whole Sun–Thu week — the most recent report
-    // strictly BEFORE this week's Sunday, so Sun/Mon/Tue/Wed/Thu all measure from the
-    // same point and Thursday's deck carries the full week's movement.
-    //
-    // The comparison is `<` against weekStart, NOT `<=`: the week's own Sunday report is
-    // deliberately EXCLUDED. Including it would make Monday…Thursday measure from Sunday
-    // evening, i.e. Sunday's own movement would be missing from every later report in
-    // the week — the exact accumulation the user asked for, lost.
-    // Note the day-count comparison (not a string compare): weekStart is a day count,
-    // and its ISO rendering is not needed anywhere.
-    const weekStart = weekStartDay(reportDate);
-    const preWeek = candidates.filter((d) => isoToDays(d) < weekStart);
-    const anchored = preWeek.length > 0;
-    // Nothing before this week's Sunday yet (a fresh install, or the first week of
-    // history): degrade to the most recent prior report so the chips still work, and
-    // SAY SO with anchored:false — build-spec then prints the daily legend wording,
-    // which is what that baseline actually is, and the review banner discloses it.
-    const chosen = mostRecent(anchored ? preWeek : candidates);
-    return withDefinitionShift({ numbers: hist[chosen], baselineDate: chosen, mode: 'week', anchored });
-  }
-
-  // Fallback: the single legacy snapshot. Its definition stamp lives NEXT TO the
-  // numbers (SNAPSHOT_SEED.defVersion), so pass it explicitly — the shipped seed is
-  // already stated in the new definition even though its asOf predates the change.
-  if (isPlainObject(legacySnapshot) && isPlainObject(legacySnapshot.numbers)) {
-    return withDefinitionShift({
-      numbers: legacySnapshot.numbers,
-      baselineDate: legacySnapshot.asOf != null ? legacySnapshot.asOf : null,
-      mode: 'legacy',
-    }, legacySnapshot.defVersion);
-  }
-  return null;
 }

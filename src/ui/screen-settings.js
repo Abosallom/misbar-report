@@ -8,14 +8,14 @@
 // mirror of the automation panel), live source (Grafana + cached-tracker), and
 // backup (export/import).
 
-import { SNAPSHOT_SEED, REPORT_OPTIONS_SEED, AUTOMATION_SEED } from '../seeds/defaults.js?v=v2026-08-04.2';
-import { normalizeDeltaMode } from '../model/delta-baseline.js?v=v2026-08-04.2';
+import { SNAPSHOT_SEED, REPORT_OPTIONS_SEED, AUTOMATION_SEED } from '../seeds/defaults.js?v=v2026-08-05.1';
+import { normalizeDeltaMode } from '../model/delta-baseline.js?v=v2026-08-05.1';
 // NAMESPACE import on purpose: the access tab reads lock.currentUser(), which is a
 // newer export. A named import would throw at link time on any build of lock.js that
 // predates it (and take the whole settings screen down); a namespace import lets the
 // tab degrade to 'unknown user' instead. lock.js is DOM-free at module scope, so this
 // stays importable in bare Node (test/module-smoke).
-import * as lock from './lock.js?v=v2026-08-04.2';
+import * as lock from './lock.js?v=v2026-08-05.1';
 
 const TABS = [
   { id: 'tat', label: 'مدة الفحوصات' },
@@ -84,10 +84,14 @@ const REPORT_CARD_FIELDS = [
  * pin them against DELTA_MODES (model/delta-baseline.js) and against the review screen's
  * DELTA_MODE_PILLS: three surfaces, one enum, no chance of a stale fourth option
  * surviving here after the weekly-sun/weekly-thu pair was retired into 'week'. Order =
- * DELTA_MODES order. */
+ * DELTA_MODES order, and the LABELS are word-for-word the review pills' labels.
+ * 2026-08-05 semantics: the mode sizes the ACTIVITY WINDOW the ▲ chips are counted over
+ * (model/delta-window.js), it no longer picks a stored report to compare against. THE
+ * INVARIANT it must never imply otherwise: the big numbers on the slides stay CUMULATIVE
+ * TOTALS — only the chips are the window's activity. */
 export const DELTA_MODE_OPTIONS = [
-  { value: 'daily', label: 'يومي — مقارنة بآخر تقرير' },
-  { value: 'week', label: 'أسبوعي — تراكمي من الأحد حتى الخميس' },
+  { value: 'daily', label: 'يومي — نشاط اليوم' },
+  { value: 'week', label: 'أسبوعي — نشاط الأسبوع (الأحد–الخميس)' },
 ];
 
 // Automation switches (Settings.automation). This tab MIRRORS the automation
@@ -960,11 +964,11 @@ export function render(container, ctx) {
           const row = checkField(f.label, () => ro().kpiCards[f.key], (v) => { ro().kpiCards[f.key] = v; });
           return f.hint ? [row, h('p', { class: 'st-help', text: f.hint })] : [row];
         }),
-        // (d) delta-chip comparison window — daily, or week-to-date (the default).
-        // Options come from the exported DELTA_MODE_OPTIONS so this radio, the review
-        // pills and DELTA_MODES stay one list.
+        // (d) delta-chip ACTIVITY WINDOW — the report day alone, or the whole Sun–Thu
+        // week (the default). Options come from the exported DELTA_MODE_OPTIONS so this
+        // radio, the review pills and DELTA_MODES stay one list.
         radioField(
-          'مقارنة الفروقات (الأسهم)',
+          'نافذة النشاط (الأسهم)',
           'st-deltaMode',
           DELTA_MODE_OPTIONS,
           () => ro().deltaMode,
@@ -972,11 +976,15 @@ export function render(container, ctx) {
         ),
         h('p', {
           class: 'st-help',
-          text: 'أسبوعي (الافتراضي): كل تقارير الأسبوع (الأحد–الخميس) تُقارن بالتقرير نفسه — آخر تقرير صدر قبل أحد ذلك الأسبوع — فتتراكم الفروقات ويعرض تقرير الخميس تغيّر الأسبوع كاملاً. تقارير الجمعة والسبت تتبع الأسبوع المنتهي للتو.',
+          text: 'الأسهم الخضراء (▲) تعرض نشاط الفترة فقط: الأحداث المؤرخة داخل النافذة كما وردت في أعمدة التواريخ بالملف. أما الأرقام الكبيرة في الشرائح فتبقى إجماليات تراكمية كما هي دائماً.',
         }),
         h('p', {
           class: 'st-help',
-          text: 'إن لم يصدر أي تقرير قبل بداية الأسبوع فتتم المقارنة بأحدث تقرير متاح، ويُذكر ذلك صراحةً في شاشة المراجعة وفي شريحة الملخص.',
+          text: 'أسبوعي (الافتراضي): النافذة من أحد هذا الأسبوع حتى تاريخ التقرير (أسبوع العمل الأحد–الخميس)، فيعرض تقرير الخميس نشاط الأسبوع كاملاً. تقارير الجمعة والسبت تتبع الأسبوع المنتهي للتو. يومي: النافذة هي يوم التقرير وحده.',
+        }),
+        h('p', {
+          class: 'st-help',
+          text: 'الحساب من البيانات نفسها ولا يعتمد على وجود تقرير سابق، لذا تكرار التوليد في اليوم نفسه يعطي النتيجة ذاتها.',
         }),
         // (e) R2 — auto-download of the 4 files after a MANUAL generation. Mirror of the
         // checkbox next to «توليد التقارير» on the review screen; both write this one key.

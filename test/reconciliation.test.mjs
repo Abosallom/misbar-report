@@ -3,9 +3,20 @@
 // INDEPENDENT cross-surface auditor. A genuine SECOND OPINION on the engine:
 // every cross-slide number is recomputed here from the RAW golden rows with its
 // own inline logic — no engine internals are imported except the pure date
-// helpers in workday.js (parsing/month-key/INT), and the workbook's own cached
-// formula fields (_cachedDue, _cachedStatus) are used as an oracle where a due
-// date or a Late label is needed. Then it asserts (a) the engine's published
+// helpers in workday.js (parsing/month-key/INT/workday), and — for everything the
+// 2026-08-05 rule changes do NOT touch — the workbook's own cached formula fields.
+// SCOPED 2026-08-05: `_cachedDue` and `_cachedStatus` are the source workbook's
+// EXCEL SAT/SUN-WEEKEND, strictly-past-due outputs. They remain a valid oracle for
+// non-due-derived facts, but they can no longer supply a DUE DATE or a LATE label:
+// Talal's rules 1 (weekend = Fri+Sat) and 2 (late = due today or overdue) were a
+// DELIBERATE divergence from that workbook, so a due-derived comparison against it
+// would now assert the OLD product. The due-derived checks below therefore
+// recompute the due date with the shared `workday()` primitive (itself pinned by
+// its own unit test in engine.test.mjs) and apply the new late rule inline. This
+// file stays a genuine second opinion about the AGGREGATION — which rows land in
+// which bucket, and whether the slides agree — it just no longer re-litigates the
+// weekend convention. golden-orders.js rows are NEVER edited.
+// Then it asserts (a) the engine's published
 // output equals this independent recompute AND (b) every cross-surface identity
 // that ties the slides together holds. Each failure message names the identity in
 // Arabic + English so a red run is self-explanatory.
@@ -16,7 +27,7 @@ import { compute } from '../src/engine/engine.js';
 import { goldenOpts } from './assertions.js';
 import { GOLDEN_ORDERS } from './fixtures/golden-orders.js';
 import { TAT_LOOKUP } from '../src/seeds/tat-lookup.js';
-import { parseDateTime, toEpochDay, monthKey } from '../src/engine/workday.js';
+import { parseDateTime, toEpochDay, monthKey, workday } from '../src/engine/workday.js';
 
 // --- our OWN tiny helpers (do not reuse engine internals) --------------------
 /** report-style 1-decimal rounding (half-up, EPSILON-guarded) — re-implemented. */
@@ -28,6 +39,22 @@ const norm = (s) => String(s ?? '').replace(/\s+/g, ' ').trim();
 const OPTS = goldenOpts();
 const out = compute(GOLDEN_ORDERS, TAT_LOOKUP, OPTS);
 
+// asOf of the published golden run, as a whole-UTC-day (the late rule compares days).
+const ASOF_DAY = toEpochDay(parseDateTime(OPTS.asOf));
+/** TAT resolution, re-implemented: curated lookup first, else the CSV column. */
+const TAT_IDX = new Map(Object.entries(TAT_LOOKUP));
+function tatOf(r) {
+  if (TAT_IDX.has(r.testName)) return TAT_IDX.get(r.testName);
+  return (r.tatDaysCsv != null && r.tatDaysCsv !== '') ? Number(r.tatDaysCsv) : null;
+}
+/** Due day = workday(received, StdTAT) under the Fri+Sat weekend. null when either
+ *  input is missing — a row with no receipt or no TAT has no due date at all. */
+function dueOf(r) {
+  const recv = parseDateTime(r.received);
+  const tat = tatOf(r);
+  return (recv != null && tat != null) ? workday(recv, tat) : null;
+}
+
 // Independent projection of every raw row to just the fields the identities need.
 // Nothing here calls the engine; dates come straight from the pure parser and the
 // workbook's cached formula outputs.
@@ -38,21 +65,30 @@ const R = GOLDEN_ORDERS.map((r) => ({
   dispatchedMs: parseDateTime(r.dispatched),
   receivedMs: parseDateTime(r.received),
   resultedMs: parseDateTime(r.resulted),
-  cachedDueMs: parseDateTime(r._cachedDue), // workbook DueDate (independent oracle)
+  // DUE DATE, recomputed here from received + StdTAT with the shared workday()
+  // primitive. NOT `_cachedDue`: that field is the workbook's Sat/Sun-weekend
+  // answer and 189 of the 628 rows now legitimately differ from it.
+  dueMs: dueOf(r),
   cancelled: r.rawStatus === 'Order Cancelled',
   rejected: r.rawStatus === 'Result Rejected',
-  cachedLate: r._cachedStatus === 'Late', // workbook Status @ asOf 2026-07-09
 }));
 const NC = R.filter((e) => !e.cancelled); // non-cancelled universe
 const created = (e) => e.orderMs != null; // sheet's "order exists"
 const count = (arr, f) => arr.filter(f).length;
 
 // Independent success ("on-time"): non-rejected resulted row whose resulted day is
-// on or before the workbook due day (day-granular). Uses the cached due date.
-const isOnTime = (e) => !e.rejected && e.resultedMs != null && e.cachedDueMs != null
-  && toEpochDay(e.resultedMs) <= toEpochDay(e.cachedDueMs);
-// Independent late-no-result: workbook-Late AND still unresulted.
-const isLateNoResult = (e) => e.cachedLate && e.resultedMs == null;
+// on or before the due day, INCLUSIVE — resulting ON the due day meets the TAT.
+// That inclusiveness is unchanged by the 2026-08-05 rules; only the due day moved.
+const isOnTime = (e) => !e.rejected && e.resultedMs != null && e.dueMs != null
+  && toEpochDay(e.resultedMs) <= toEpochDay(e.dueMs);
+// Independent late-no-result, re-implemented under the NEW rule (Talal 2026-08-05):
+// still unresulted, not rejected/cancelled, and the due day is TODAY or PAST
+// (`asOf >= due`, where it used to be a strict `>`). Note this points the OPPOSITE
+// way to isOnTime at the boundary and that is the intended asymmetry: due today
+// with a result = on time, due today with NO result = late ("<24h left, nothing to
+// show"). Was `_cachedStatus === 'Late'`, the workbook's strictly-past-due label.
+const isLateNoResult = (e) => e.resultedMs == null && !e.rejected && e.dueMs != null
+  && ASOF_DAY >= toEpochDay(e.dueMs);
 
 // ---------------------------------------------------------------------------
 // 1. STAGE PARTITION — تقسيم المراحل يساوي الإجمالي

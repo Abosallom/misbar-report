@@ -158,6 +158,11 @@ export const SNAPSHOT_SEED = {
     awaitingDispatch: 10,
     shippedNotReceived: 12,
     awaitingResults: 159,
-    lateNoResult: 67,
+    // 2026-08-05 re-baseline: 67 → 73. The late rule became "due TODAY or overdue"
+    // (stakeholder decision) — six 09-07 rows are due EXACTLY on the report date with
+    // no result (received 30-06 TAT 7, 02-07 TAT 5, three on 05-07 TAT 4, 08-07 TAT 1)
+    // and now count late. The Fri/Sat weekend flip alone left this at 67; the boundary
+    // change is what moves it. Engine and as-of agree at 73 (asof.test identity).
+    lateNoResult: 73,
   },
 };

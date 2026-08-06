@@ -9,6 +9,18 @@
 // own date helpers (workday.js) and TAT resolution (tat.js) so the day-granular
 // LATE rule and StdTAT lookup (incl. the CSV fallback) match the engine exactly.
 //
+// RULE CHANGES MIRRORED HERE (Talal, 2026-08-05) — this file must never drift
+// from engine.js on either:
+//   • WEEKEND = Friday+Saturday (business days Sun–Thu). Inherited automatically
+//     from workday.js, which deliberately dropped Excel's Sat/Sun convention.
+//     Every due date below therefore moves with the engine's.
+//   • LATE = due TODAY or overdue. `lateNoResult` compares `asOfDay >= dueMs`
+//     (was `>`), matching engine.js's `delay < 0 → ON_TIME` cascade: a row with
+//     no result whose due day IS the as-of day has under 24h of TAT left and
+//     counts as late. (A row RESULTED on its due day is still on time — that
+//     asymmetry lives in engine.js's onTime and does not touch this file, which
+//     only ever counts UNRESULTED rows as late.)
+//
 // CROWN INVARIANT — identity at the report date. For a dataset whose current
 // state IS its as-of state (no timestamp later than the report date, e.g. the
 // 2026-07-09 golden snapshot), computeNumbersAsOf at that date reproduces the
@@ -44,7 +56,9 @@
 //   awaitingDispatch   orderDate ≤ asOf AND NOT dispatched ≤ asOf
 //   shippedNotReceived dispatched ≤ asOf AND NOT received ≤ asOf
 //   awaitingResults    received ≤ asOf AND NOT resulted ≤ asOf AND NOT rejected
-//   lateNoResult       awaitingResults ∩ StdTAT resolved ∩ due day < asOf day
+//   lateNoResult       awaitingResults ∩ StdTAT resolved ∩ due day ≤ asOf day
+//                      (2026-08-05: was `due day < asOf day`; due TODAY with no
+//                      result is now late — see the LATE rule note above)
 // completed and rejected share ONE dated-day computation per row (below), so the
 // two can never disagree about when a rejected row entered the picture, and a
 // rejected row that DOES carry a result date is counted once, not twice.
@@ -61,8 +75,8 @@
 // earliest defensible day and restores the partition, while still resolving to
 // SOME day for every row so the CROWN identity at a saturated as-of is unchanged.
 
-import { parseDateTime, toEpochDay, workday, MS_PER_DAY } from './workday.js?v=v2026-08-04.2';
-import { buildTatIndex, resolveTat } from './tat.js?v=v2026-08-04.2';
+import { parseDateTime, toEpochDay, workday, MS_PER_DAY } from './workday.js?v=v2026-08-05.1';
+import { buildTatIndex, resolveTat } from './tat.js?v=v2026-08-05.1';
 
 // engine.js's cascade keys off these exact rawStatus literals (not exported).
 const RAW_CANCELLED = 'Order Cancelled';
@@ -134,6 +148,15 @@ export function computeNumbersAsOf({ rows, tatTests, asOfIso, opts = {} } = {}) 
   for (const row of rowsArr) {
     const cancelled = row.rawStatus === RAW_CANCELLED;
     const isRejected = row.rawStatus === RAW_REJECTED;
+
+    // opts.excludeNoTat mirrors engine compute(): a 'No Match' row — received present
+    // but StdTAT unresolvable from lookup AND CSV fallback — is dropped before ANY
+    // aggregation. Cancelled/rejected rows are never 'No Match' (they resolve earlier
+    // in the cascade), so their counting is untouched, exactly as in the engine.
+    if (opts.excludeNoTat && !cancelled && !isRejected && dayOf(row.received) != null
+        && resolveTat(row, tatIndex, opts).tat == null) {
+      continue;
+    }
 
     const orderD = dayOf(row.orderDate);
     const collectedD = dayOf(row.collected);
@@ -208,9 +231,10 @@ export function computeNumbersAsOf({ rows, tatTests, asOfIso, opts = {} } = {}) 
     if (receivedByAsOf && !resultedByAsOf && !rejectedByAsOf) awaitingResults++;
 
     // lateNoResult (engine: status === LATE && resultedMs == null). LATE =
-    // non-cancelled, non-rejected, received, StdTAT resolved, and DueDate strictly
-    // before the as-of day (delay = asOfDay − due > 0). Due = WORKDAY(received, tat)
-    // with the engine's exact StdTAT resolution (lookup, then CSV fallback).
+    // non-cancelled, non-rejected, received, StdTAT resolved, and DueDate ON or
+    // before the as-of day (delay = asOfDay − due ≥ 0). Due = workday(received, tat)
+    // with the engine's exact StdTAT resolution (lookup, then CSV fallback), under
+    // the Fri/Sat weekend.
     // Same time-shifted guard as awaitingResults: a row rejected LATER was genuinely
     // late-without-a-result on the earlier date, and lateNoResult is a subset of
     // awaitingResults, so the two guards must agree or the subset breaks.
@@ -218,7 +242,9 @@ export function computeNumbersAsOf({ rows, tatTests, asOfIso, opts = {} } = {}) 
       const { tat } = resolveTat(row, tatIndex, opts);
       if (tat != null) {
         const dueMs = workday(receivedD, tat); // workday floors start internally
-        if (asOfDay > dueMs) lateNoResult++; // day-granular: due day strictly before asOf day
+        // day-granular: due day ON or before asOf day (2026-08-05 boundary change —
+        // `>` became `>=`, mirroring engine.js's `delay < 0 → ON_TIME`).
+        if (asOfDay >= dueMs) lateNoResult++;
       }
     }
   }

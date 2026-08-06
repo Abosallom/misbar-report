@@ -14,9 +14,9 @@
 //
 // PHI rule unchanged: order rows live in `state` only. Nothing here logs a row
 // or writes one to storage — only aggregate numbers reach store.updateSnapshot.
-import { STR, todayISO, buildFileName } from '../i18n/ar.js?v=v2026-08-04.2';
-import { VARIANTS, normTest } from '../contracts.js?v=v2026-08-04.2';
-import { getGenLibs } from '../vendor-loader.js?v=v2026-08-04.2';
+import { STR, todayISO, buildFileName } from '../i18n/ar.js?v=v2026-08-05.1';
+import { VARIANTS, normTest } from '../contracts.js?v=v2026-08-05.1';
+import { getGenLibs } from '../vendor-loader.js?v=v2026-08-05.1';
 
 /* ------------------------------------------------------------------ *
  * Shared micro-helpers (same idioms the screens use)
@@ -39,94 +39,55 @@ function fmtHHMM(iso) {
 }
 
 /* ------------------------------------------------------------------ *
- * Delta baseline (lifted from screen-generate — shared verbatim)
+ * Delta chips — THE WEEK'S ACTIVITY (2026-08-05, Talal)
  * ------------------------------------------------------------------ */
 
-// Engine's 10 published numbers (the delta keys) pulled out of an EngineOutput/kpi.
-export function currentNumbersOf(kpi) {
-  const t = (kpi && kpi.totals) || {};
-  const f = (kpi && kpi.funnel) || {};
-  const b = (kpi && kpi.buckets) || {};
-  return {
-    total: t.total, collected: f.collected, dispatched: f.dispatched, received: f.received,
-    completed: b.completed, rejected: b.rejected, awaitingDispatch: b.awaitingDispatch,
-    shippedNotReceived: b.shippedNotReceived, awaitingResults: b.awaitingResults, lateNoResult: b.lateNoResult,
-  };
-}
-
-// deltaMode baseline (user decision B): recompute model.kpi.deltas against the picked
-// baseline and stamp model.deltaBaseline {baselineDate, mode, anchored, definitionShift}
-// so the exec legend renders mode-aware and BOTH disclosures (a non-anchored week
-// fallback, an old-definition baseline) survive to file production. Signed (no
-// max(0) clamp) so a drop surfaces as a '−N' green chip. Degrades to the engine's legacy
-// deltas when the delta-baseline module is missing or no baseline resolves. Mutates
-// kpi.deltas in place so the generated files match the review preview.
-export function applyDeltaBaseline(model, store, pickDeltaBaseline) {
-  if (typeof pickDeltaBaseline !== 'function' || !model || !model.kpi) return;
+// THE INVARIANT, first: the BIG numbers on slides 2/3/4 — exec KPI cards, journey stage
+// counts, monthly table, compliance table — REMAIN CUMULATIVE TOTALS, untouched. ONLY
+// the small green delta chips changed meaning: they are now the WEEK'S ACTIVITY, the
+// events dated Sunday..report-day, counted from the CSV's own date columns.
+//
+// So the stored-baseline stamper is gone. applyDeltaBaseline (kpi numbers minus
+// pickDeltaBaseline's chosen stored report) and its local currentNumbersOf twin are
+// DELETED; model/delta-window.js stampWindowDeltas is the ONE stamper, shared verbatim
+// with ui/screen-review.js. It writes model.kpi.deltas (signed — a drained queue must
+// surface as '−N') and model.deltaWindow {start, end, mode, approx?}, which REPLACES
+// model.deltaBaseline for build-spec's legend and the review banner.
+//
+// WHY THIS FILE'S IDIOM DOESN'T CHANGE: the module stays an INJECTED, guarded dependency
+// (DEFAULT_DEPS.loadDeltaWindow → tryImport; the stamper arrives as an argument), exactly
+// as the picker did, and for the identical reason. A static import would make
+// model/delta-window.js a HARD dependency of pipeline.js, so a missing or export-skewed
+// module would fail this file at LOAD time and main.js's headless trigger
+// (`await import('./automation/pipeline.js')`, which catches and abandons the run) would
+// produce NO REPORT AT ALL — instead of degrading to the engine's own clamped deltas the
+// way this function promises.
+//
+// The mode is read from settings the same way, but note what it now selects: the SIZE OF
+// THE WINDOW ('week' = Sunday..report-date, 'daily' = the report date alone), not which
+// stored report to diff against. The RAW stored value is passed through deliberately —
+// stampWindowDeltas normalizes it (normalizeDeltaMode, whose documented fallback is the
+// DEFAULT 'week', never 'daily'), so a `|| 'daily'` here would silently re-daily-ify every
+// falsy stored mode. That exact bug shipped once: seedSettings() writes no reportOptions
+// key, so the local-store path always lands on the fallback, and screen-generate re-runs
+// THIS copy over the model screen-review already stamped — the deck won every
+// disagreement. It cannot recur now for a second reason too: the stamper is a PURE
+// function of (rows, reportDate, mode), so two runs on one model are deep-equal.
+//
+// DEGRADES, never throws: no stamper, no rows, or an unusable report date → kpi.deltas is
+// left exactly as the engine produced it.
+export function applyWindowDeltas(model, state, store, stampWindowDeltas) {
+  if (typeof stampWindowDeltas !== 'function' || !model || !model.kpi) return;
   const settings = (store && store.settings) || {};
-  let picked = null;
   try {
-    picked = pickDeltaBaseline({
-      history: settings.snapshotHistory,
-      legacySnapshot: settings.snapshot,
-      reportDate: model.reportDate,
-      // The RAW stored value — deliberately NOT `|| 'daily'` (review fix 2026-08-04).
-      // The default is 'week' now, so that fallback silently re-daily-ified every FALSY
-      // stored mode (undefined — main.js seedSettings() writes no reportOptions key at
-      // all, so the local-store fallback always lands here — plus null, '', 0, false)
-      // while screen-review's twin fed the same expression through normalizeDeltaMode and
-      // got 'week'. screen-generate re-runs THIS copy on the very model object review
-      // already stamped, so the deck always won the disagreement: the banner promised
-      // 'منذ بداية الأسبوع' and the files shipped a day-over-day baseline.
-      // delta-baseline.js names that exact failure ("falling back to 'daily' would
-      // silently re-daily-ify a user who never asked for daily").
-      //
-      // Passing the raw value is EQUIVALENT to screen-review's normalizeDeltaMode(...)
-      // for every possible input, and that is the point: pickDeltaBaseline normalizes its
-      // own `mode` argument (its documented contract — "anything unknown →
-      // DEFAULT_DELTA_MODE"), normalizeDeltaMode is idempotent, and the mode stamped
-      // below is `picked.mode`, the canonical one the picker chose. Normalizing HERE
-      // instead — i.e. a static `import { normalizeDeltaMode }` — would turn
-      // model/delta-baseline.js into a HARD dependency of this module, and it is
-      // deliberately an optional injected one (DEFAULT_DEPS.loadDeltaBaseline uses
-      // tryImport; this function receives the picker as an argument). A missing or
-      // export-skewed delta-baseline.js would then fail pipeline.js at load time and
-      // main.js's headless trigger (`await import('./automation/pipeline.js')`, which
-      // catches and abandons the run) would produce NO report at all, instead of the
-      // engine's legacy deltas this function's header promises.
+    stampWindowDeltas(model, {
+      rows: (state && state.parsed && state.parsed.orders) || null,
+      tatTests: settings.tatLookup || {},
       mode: settings.reportOptions && settings.reportOptions.deltaMode,
     });
-  } catch (e) { console.warn('[generate] pickDeltaBaseline failed; keeping legacy deltas', e); return; }
-  if (!picked || !picked.numbers) return; // no baseline resolvable → keep engine deltas
-  const cur = currentNumbersOf(model.kpi);
-  const deltas = {};
-  for (const key of Object.keys(cur)) {
-    const prev = picked.numbers[key];
-    deltas[key] = (typeof prev === 'number' && typeof cur[key] === 'number') ? (cur[key] - prev) : 0;
+  } catch (e) {
+    console.warn('[generate] stampWindowDeltas failed; keeping engine deltas', e);
   }
-  model.kpi.deltas = deltas;
-  model.deltaBaseline = { baselineDate: picked.baselineDate, mode: picked.mode };
-  // anchored is only meaningful for mode 'week' and, since 2026-08-04, means: NO report
-  // was stored BEFORE this week's Sunday, so the picked baseline is just the most recent
-  // prior report and the numbers are NOT a full week-to-date gap. (It used to mean "the
-  // baseline missed the requested weekday" under the retired weekly-sun/weekly-thu pair —
-  // same flag, same consumers, narrower meaning.) It MUST be preserved here, not just in
-  // the review screen's copy: this is the function the unattended run and screen-generate
-  // use, and screen-generate re-runs it on the very model object review already stamped —
-  // dropping the key would delete the disclosure on the way to file production
-  // (build-spec downgrades to the daily legend wording on anchored:false).
-  if ('anchored' in picked) model.deltaBaseline.anchored = !!picked.anchored;
-  // definitionShift is the SECOND disclosure riding on the same object and gets the
-  // IDENTICAL treatment (review fix 2026-08-04 — until now only screen-review's copy
-  // forwarded it). true means the picked baseline's `completed` was recorded under the
-  // pre-2026-07-28 rule (rejected EXCLUDED from completed), so part of the completed chip
-  // is the definition change rather than movement. The argument is the one written out
-  // for `anchored` just above: this assignment REPLACES the deltaBaseline object review
-  // already stamped, so dropping the key deletes the disclosure on the way to file
-  // production. Latent only because build-spec currently reads db.anchored and db.mode
-  // and not db.definitionShift — the day the deck discloses a definition shift, it would
-  // silently not. Both stampers now produce the same object for the same input.
-  if (picked.definitionShift) model.deltaBaseline.definitionShift = true;
 }
 
 /**
@@ -305,7 +266,7 @@ function installFastTimers() {
 // Build the SlideSpec per VARIANT — the variant changes slide-5 content
 // (task rows), so one shared spec would leak internal tasks into NUPCO files.
 async function buildVariantSpec(model, variant) {
-  const mod = await tryImport('../slidespec/build-spec.js?v=v2026-08-04.2');
+  const mod = await tryImport('../slidespec/build-spec.js?v=v2026-08-05.1');
   const fn = pickFn(mod, ['buildSpec', 'build', 'makeSpec', 'toSpec']);
   if (!fn) return null;
   let spec = fn(model, { variant });
@@ -331,7 +292,7 @@ async function toBlob(result, kind) {
 // renderPptx(spec, {variant, PptxGenJS}) -> Promise<Blob>
 async function makePptx(spec, variant, libs) {
   if (!spec) return null;
-  const mod = await tryImport('../render/pptx-renderer.js?v=v2026-08-04.2');
+  const mod = await tryImport('../render/pptx-renderer.js?v=v2026-08-05.1');
   const fn = pickFn(mod, ['renderPptx', 'buildPptx', 'toPptx', 'makePptx', 'render']);
   if (!fn) return null;
   const r = await fn(spec, { variant, PptxGenJS: libs.PptxGenJS });
@@ -343,9 +304,9 @@ async function makePptx(spec, variant, libs) {
 // the host and before capture starts — screen-generate clones them into live thumbnails.
 async function makePdf(spec, variant, libs, host, onProgress, onSlides) {
   if (!spec) return null;
-  const rMod = await tryImport('../render/html-renderer.js?v=v2026-08-04.2');
+  const rMod = await tryImport('../render/html-renderer.js?v=v2026-08-05.1');
   const renderSlides = pickFn(rMod, ['renderSlides', 'renderSpec', 'renderHtml', 'render']);
-  const pMod = await tryImport('../render/pdf-export.js?v=v2026-08-04.2');
+  const pMod = await tryImport('../render/pdf-export.js?v=v2026-08-05.1');
   const exportPdf = pickFn(pMod, ['exportPdf', 'renderPdf', 'toPdf', 'buildPdf', 'render']);
   if (!renderSlides || !exportPdf) return null;
   host.innerHTML = '';
@@ -529,17 +490,20 @@ const PULL_REUSE_MS = 15000;
 
 /** Default heavy dependencies — every one overridable through `deps` (tests inject fakes). */
 const DEFAULT_DEPS = Object.freeze({
-  loadGrafana: () => import('../ingest/grafana.js?v=v2026-08-04.2'),
-  loadEngine: () => tryImport('../engine/engine.js?v=v2026-08-04.2'),
-  loadReportModel: () => import('../model/report-model.js?v=v2026-08-04.2'),
-  loadDeltaBaseline: () => tryImport('../model/delta-baseline.js?v=v2026-08-04.2'),
-  loadTaskLifecycle: () => tryImport('../model/task-lifecycle.js?v=v2026-08-04.2'),
-  loadLateLabs: () => import('../export/late-labs.js?v=v2026-08-04.2'),
-  loadTatSuggest: () => tryImport('../ingest/tat-suggest.js?v=v2026-08-04.2'),
-  loadTatLoinc: () => tryImport('../seeds/tat-lookup.js?v=v2026-08-04.2'),
+  loadGrafana: () => import('../ingest/grafana.js?v=v2026-08-05.1'),
+  loadEngine: () => tryImport('../engine/engine.js?v=v2026-08-05.1'),
+  loadReportModel: () => import('../model/report-model.js?v=v2026-08-05.1'),
+  loadDeltaBaseline: () => tryImport('../model/delta-baseline.js?v=v2026-08-05.1'),
+  // The delta-chip stamper. Guarded like the rest: a build without it degrades to the
+  // engine's own clamped deltas instead of failing this module at load time.
+  loadDeltaWindow: () => tryImport('../model/delta-window.js?v=v2026-08-05.1'),
+  loadTaskLifecycle: () => tryImport('../model/task-lifecycle.js?v=v2026-08-05.1'),
+  loadLateLabs: () => import('../export/late-labs.js?v=v2026-08-05.1'),
+  loadTatSuggest: () => tryImport('../ingest/tat-suggest.js?v=v2026-08-05.1'),
+  loadTatLoinc: () => tryImport('../seeds/tat-lookup.js?v=v2026-08-05.1'),
   // Track 5's module; absent until it ships → the emails step reports 'skip'.
-  loadEmlDraft: () => tryImport('../export/eml-draft.js?v=v2026-08-04.2'),
-  loadDownload: () => tryImport('../ui/late-labs-section.js?v=v2026-08-04.2'),
+  loadEmlDraft: () => tryImport('../export/eml-draft.js?v=v2026-08-05.1'),
+  loadDownload: () => tryImport('../ui/late-labs-section.js?v=v2026-08-05.1'),
   produceReportFiles,
   now: () => Date.now(),
 });
@@ -760,8 +724,8 @@ export async function runAutomation({
     if (settings.reportOptions) model.reportOptions = settings.reportOptions;
     if (!model.overrides) model.overrides = {};
 
-    const db = await D.loadDeltaBaseline();
-    applyDeltaBaseline(model, theStore, db && db.pickDeltaBaseline);
+    const dw = typeof D.loadDeltaWindow === 'function' ? await D.loadDeltaWindow() : null;
+    applyWindowDeltas(model, theState, theStore, dw && dw.stampWindowDeltas);
     theState.reportModel = model;
 
     const total = (out.totals && out.totals.total) != null ? out.totals.total : 0;

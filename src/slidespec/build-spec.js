@@ -22,7 +22,7 @@
 //   m.reportOptions.kpiCards[key] toggles the 7 exec KPI cards (row geometry repacks)
 //                                 + the OPT-IN 'turnaround' block on the monthly slide
 //   m.overrides[key]              per-run manual NUMBER overrides (suppresses that delta chip)
-import { COLORS as C, GEOM } from '../theme.js?v=v2026-08-04.2';
+import { COLORS as C, GEOM } from '../theme.js?v=v2026-08-05.1';
 
 // OPT-IN kpiCards KEYS. reportOptions.kpiCards normally reads "on unless === false"
 // (see buildExec's cardDefs filter). The keys in this set INVERT that: they render only
@@ -90,17 +90,25 @@ export const DEFAULT_LABELS = {
   // Exec slide — overall completion-rate line. NOT RENDERED (user decision 2026-07-26:
   // the 20-07 reference deck has no such line); kept for registry parity like execPartition.
   execCompletionRate: 'نسبة الاكتمال الإجمالية',
-  // Exec slide — delta-chip legend. ALL chips are green now (user decision 2026-07-23):
-  // the old red/green colour key was removed. The legend is MODE-AWARE — the daily/weekly
-  // variants substitute the baseline date into '{date}'; the plain key is the legacy
-  // (no-baseline) previous-report wording. Rendered only when a chip is visible this run.
-  // The weekly comparison is WEEK-TO-DATE since 2026-08-04 (user request): one baseline
-  // per Sun–Thu week — the last report before that week's Sunday — so the chips
-  // accumulate through the week. Its wording therefore names the WEEK's start, not a
-  // weekday: execDeltaLegendWeek. The three older weekly keys are RETIRED but KEPT (a
-  // labels override saved against one of them must not vanish, and DELTA_LEGEND_KEY
-  // still maps the old mode values for stale-cache safety — see it for why).
+  // Exec slide — delta-chip legend. ALL chips are green (user decision 2026-07-23): the
+  // old red/green colour key was removed. Rendered only when a chip is visible this run.
+  //
+  // 2026-08-05 — THE LEGEND NOW NAMES A WINDOW, NOT A BASELINE. THE INVARIANT: the big
+  // numbers on this slide (and on the monthly/compliance slides) REMAIN CUMULATIVE
+  // TOTALS; only the chips changed meaning — they are the WEEK'S ACTIVITY, the events
+  // dated Sunday..report-day, counted from the CSV's own date columns
+  // (model/delta-window.js). So the legend states the window's own dates:
+  //   week  → '▲ نشاط الأسبوع من الأحد {start} حتى {end}'
+  //   daily → '▲ نشاط يوم {end}'
+  // The FIVE baseline-era keys below are RETIRED but KEPT as registry orphans: a labels
+  // override saved against one of them must not vanish out from under the operator, and
+  // DEFAULT_LABELS/LABEL_NAMES key parity is test-pinned. Nothing reads them — they are
+  // marked (غير مستخدم حالياً) in LABEL_NAMES so the labels editor says so.
+  // execDeltaLegend is NOT retired: it is the undated generic fallback used whenever a
+  // model carries no deltaWindow (rows unavailable → the engine's own deltas).
   execDeltaLegend: '▲ التغيّر منذ التقرير السابق',
+  execDeltaLegendWeekWindow: '▲ نشاط الأسبوع من الأحد {start} حتى {end}',
+  execDeltaLegendDayWindow: '▲ نشاط يوم {end}',
   execDeltaLegendDaily: '▲ التغيّر منذ آخر تقرير ({date})',
   execDeltaLegendWeek: '▲ التغيّر منذ بداية الأسبوع — مقارنة بتقرير ({date})',
   execDeltaLegendWeekly: '▲ التغيّر الأسبوعي — منذ تقرير ({date})',
@@ -328,9 +336,11 @@ export const LABEL_NAMES = {
   kpiLate: 'بطاقة: الطلبات المتأخرة',
   kpiShipped: 'بطاقة: فحوصات شُحنت ولم تُستلم',
   execCompletionRate: 'سطر نسبة الاكتمال الإجمالية (غير مستخدم حالياً)',
-  execDeltaLegend: 'مفتاح التغيّر — الصيغة الافتراضية (منذ التقرير السابق)',
-  execDeltaLegendDaily: 'مفتاح التغيّر اليومي — منذ آخر تقرير ({date})',
-  execDeltaLegendWeek: 'مفتاح التغيّر الأسبوعي — منذ بداية الأسبوع ({date})',
+  execDeltaLegend: 'مفتاح النشاط — الصيغة الافتراضية (بدون نافذة)',
+  execDeltaLegendWeekWindow: 'مفتاح نشاط الأسبوع — من الأحد ({start}) حتى ({end})',
+  execDeltaLegendDayWindow: 'مفتاح نشاط اليوم — ({end})',
+  execDeltaLegendDaily: 'مفتاح التغيّر اليومي — منذ آخر تقرير ({date}) (غير مستخدم حالياً)',
+  execDeltaLegendWeek: 'مفتاح التغيّر الأسبوعي — منذ بداية الأسبوع ({date}) (غير مستخدم حالياً)',
   execDeltaLegendWeekly: 'مفتاح التغيّر الأسبوعي — منذ تقرير قبل أسبوع ({date}) (غير مستخدم حالياً)',
   execDeltaLegendWeeklySun: 'مفتاح التغيّر الأسبوعي — منذ تقرير الأحد ({date}) (غير مستخدم حالياً)',
   execDeltaLegendWeeklyThu: 'مفتاح التغيّر الأسبوعي — منذ تقرير الخميس ({date}) (غير مستخدم حالياً)',
@@ -434,40 +444,40 @@ const bullets = (items) => items.map((s) => '•  ' + s).join('\n');
 // 0 / non-finite → undefined so the chip is hidden (keep current behaviour). ALL chips
 // are green now (user decision 2026-07-23) — the old BAD_DELTA red-chip logic is gone.
 const fmtDelta = (n) => (Number.isFinite(n) && n !== 0 ? (n > 0 ? '+' + n : '−' + Math.abs(n)) : undefined);
-// Mode-aware delta legend: every dated mode substitutes the baseline date into '{date}';
-// legacy (no baseline, or mode 'legacy') uses the plain previous-report wording. The
-// weekly comparison is WEEK-TO-DATE since 2026-08-04 — pickDeltaBaseline returns mode
-// 'week' with the pre-Sunday baseline date. All strings stay overridable through the
-// labels registry.
+// Delta-chip legend text — it names the ACTIVITY WINDOW the chips were counted over,
+// read straight off model.deltaWindow {start, end, mode} (model/delta-window.js). One
+// source, two surfaces: the review banner's deltaWording (ui/screen-review.js) reads the
+// SAME object with the same precedence, so the operator's banner and the audience's
+// slide can never claim different windows.
 //
-// The three RETIRED mode values are still mapped ON PURPOSE. This is a static site
-// served from Pages with ?v= cache-busting per module: a browser can hold an older
-// cached model/delta-baseline.js (still emitting 'weekly-sun') against this newer
-// build-spec.js for as long as its cache skews. An unmapped mode falls all the way
-// through to the undated 'منذ التقرير السابق' wording, silently dropping the baseline
-// date off the deck. Keeping four lines costs nothing and makes that skew invisible.
-const DELTA_LEGEND_KEY = {
-  daily: 'execDeltaLegendDaily',
-  week: 'execDeltaLegendWeek',
-  weekly: 'execDeltaLegendWeekly',           // retired — stale-cache safety only
-  'weekly-sun': 'execDeltaLegendWeeklySun',  // retired — stale-cache safety only
-  'weekly-thu': 'execDeltaLegendWeeklyThu',  // retired — stale-cache safety only
-};
-// db.anchored === false means pickDeltaBaseline found NO report before this week's Sunday
-// yet (history still filling up) and degraded to the most recent prior report. Calling that
-// 'منذ بداية الأسبوع' would assert a week-to-date span the baseline does not have — the deck
-// would state a false comparison basis while the review screen discloses the fallback
-// (screen-review.js). So the unanchored case falls back to the daily wording
-// ('منذ آخر تقرير ({date})'), which is exactly what that baseline IS. Unchanged by the
-// week-to-date switch: the flag means the same thing and the right wording is still daily's.
-// BOTH stampers forward `anchored`, so the fallback wording is reached on either path:
-// src/ui/screen-review.js:79 and src/automation/pipeline.js:90 each copy it onto
-// model.deltaBaseline (both carry their own comment saying it MUST be preserved).
-const deltaLegendText = (L, db) => {
-  if (!db || !db.baselineDate) return L('execDeltaLegend');
-  const key = db.anchored === false ? 'execDeltaLegendDaily' : DELTA_LEGEND_KEY[db.mode];
-  if (key) return L(key).replace('{date}', fmtDate(db.baselineDate));
-  return L('execDeltaLegend');
+// THE INVARIANT this legend must not misstate: the big numbers on the slide are
+// CUMULATIVE TOTALS; only the ▲ chips are the window's activity. The wording says
+// نشاط (activity) for exactly that reason — never 'التغيّر منذ …', which described the
+// retired stored-baseline diff.
+//
+// The stamped `mode` decides the wording; 'daily' is the single-day form, anything else
+// (i.e. 'week') the Sunday-anchored form. With no deltaWindow, or one missing its dates,
+// the undated generic wording is used — that is the shape a model carries when the rows
+// were unavailable and the engine's own deltas survived.
+//
+// DELTA_LEGEND_KEY and the anchored-downgrade branch it fed are DELETED: there is no
+// baseline to be un-anchored, and no retired mode value can arrive here (the stamped
+// mode is normalizeDeltaMode's canonical output, always 'daily' or 'week'). A stale
+// cached model/delta-window.js cannot emit a third value, so the old stale-cache mapping
+// has nothing left to protect against; an unexpected mode falls into the week form,
+// whose dates are still read from the same stamp and are therefore still true.
+// ISO-shape gate, not just a truthiness one: fmtDate splits on '-' and would emit
+// 'undefined / undefined / …' for anything else. A malformed stamp must degrade to the
+// undated wording, never print garbage onto a delivered slide.
+const isIsoDate = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
+const deltaLegendText = (L, dw) => {
+  if (!dw || !isIsoDate(dw.end)) return L('execDeltaLegend');
+  const end = fmtDate(dw.end);
+  if (dw.mode === 'daily') return L('execDeltaLegendDayWindow').replace('{end}', end);
+  if (!isIsoDate(dw.start)) return L('execDeltaLegend');
+  return L('execDeltaLegendWeekWindow')
+    .replace('{start}', fmtDate(dw.start))
+    .replace('{end}', end);
 };
 
 // ---- repeated chrome (top bar, section title, corner tags, footer border) ---
@@ -748,7 +758,7 @@ function buildExecFunnel(m) {
   });
   // Delta-chip legend — only when at least one green "+N" chip is visible this run.
   if (anyChip) {
-    els.push(text(0.5, 0.72, 6.0, 0.18, deltaLegendText(L, m.deltaBaseline), 8.5, { color: C.deltaGreen, align: 'left', valign: 'middle', rtl: true }));
+    els.push(text(0.5, 0.72, 6.0, 0.18, deltaLegendText(L, m.deltaWindow), 8.5, { color: C.deltaGreen, align: 'left', valign: 'middle', rtl: true }));
   }
   return { id: 'execFunnel', bg: C.white, elements: els };
 }

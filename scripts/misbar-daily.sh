@@ -2,7 +2,7 @@
 # Hands-off report job (launchd → com.misbar.daily-report / com.misbar.weekly-report).
 #
 #   misbar-daily.sh            # mode=daily  (default — unchanged behaviour)
-#   misbar-daily.sh weekly     # mode=weekly (the Sunday + Thursday agent)
+#   misbar-daily.sh weekly     # mode=weekly (the Thursday agent)
 #
 #   1) refresh the encrypted KAMC snapshot with the existing local exporter
 #   2) open the live site with the ?auto=1 trigger so the browser does the rest
@@ -10,10 +10,10 @@
 # The mode is an IDENTITY, never a switch inside this script: both agents run the
 # very same two steps. It tags every log line ([misbar-daily …] /
 # [misbar-weekly …]) and, for weekly, puts &mode=weekly on the trigger URL as the
-# run's marker. What the page does with that marker — including the choice between
-# the weekday-anchored weekly-sun / weekly-thu comparisons — is decided in the app
-# (src/main.js), not here; this job never writes a setting and never claims the
-# page acted on it.
+# run's marker. What the page does with that marker is decided in the app — the
+# delta chips are the week's ACTIVITY window (model/delta-window.js), computed from
+# the data itself; this job never writes a setting and never claims the page acted
+# on it.
 #
 # NO SECRETS LIVE HERE. The exporter inherits GRAFANA_TOKEN / DATA_KEY from its
 # own LaunchAgent (com.misbar.kamc-live); this job only asks launchd to run it.

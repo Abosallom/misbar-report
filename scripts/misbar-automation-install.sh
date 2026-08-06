@@ -3,15 +3,17 @@
 #
 # TWO jobs, installed and removed independently:
 #   • com.misbar.daily-report   — every morning
-#   • com.misbar.weekly-report  — Sunday + Thursday only (the two days the
-#     weekly report is issued; the Saudi work week is Sun-Thu)
+#   • com.misbar.weekly-report  — Thursday only (the LAST business day of the
+#     Saudi work week Sun-Thu, weekend = Fri+Sat). One report per work week,
+#     covering the just-ended Sunday..Thursday window. Was Sun+Thu until
+#     2026-08-05 (Talal: one weekly report, on Thursday).
 #
 #   misbar-automation-install.sh on [HH:MM]          # daily, default 08:00
 #   misbar-automation-install.sh off                 # daily
 #   misbar-automation-install.sh status              # BOTH jobs
 #   misbar-automation-install.sh daily  on [HH:MM]   # explicit daily forms
 #   misbar-automation-install.sh daily  off | status
-#   misbar-automation-install.sh weekly on [HH:MM]   # Sun+Thu, default 08:15
+#   misbar-automation-install.sh weekly on [HH:MM]   # Thursday, default 08:15
 #   misbar-automation-install.sh weekly off | status
 #
 # The bare on/off/status forms are the original documented interface and still
@@ -30,9 +32,9 @@ DOMAIN="gui/$(id -u)"
 
 DAILY_LABEL="com.misbar.daily-report"
 WEEKLY_LABEL="com.misbar.weekly-report"
-# launchd Weekday: 0 (or 7) = Sunday … 4 = Thursday. The weekly template pins 0 + 4.
-WEEKLY_DAYS_AR="الأحد والخميس"
-WEEKLY_DAYS_EN="Sunday + Thursday"
+# launchd Weekday: 0 (or 7) = Sunday … 4 = Thursday. The weekly template pins 4.
+WEEKLY_DAYS_AR="كل خميس"
+WEEKLY_DAYS_EN="Thursday"
 
 say()  { printf '%s\n' "$*"; }
 fail() { printf '%s\n' "$*" >&2; exit 1; }
@@ -74,9 +76,11 @@ plist_int() {
 }
 
 # Reads Hour/Minute back out of an installed plist. Prints "HH:MM" or nothing.
-# Handles both shapes: StartCalendarInterval as a dict (daily) and as an array
-# of dicts (weekly — one entry per weekday), where the first entry carries the
-# time all entries share.
+# Handles both shapes: StartCalendarInterval as a dict (what BOTH templates ship
+# today) and as an array of dicts, where the first entry carries the time all
+# entries share. The array branch is kept on purpose: a weekly plist installed
+# before the Thursday-only change (2026-08-05) is still the Sun+Thu array, and
+# `status` must keep reporting it correctly until the user re-runs `weekly on`.
 configured_time() {
   [ -f "$1" ] || return 0
   local h m
@@ -102,11 +106,15 @@ weekday_ar() {
   esac
 }
 
-# Arabic day list of an array-shaped StartCalendarInterval ("الأحد والخميس").
-# Prints nothing for the dict-shaped (daily) plist — it has no Weekday at all.
+# Arabic day list of the installed plist's StartCalendarInterval. Reads the
+# dict shape first (the Thursday-only weekly template → "الخميس"), then the
+# legacy array shape (a pre-2026-08-05 Sun+Thu plist → "الأحد والخميس"). Prints
+# nothing for the daily plist — its dict carries no Weekday at all.
 configured_days() {
   [ -f "$1" ] || return 0
   local i=0 d out=""
+  d="$(plist_int "$1" ':StartCalendarInterval:Weekday')"
+  if [ -n "$d" ]; then printf '%s' "$(weekday_ar "$d")"; return 0; fi
   while [ "$i" -lt 7 ]; do
     d="$(plist_int "$1" ":StartCalendarInterval:$i:Weekday")"
     [ -n "$d" ] || break
@@ -154,7 +162,7 @@ cmd_on() {
     say "⚠️  تمت كتابة الملف لكن التحميل لم يتأكد / plist written but load not confirmed: $PLIST"
   fi
   if [ "$KIND" = "weekly" ]; then
-    say "   الأيام / days: $WEEKLY_DAYS_AR ($WEEKLY_DAYS_EN — launchd Weekday 0 & 4)"
+    say "   اليوم / day: $WEEKLY_DAYS_AR ($WEEKLY_DAYS_EN — launchd Weekday 4)"
   fi
   say "   السجل / log: $LOG_FILE"
 }
@@ -180,7 +188,7 @@ cmd_status() {
     say "   الوقت المجدول / scheduled time: ${when:-unknown}"
     if [ "$KIND" = "weekly" ]; then
       days="$(configured_days "$PLIST")"
-      say "   الأيام / days: ${days:-$WEEKLY_DAYS_AR} ($WEEKLY_DAYS_EN)"
+      say "   اليوم / day: ${days:-$WEEKLY_DAYS_AR} ($WEEKLY_DAYS_EN)"
     fi
   else
     say "📄 الوكيل غير مثبَّت / LaunchAgent not installed."

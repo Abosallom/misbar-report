@@ -58,12 +58,24 @@
  * @property {{total:number, collected:number, dispatched:number, received:number,
  *             completed:number, rejected:number, awaitingDispatch:number, shippedNotReceived:number,
  *             awaitingResults:number, lateNoResult:number}} deltas
- *   - INCREASE vs the previous report's snapshot numbers (0 when equal/lower or no
- *     snapshot). Per the workbook's E6 prompt: a green "+N" chip renders ONLY for
- *     deltas > 0, recomputed each run, never accumulated. This IS the whole key
- *     set (engine.js currentNumbers); `completed` speaks the COMPLETED rule above
- *     (result date OR rejected) and `rejected` rides along as its own value —
- *     a SUBSET of completed, so the two chips must never be summed.
+ *   - THE ACTIVITY OF THE REPORT'S WINDOW (2026-08-05 rule, Talal). THE INVARIANT
+ *     these values live under: every OTHER number in EngineOutput — and every big
+ *     number on slides 2/3/4 — is a CUMULATIVE TOTAL and did not change. Only these
+ *     small green ▲ chips did: they now count what HAPPENED inside the window
+ *     [Sunday, reportDate] ('week', the default) or [reportDate, reportDate]
+ *     ('daily'), from the rows' OWN date columns — model/delta-window.js
+ *     computeWindowDeltas, deltas[key] = asof(end) − asof(the day before the start).
+ *     SIGNED, not clamped: the six EVENT keys (total/collected/dispatched/received/
+ *     completed/rejected) are in-window event COUNTS and are ≥ 0 in practice, while
+ *     the four STATE keys (awaitingDispatch/shippedNotReceived/awaitingResults/
+ *     lateNoResult) are queue depths whose window value is a NET change and is
+ *     routinely negative — both surfaces render '−N' for those. A zero value renders
+ *     no chip at all. SUPERSEDED: "INCREASE vs the previous report's snapshot" — the
+ *     engine still produces that clamped legacy value and it survives ONLY as the
+ *     degraded fallback when the stamper or the parsed rows are unavailable.
+ *     This IS the whole key set (engine/asof.js NUMBER_KEYS); `completed` speaks the
+ *     COMPLETED rule above (result date OR rejected) and `rejected` rides along as
+ *     its own value — a SUBSET of completed, so the two chips must never be summed.
  */
 
 /**
@@ -90,6 +102,23 @@
  *   NOTE: 'funnel.resulted' is the (unrenamed) key of the funnel's COMPLETED final
  *   stage, so it and 'completed' address the same figure on two slides.
  * @property {Settings['reportOptions']} [reportOptions] - presentation options (see Settings)
+ * @property {{start:string, end:string, mode:('daily'|'week'), approx?:Object<string,boolean>}} [deltaWindow]
+ *   - the ACTIVITY WINDOW kpi.deltas were counted over, stamped by
+ *     model/delta-window.js stampWindowDeltas (ui/screen-review.js on render/preview/
+ *     mode-switch, ui/screen-generate.js and automation/pipeline.js before file
+ *     production). start/end are inclusive 'YYYY-MM-DD'; mode 'week' → start is the
+ *     SUNDAY that opens reportDate's Sun–Thu work week (a Fri/Sat report date maps
+ *     back into the week that just ended), mode 'daily' → start === end === reportDate.
+ *     `approx` bubbles engine/asof.js's own caveats for the two endpoints; only
+ *     `rejected` (with its `completed` twin) is surfaced to the operator, because a
+ *     rejection carries no timestamp and such a row is dated by its result date or,
+ *     failing that, by the last milestone it reached.
+ *     ABSENT means no window was stamped — the parsed rows were unavailable (a mock
+ *     preview) or the module was missing — and kpi.deltas is then the engine's own
+ *     clamped legacy delta; the banner and the deck legend fall back to undated wording.
+ *     REPLACES the retired `deltaBaseline` {baselineDate, mode, anchored,
+ *     definitionShift}: the chips no longer diff against a STORED report, so a baseline
+ *     date, its anchored flag and its definition-version disclosure all ceased to exist.
  */
 
 /**
@@ -127,7 +156,9 @@
  *   - the previous report's published numbers (keys = deltas keys above);
  *     written after each successful generation. Legacy {prevCompleted} docs are
  *     migrated on load (numbers.completed = prevCompleted). Acts as the fallback
- *     baseline when snapshotHistory has no entry before the report date.
+ *     baseline when snapshotHistory has no entry before the report date. Since
+ *     2026-08-05 the delta chips no longer read either, so this is a published
+ *     record for the history panel and the store's own migrations.
  *     Optional `defVersion` (SIBLING of numbers, never inside it — see
  *     seeds/defaults.js SNAPSHOT_SEED) stamps WHICH definition `numbers` speaks:
  *     2 = completed includes rejected (2026-07-28 rule). Unstamped baselines are
@@ -135,8 +166,10 @@
  * @property {Object<string,Object<string,number>>} snapshotHistory
  *   - rolling per-date history of published report numbers, key 'YYYY-MM-DD' →
  *     the same number set snapshot.numbers holds. Trimmed to the most recent 45
- *     dates (model/delta-baseline.js recordSnapshot). Feeds pickDeltaBaseline,
- *     which selects the comparison baseline per reportOptions.deltaMode. An entry
+ *     dates (model/delta-baseline.js recordSnapshot). Read by the review screen's
+ *     progress panel (ui/history-table.js: published vs computed numbers) — as of
+ *     2026-08-05 it no longer feeds the delta chips, which are computed from the
+ *     rows' own dates instead (model/delta-window.js). An entry
  *     may carry an optional numeric `defVersion` LEAF alongside its numbers (same
  *     meaning as snapshot.defVersion); with no stamp the entry's own date decides.
  * @property {Object<string,{openOn:string, closedOn:(string|null)}>} taskLog
@@ -163,16 +196,20 @@
  *     shape; kpiCards keys mirror the deltas
  *     keys and hide exec-slide cards (row geometry repacks); labels overrides the
  *     DEFAULT_LABELS registry in slidespec/build-spec.js (empty = built-in text);
- *     deltaMode picks the exec delta-chip comparison window — 'daily' vs the last
- *     report before the report date, or 'week' (the DEFAULT since 2026-08-04) =
- *     WEEK-TO-DATE: every report of one Sun–Thu week compares against the same
- *     baseline, the most recent report stored strictly BEFORE that week's Sunday, so
- *     the chips accumulate and Thursday's deck carries the whole week. With no
- *     pre-week entry the picker falls back to the most recent prior report and says
- *     so via anchored:false. The retired 'weekly' / 'weekly-sun' / 'weekly-thu'
- *     values are ALIASES of 'week'; schema v7 forces stored 'daily' to 'week' once
- *     (see model/delta-baseline.js pickDeltaBaseline / normalizeDeltaMode and
- *     store.js migrateV6toV7).
+ *     deltaMode sizes the exec delta-chip ACTIVITY WINDOW (2026-08-05 semantics —
+ *     SAME two values, SAME storage key, no schema bump; what changed is what they
+ *     select). 'week' (the DEFAULT since 2026-08-04) = [the SUNDAY that opens the
+ *     report date's Sun–Thu work week, the report date], so Thursday's deck carries
+ *     the whole week's activity and a Fri/Sat report date folds into the week that
+ *     just ended; 'daily' = the report date alone. SUPERSEDED: the mode used to pick
+ *     WHICH STORED REPORT to diff against (week-to-date vs the last report), with an
+ *     anchored:false degrade when history was still filling up — the chips are now
+ *     computed from the rows' own dates (ReportModel.deltaWindow), so no stored
+ *     report is read and the degrade cannot happen. The retired 'weekly' /
+ *     'weekly-sun' / 'weekly-thu' values are still ALIASES of 'week'; schema v7
+ *     forces stored 'daily' to 'week' once (see model/delta-baseline.js
+ *     normalizeDeltaMode, model/delta-window.js windowFor and store.js
+ *     migrateV6toV7).
  *     autoDownloadFiles (default TRUE; an ABSENT key means ON — it post-dates the
  *     feature) governs ONLY the manual generate flow: whether the 4 produced files
  *     are pushed to the browser automatically, or the operator picks them from the

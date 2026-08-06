@@ -36,8 +36,8 @@ automation is strictly opt-in, per option, from the settings screen.
 `shouldAutoDownloadFiles`) governs the **manual** generate flow only — a presentation
 checkbox must never arm a background download, so neither flag reads or writes the other.
 
-مواعيد التقرير الأسبوعي ليست خيارًا في الإعدادات — هي في LaunchAgent (§3).
-There is deliberately **no weekly option in this table**: the weekly run days live in the
+موعد التقرير الأسبوعي ليس خيارًا في الإعدادات — هو في LaunchAgent (§3).
+There is deliberately **no weekly option in this table**: the weekly run day lives in the
 `com.misbar.weekly-report` LaunchAgent (§3), not in app settings, so nothing in the app can
 claim a schedule the machine is not actually keeping.
 
@@ -78,27 +78,33 @@ The trigger always lands on the upload screen so the progress panel is visible.
 | Agent | متى / When | الأمر / Invocation | URL |
 | --- | --- | --- | --- |
 | `com.misbar.daily-report` | كل يوم / every day, default **08:00** | `misbar-daily.sh` | `?auto=1` |
-| `com.misbar.weekly-report` | **الأحد والخميس** / **Sunday + Thursday**, default **08:15** | `misbar-daily.sh weekly` | `?auto=1&mode=weekly` |
+| `com.misbar.weekly-report` | **كل خميس** / **every Thursday**, default **08:15** | `misbar-daily.sh weekly` | `?auto=1&mode=weekly` |
 
-التقرير الأسبوعي يُصدر يومي الأحد والخميس (أسبوع العمل السعودي الأحد–الخميس)، فالمهمة
-الأسبوعية مربوطة بهذين اليومين لا بـ«كل ٧ أيام».
-The weekly report is issued **twice a week — Sunday and Thursday** (the Saudi work week is
-Sun–Thu), so the weekly agent is anchored to those two weekdays rather than to a rolling
-7-day interval. launchd expresses that as an *array* of `StartCalendarInterval` dicts —
-one per weekday — using this mapping:
+التقرير الأسبوعي يُصدر **مرة واحدة كل أسبوع، يوم الخميس** — آخر يوم عمل في الأسبوع السعودي
+(الأحد–الخميس، والعطلة الجمعة والسبت)، فالمهمة الأسبوعية مربوطة بهذا اليوم لا بـ«كل ٧ أيام».
+The weekly report is issued **once a week, on Thursday** — the **last business day** of the
+Saudi work week (Sun–Thu; the weekend is **Friday + Saturday**). A Thursday run therefore
+closes the whole just-ended week, which is exactly the window the green delta chips count
+their activity over (Sunday → report day). The agent is anchored to that weekday rather than
+to a rolling 7-day interval. launchd's weekday mapping:
 
 | `Weekday` | 0 (or 7) | 1 | 2 | 3 | **4** | 5 | 6 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| اليوم / Day | **الأحد** Sun | الاثنين Mon | الثلاثاء Tue | الأربعاء Wed | **الخميس** Thu | الجمعة Fri | السبت Sat |
+| اليوم / Day | الأحد Sun | الاثنين Mon | الثلاثاء Tue | الأربعاء Wed | **الخميس** Thu | الجمعة Fri | السبت Sat |
 
-`scripts/com.misbar.weekly-report.plist.template` therefore pins **Weekday 0 and Weekday 4**
-at the same hour/minute. Both agents append to the same log,
+`scripts/com.misbar.weekly-report.plist.template` therefore pins **Weekday 4** in a single
+`StartCalendarInterval` **dict** — the same shape the daily template uses. It used to carry
+an *array* of dicts (one per weekday) because the report was issued twice, on Sunday **and**
+Thursday; that changed on **2026-08-05** (Talal: one weekly report, on Thursday), and with a
+single weekday left the array collapses to a dict. A weekly plist installed **before** that
+change is still the Sun+Thu array — `weekly status` still reads it correctly, and re-running
+`weekly on` re-renders it to the Thursday-only shape. Both agents append to the same log,
 `~/Library/Logs/misbar-daily.log`, and each line is tagged with its mode so the two runs are
 distinguishable:
 
 ```
 [misbar-daily  2026-07-26 08:00:03] start (mode=daily, scripts=…)
-[misbar-weekly 2026-07-26 08:15:04] start (mode=weekly, scripts=…)
+[misbar-weekly 2026-07-30 08:15:04] start (mode=weekly, scripts=…)
 ```
 
 Both skip silently when the Mac is offline and always exit 0, so one bad morning never
@@ -128,11 +134,11 @@ Those bare forms are the original interface and still mean the **daily** job (`s
 additionally reports the weekly one). An explicit `daily` prefix works too:
 `… daily on [HH:MM] | daily off | daily status`.
 
-### الأسبوعية — الأحد والخميس / Weekly job — Sunday + Thursday
+### الأسبوعية — كل خميس / Weekly job — every Thursday
 
 ```bash
 bash scripts/misbar-automation-install.sh weekly status    # هل هي مثبّتة؟ / is it installed?
-bash scripts/misbar-automation-install.sh weekly on        # الأحد والخميس 08:15 / Sun+Thu 08:15
+bash scripts/misbar-automation-install.sh weekly on        # كل خميس 08:15 / Thursday 08:15
 bash scripts/misbar-automation-install.sh weekly on 09:00  # وقت مخصّص / custom time
 bash scripts/misbar-automation-install.sh weekly off       # إيقاف وحذف / unload and remove
 ```
@@ -162,8 +168,13 @@ fails at `git pull` and the snapshot silently goes stale until the lock is remov
 (`rm -f .git/index.lock`). To avoid that window entirely, install the daily job on an
 **off-grid minute** — `… on 08:05`; the weekly default 08:15 already is one.
 
-On a Sunday or Thursday **both** report agents fire; that is intended — the daily run is
-unchanged and the weekly run is the extra, weekday-anchored one.
+On a **Thursday** *both* report agents fire; that is intended — the daily run is unchanged
+and the weekly run is the extra, weekday-anchored one.
+
+مهمة تُغلق يوم الخميس تظهر في «فترة السماح» في تقرير **الخميس التالي**.
+**A task closed on a Thursday shows its grace appearance in the FOLLOWING Thursday's
+report** — the lifecycle keeps a closed task visible for one more report, and with a
+once-weekly cadence that "one more report" is a week later, not two days later.
 
 تشغيل تجريبي فوري / dry-run either by hand without waiting for the schedule:
 
@@ -172,9 +183,9 @@ bash scripts/misbar-daily.sh          && tail -20 ~/Library/Logs/misbar-daily.lo
 bash scripts/misbar-daily.sh weekly   && tail -20 ~/Library/Logs/misbar-daily.log
 ```
 
-لوحة «⚡ التشغيل التلقائي» تعرض أيام التقرير الأسبوعي (الأحد والخميس) كسطر للقراءة فقط مع
+لوحة «⚡ التشغيل التلقائي» تعرض يوم التقرير الأسبوعي (كل خميس) كسطر للقراءة فقط مع
 أمر التفعيل — الجدولة الحقيقية في LaunchAgent وليست في الصفحة.
-The **⚡ التشغيل التلقائي** card shows the weekly days and the enable command as a
+The **⚡ التشغيل التلقائي** card shows the weekly day (`كل خميس`) and the enable command as a
 **read-only** line. There is deliberately no in-page scheduler: a web page cannot install a
 LaunchAgent, and a fake switch would drift out of sync with the real one.
 

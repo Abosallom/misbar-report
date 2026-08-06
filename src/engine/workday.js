@@ -1,9 +1,22 @@
 // engine/workday.js — pure date arithmetic for the KAMC report engine.
 // No DOM, no locale, no timezone drift: everything is computed in UTC epoch-ms.
-// Mirrors the exact Excel semantics used by the source workbook:
-//   INT(datetime)  -> midnight of that calendar day
-//   WORKDAY(start, n) -> add n business days, EXCLUDING the start day, skipping
-//                        Sat/Sun, no holiday calendar.
+// Semantics:
+//   INT(datetime)  -> midnight of that calendar day  (Excel INT, unchanged)
+//   workday(start, n) -> add n business days, EXCLUDING the start day, skipping
+//                        the SAUDI WEEKEND (Friday+Saturday), no holiday calendar.
+//
+// WEEKEND — DELIBERATE DIVERGENCE FROM EXCEL (stakeholder rule, Talal 2026-08-05).
+// This function used to skip Sat+Sun because it was ported 1:1 from the source
+// workbook's WORKDAY(), which runs on Excel's default US weekend. That was an
+// Excel legacy artifact, not the business rule: KAMC's business days are
+// Sunday–Thursday, so the weekend is FRIDAY+SATURDAY. The convention was
+// replaced on 2026-08-05 on purpose. Do NOT "fix" it back.
+//   CONSEQUENCE: the golden workbook oracle (test/fixtures/golden-orders.js
+//   _cachedDue/_cachedDelay/_cachedStatus, test/fixtures/summary-tables.json)
+//   still speaks the OLD Sat/Sun convention. It is an EXTERNAL oracle that
+//   cannot be regenerated, so due-derived golden expectations are re-derived
+//   engine-side; only non-due-derived fields are still checked against it.
+//   Measured on the 628-row golden fixture: 189 due dates move.
 
 export const MS_PER_DAY = 86400000;
 
@@ -36,10 +49,20 @@ export function toEpochDay(ms) {
 }
 
 /**
- * Excel WORKDAY(start, days): count `days` business days forward from the start
- * DAY (start's time-of-day is dropped), excluding the start day itself and
- * skipping Saturdays/Sundays. Returns the resulting midnight epoch-ms.
- * Supports negative `days` symmetrically. `days === 0` returns the start day.
+ * workday(start, days): count `days` business days forward from the start DAY
+ * (start's time-of-day is dropped), excluding the start day itself and skipping
+ * the SAUDI WEEKEND — Friday and Saturday. Business days are Sunday–Thursday.
+ * Returns the resulting midnight epoch-ms. Supports negative `days`
+ * symmetrically. `days === 0` returns the start day.
+ *
+ * This is Excel's WORKDAY() shape but NOT Excel's weekend: the workbook's
+ * Sat/Sun convention was deliberately replaced by the real Saudi weekend on
+ * 2026-08-05 (stakeholder rule) — see the file header. Reference table for
+ * TAT = 2 business days under this rule:
+ *   received Wed → due Sun (+4 cal. days, Fri/Sat skipped)
+ *   received Thu → due Mon (+4 cal. days, Fri/Sat skipped)
+ *   received Sat → due Mon (+2 cal. days; Sat is itself a weekend day, the
+ *                           count simply starts from the next day forward)
  * @param {number} startMs  any epoch-ms (INT is applied internally)
  * @param {number} days     business-day offset
  * @returns {number}        midnight epoch-ms
@@ -51,7 +74,7 @@ export function workday(startMs, days) {
   while (remaining > 0) {
     d += step;
     const dow = new Date(d).getUTCDay(); // 0=Sun … 6=Sat
-    if (dow !== 0 && dow !== 6) remaining--;
+    if (dow !== 5 && dow !== 6) remaining--; // skip Fri(5)+Sat(6) — Saudi weekend
   }
   return d;
 }
