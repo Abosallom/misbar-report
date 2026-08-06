@@ -2,16 +2,16 @@
 // The file-producing core now lives in automation/pipeline.js (produceReportFiles) so
 // an unattended run makes byte-identical files; this screen drives it and paints the
 // very same progress bar, file rows and live slide thumbnails it always has.
-import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-08-05.1';
-import { el, progressBar, toast } from './components.js?v=v2026-08-05.1';
-import { resetRunData } from '../state.js?v=v2026-08-05.1';
-import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-08-05.1';
-import { autoDraft, splitTaskLists } from '../model/drafts.js?v=v2026-08-05.1';
-import { buildLateLabsSection, triggerDownload } from './late-labs-section.js?v=v2026-08-05.1';
+import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-08-06.1';
+import { el, progressBar, toast } from './components.js?v=v2026-08-06.1';
+import { resetRunData } from '../state.js?v=v2026-08-06.1';
+import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-08-06.1';
+import { autoDraft, splitTaskLists } from '../model/drafts.js?v=v2026-08-06.1';
+import { buildLateLabsSection, triggerDownload } from './late-labs-section.js?v=v2026-08-06.1';
 import {
   applyWindowDeltas, buildFileDefs, produceReportFiles, recordRunSnapshot,
   shouldAutoDownloadFiles,
-} from '../automation/pipeline.js?v=v2026-08-05.1';
+} from '../automation/pipeline.js?v=v2026-08-06.1';
 
 async function tryImport(path) { try { return await import(path); } catch { return null; } }
 const isMobile = () => /iP(hone|ad|od)|Android/i.test(navigator.userAgent);
@@ -177,8 +177,8 @@ export async function render(container, ctx) {
   // cumulative numbers on slides 2/3/4 are untouched.
   // recordSnapshot (below) still appends this run's published numbers to snapshotHistory
   // for the history panel. Both modules are guarded → engine deltas if either is absent.
-  const dwMod = await tryImport('../model/delta-window.js?v=v2026-08-05.1');
-  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-08-05.1');
+  const dwMod = await tryImport('../model/delta-window.js?v=v2026-08-06.1');
+  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-08-06.1');
   const recordSnapshot = dbMod && dbMod.recordSnapshot;
   applyWindowDeltas(model, state, store, dwMod && dwMod.stampWindowDeltas);
 
@@ -283,7 +283,7 @@ export async function render(container, ctx) {
     // unattended generation feeds the same delta/history features.
     // recordShownTasks also writes the closed-task grace log (v6) from this very
     // model — guarded import, so an older/partial build just keeps the numbers path.
-    const tlMod = await tryImport('../model/task-lifecycle.js?v=v2026-08-05.1');
+    const tlMod = await tryImport('../model/task-lifecycle.js?v=v2026-08-06.1');
     recordRunSnapshot({
       model, store, state, date, recordSnapshot,
       recordShownTasks: tlMod && tlMod.recordShownTasks,

@@ -2,7 +2,7 @@
 // Every output is a heuristic seed the user edits on the review screen.
 import {
   LIST_EXTERNAL, LIST_INTERNAL, isGraceRow, taskKey,
-} from './task-lifecycle.js?v=v2026-08-05.1';
+} from './task-lifecycle.js?v=v2026-08-06.1';
 
 const CLOSED = 'مغلق'; // closed/done
 const CAT_INTERNAL = 'لين'; // فئة التقرير value that routes a task to the internal slide (داخلي)

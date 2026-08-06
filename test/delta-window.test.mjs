@@ -397,3 +397,57 @@ test('isoFromDays / isoToDays round-trip on the UTC epoch, not the host zone', (
   assert.equal(isoFromDays(isoToDays('2026-08-02') - 1), '2026-08-01');
   assert.equal(isoFromDays(isoToDays('2026-01-01') - 1), '2025-12-31');
 });
+
+// =============================================================================
+// 5. excludeNoTat — the stamper must count the SAME row set the deck's totals do
+// =============================================================================
+// reportOptions.excludeNoTat drops 'No Match' rows (received present, StdTAT
+// unresolvable from lookup AND CSV) from the engine's totals. The chips must speak
+// that same row set, so stampWindowDeltas derives the flag from settings/model
+// reportOptions when the caller passes no opts. A NOMATCH fixture row: every date
+// in-window, but an unknown test name and no CSV TAT.
+const NOMATCH = row({
+  orderId: 'N', orderDate: '2026-07-08', testName: 'TEST WITH NO TAT ANYWHERE',
+  tatDaysCsv: null, collected: '2026-07-08 07:30:00', dispatched: '2026-07-08 08:30:00',
+  received: '2026-07-08 09:30:00',
+});
+
+test('excludeNoTat: the flag changes the chips — a No Match row counts only when kept', () => {
+  const kept = mkModel();
+  kept.reportOptions.excludeNoTat = false;
+  stampWindowDeltas(kept, { rows: [...WEEK_ROWS, NOMATCH], tatTests: {} });
+
+  const dropped = mkModel();
+  dropped.reportOptions.excludeNoTat = true;
+  stampWindowDeltas(dropped, { rows: [...WEEK_ROWS, NOMATCH], tatTests: {} });
+
+  for (const k of ['total', 'collected', 'dispatched', 'received']) {
+    assert.equal(kept.kpi.deltas[k] - dropped.kpi.deltas[k], 1,
+      `${k}: the No Match row must count when kept and vanish when excluded`);
+  }
+  // WEEK_ROWS all resolve a TAT via tatDaysCsv, so the flag may touch nothing else.
+  assert.equal(kept.kpi.deltas.completed, dropped.kpi.deltas.completed);
+});
+
+test('excludeNoTat: settings.reportOptions beat the model copy, like deltaMode', () => {
+  const model = mkModel();
+  model.reportOptions.excludeNoTat = false; // stale model copy says keep
+  stampWindowDeltas(model, {
+    rows: [...WEEK_ROWS, NOMATCH], tatTests: {},
+    settings: { reportOptions: { excludeNoTat: true } },
+  });
+  const bare = mkModel();
+  bare.reportOptions.excludeNoTat = true;
+  stampWindowDeltas(bare, { rows: [...WEEK_ROWS, NOMATCH], tatTests: {} });
+  assert.deepEqual(model.kpi.deltas, bare.kpi.deltas,
+    'the settings flag must win over the model copy');
+});
+
+test('excludeNoTat: stamping stays IDEMPOTENT with the flag active', () => {
+  const model = mkModel();
+  model.reportOptions.excludeNoTat = true;
+  stampWindowDeltas(model, { rows: [...WEEK_ROWS, NOMATCH], tatTests: {} });
+  const first = JSON.parse(JSON.stringify({ deltas: model.kpi.deltas, window: model.deltaWindow }));
+  stampWindowDeltas(model, { rows: [...WEEK_ROWS, NOMATCH], tatTests: {} });
+  assert.deepEqual(JSON.parse(JSON.stringify({ deltas: model.kpi.deltas, window: model.deltaWindow })), first);
+});

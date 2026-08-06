@@ -30,9 +30,9 @@
 // نسبة الاكتمال nonsense). The published entry is still shown when nothing can be
 // computed, marked `staleDef` so the footnote says the number is old-definition.
 // Stored history itself is NEVER rewritten here — this module only reads it.
-import { el } from './components.js?v=v2026-08-05.1';
-import { formatDateAr } from '../i18n/ar.js?v=v2026-08-05.1';
-import { COMPLETED_DEF_SINCE, LATE_DEF_SINCE } from '../model/delta-baseline.js?v=v2026-08-05.1';
+import { el } from './components.js?v=v2026-08-06.1';
+import { formatDateAr } from '../i18n/ar.js?v=v2026-08-06.1';
+import { COMPLETED_DEF_SINCE, LATE_DEF_SINCE } from '../model/delta-baseline.js?v=v2026-08-06.1';
 
 // Every relative specifier in this file — static AND the two guarded dynamic ones below —
 // carries its ?v= INLINE so scripts/stamp-version.mjs owns the whole literal (its SPEC_RE
@@ -123,7 +123,7 @@ const RANGE_NOTE = {
 const monthNote = (anchor) => (anchor
   ? `عيّنات أسبوعية بحسب يوم ${anchor.label} (آخر ٥ مرات)؛ الرسم بنقاط يومية.`
   : RANGE_NOTE.month);
-// Definition footnote, shown only when a rendered sample predates COMPLETED_DEF_SINCE.
+// Definition footnote, shown only when a rendered sample predates DEF_SINCE_LATEST.
 // `restated` = those rows were recomputed under the new rule (the normal case, engine
 // present); `stale` = a published pre-change row is still on screen under the OLD rule
 // because nothing could be computed for it.
@@ -177,9 +177,9 @@ function sourceBadge(sample) {
   const published = sample && sample.source === 'published';
   let title = published ? 'من تقرير منشور' : 'محسوب من بيانات الطلبات كما كانت في ذلك اليوم';
   if (sample && sample.restated) {
-    title = 'أُعيد احتساب هذا اليوم من بيانات الطلبات وفق التعريف الجديد لـ«مكتملة» (تشمل المرفوضة)، بدل الرقم المنشور حينها بالتعريف القديم';
+    title = 'أُعيد احتساب هذا اليوم من بيانات الطلبات وفق التعريفات الجديدة لـ«مكتملة» (تشمل المرفوضة) و«متأخرة بلا نتيجة» (عطلة الجمعة والسبت، والمتأخر يشمل المستحق اليوم)، بدل الرقم المنشور حينها بالتعريفات القديمة';
   } else if (sample && sample.staleDef) {
-    title = 'من تقرير منشور — رقم «مكتملة» فيه بالتعريف القديم (لا يشمل المرفوضة)';
+    title = 'من تقرير منشور — أرقام «مكتملة» و«متأخرة بلا نتيجة» فيه بالتعريفات القديمة';
   }
   return el('span', {
     style: published ? BADGE_PUBLISHED : BADGE_COMPUTED,
@@ -482,12 +482,14 @@ function renderRangeContent(bundle, range) {
     frag.appendChild(el('p', { class: 'small muted', style: 'margin:0', text: 'لا توجد بيانات ضمن هذا النطاق.' }));
     return frag;
   }
-  // مكتملة changed meaning on COMPLETED_DEF_SINCE. Whenever a rendered sample predates
-  // it, say which definition the column speaks — above the chart and the table, because
-  // it governs how every مكتملة value and نسبة الاكتمال below is to be read.
+  // The definitions changed twice (مكتملة on COMPLETED_DEF_SINCE, متأخرة بلا نتيجة on
+  // LATE_DEF_SINCE). Whenever a rendered sample predates the LATER boundary, say which
+  // definitions the columns speak — above the chart and the table, because it governs
+  // how every value below is to be read. The displayed date MUST be DEF_SINCE_LATEST,
+  // the same boundary isPreDefChange restates by, or the note misdates its own scope.
   const preDef = table.filter((d) => d && isPreDefChange(d.date));
   if (preDef.length) {
-    const since = formatDateAr(COMPLETED_DEF_SINCE) || COMPLETED_DEF_SINCE;
+    const since = formatDateAr(DEF_SINCE_LATEST) || DEF_SINCE_LATEST;
     const stale = preDef.some((d) => d.staleDef);
     frag.appendChild(el('p', {
       class: 'small muted', style: 'margin:-6px 0 12px',
@@ -547,8 +549,8 @@ export function buildHistoryPanel({ rows, tatTests, history, endIso, deltaMode, 
 
   (async () => {
     const [asofMod, wdMod] = await Promise.all([
-      tryImport('../engine/asof.js?v=v2026-08-05.1'),
-      tryImport('../engine/workday.js?v=v2026-08-05.1'),
+      tryImport('../engine/asof.js?v=v2026-08-06.1'),
+      tryImport('../engine/workday.js?v=v2026-08-06.1'),
     ]);
     const computeAsOf = asofMod && typeof asofMod.computeNumbersAsOf === 'function' ? asofMod.computeNumbersAsOf : null;
     const degraded = !computeAsOf;

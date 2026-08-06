@@ -75,8 +75,8 @@
 // earliest defensible day and restores the partition, while still resolving to
 // SOME day for every row so the CROWN identity at a saturated as-of is unchanged.
 
-import { parseDateTime, toEpochDay, workday, MS_PER_DAY } from './workday.js?v=v2026-08-05.1';
-import { buildTatIndex, resolveTat } from './tat.js?v=v2026-08-05.1';
+import { parseDateTime, toEpochDay, workday, MS_PER_DAY } from './workday.js?v=v2026-08-06.1';
+import { buildTatIndex, resolveTat } from './tat.js?v=v2026-08-06.1';
 
 // engine.js's cascade keys off these exact rawStatus literals (not exported).
 const RAW_CANCELLED = 'Order Cancelled';
@@ -153,7 +153,9 @@ export function computeNumbersAsOf({ rows, tatTests, asOfIso, opts = {} } = {}) 
     // but StdTAT unresolvable from lookup AND CSV fallback — is dropped before ANY
     // aggregation. Cancelled/rejected rows are never 'No Match' (they resolve earlier
     // in the cascade), so their counting is untouched, exactly as in the engine.
-    if (opts.excludeNoTat && !cancelled && !isRejected && dayOf(row.received) != null
+    // `=== true` matches the engine's gate exactly: a truthy non-boolean must not
+    // exclude here while the engine keeps the row (the two must count one row set).
+    if (opts.excludeNoTat === true && !cancelled && !isRejected && dayOf(row.received) != null
         && resolveTat(row, tatIndex, opts).tat == null) {
       continue;
     }

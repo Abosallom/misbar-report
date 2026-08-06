@@ -1,5 +1,5 @@
 // engine/tat.js — standard-TAT resolution + the Slide-5 by-test chart catalog.
-import { normTest } from '../contracts.js?v=v2026-08-05.1';
+import { normTest } from '../contracts.js?v=v2026-08-06.1';
 
 /**
  * Build a fast normalized index from a { testName: businessDays } lookup object.

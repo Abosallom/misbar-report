@@ -103,7 +103,7 @@ change is still the Sun+Thu array — `weekly status` still reads it correctly, 
 distinguishable:
 
 ```
-[misbar-daily  2026-07-26 08:00:03] start (mode=daily, scripts=…)
+[misbar-daily  2026-07-30 08:00:03] start (mode=daily, scripts=…)
 [misbar-weekly 2026-07-30 08:15:04] start (mode=weekly, scripts=…)
 ```
 

@@ -386,3 +386,38 @@ test('as-of LATE BOUNDARY: the as-of series and the engine agree on the boundary
     assert.equal(asofN.lateNoResult, late, `lateNoResult on ${iso}`);
   }
 });
+
+test('excludeNoTat drops ONLY received No-Match rows — never cancelled, rejected, or pre-received ones', () => {
+  // Four rows that must survive the flag plus one that must not. The flag mirrors
+  // engine compute(): 'No Match' means received present but StdTAT unresolvable
+  // from lookup AND CSV; cancelled/rejected resolve earlier in the cascade and a
+  // row not yet received has nothing to be late against, so none of those may
+  // ever be dropped by it.
+  const mk = (o) => ({
+    orderDate: '2026-07-06 00:00:00', facility: 'Lab X', orderId: null, lineNo: null,
+    loinc: null, testName: 'UNKNOWN TEST', collected: null, dispatched: null,
+    received: null, resulted: null, rawStatus: 'In Progress', tatDaysCsv: null,
+    specimenNo: null, shipmentId: null, orderingFacilityId: null, performingFacilityId: null,
+    ...o,
+  });
+  const rows = [
+    mk({ orderId: 'DROP', received: '2026-07-07 09:00:00' }),                       // No Match → dropped
+    mk({ orderId: 'CANC', received: '2026-07-07 09:00:00', rawStatus: 'Order Cancelled' }),
+    mk({ orderId: 'REJ', received: '2026-07-07 09:00:00', rawStatus: 'Result Rejected' }),
+    mk({ orderId: 'PRE', collected: '2026-07-06 08:00:00' }),                       // never received
+    mk({ orderId: 'TAT', received: '2026-07-07 09:00:00', tatDaysCsv: 3 }),         // resolves via CSV
+  ];
+  const off = computeNumbersAsOf({ rows, tatTests: {}, asOfIso: '2026-07-09' }).numbers;
+  const on = computeNumbersAsOf({ rows, tatTests: {}, asOfIso: '2026-07-09', opts: { excludeNoTat: true } }).numbers;
+  // Exactly one row vanishes, and it is the received No-Match one.
+  assert.equal(off.total - on.total, 1);
+  assert.equal(off.received - on.received, 1);
+  // The cancelled and pre-received rows are untouched: total still counts CANC's
+  // exclusion the same way (cancelled is its own KPI, subtracted from total by the
+  // engine's rule), and rejected stays exactly as it was.
+  assert.equal(on.rejected, off.rejected, 'rejected must never be dropped by the flag');
+  // The engine gate is `=== true`: a truthy non-boolean must NOT exclude, or the
+  // as-of mirror would count a different row set than the deck's totals.
+  const truthy = computeNumbersAsOf({ rows, tatTests: {}, asOfIso: '2026-07-09', opts: { excludeNoTat: 1 } }).numbers;
+  assert.deepEqual(truthy, off, 'non-boolean truthy flag must behave as OFF, matching the engine');
+});

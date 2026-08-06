@@ -1,19 +1,19 @@
 // ui/screen-review.js — review/edit report content with a live slide preview (Track E).
-import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-08-05.1';
-import { el, editableTable, textareaField, toast } from './components.js?v=v2026-08-05.1';
-import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-08-05.1';
-import { autoDraft, splitTaskLists } from '../model/drafts.js?v=v2026-08-05.1';
-import { buildHistoryPanel } from './history-table.js?v=v2026-08-05.1';
+import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-08-06.1';
+import { el, editableTable, textareaField, toast } from './components.js?v=v2026-08-06.1';
+import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-08-06.1';
+import { autoDraft, splitTaskLists } from '../model/drafts.js?v=v2026-08-06.1';
+import { buildHistoryPanel } from './history-table.js?v=v2026-08-06.1';
 import {
   normalizeDeltaMode, isWeekDeltaMode, DEFAULT_DELTA_MODE,
-} from '../model/delta-baseline.js?v=v2026-08-05.1';
+} from '../model/delta-baseline.js?v=v2026-08-06.1';
 // Same module instance drafts.js already imports (identical specifier) — the grace
 // re-check below MUST use task-lifecycle's own identity/status vocabulary, never a
 // second local copy of it. Static, not guarded: drafts.js (imported above) already
 // depends on this module, so there is no new failure mode.
 import {
   CLOSED as CLOSED_STATUS, LIST_EXTERNAL, LIST_INTERNAL, taskKey,
-} from '../model/task-lifecycle.js?v=v2026-08-05.1';
+} from '../model/task-lifecycle.js?v=v2026-08-06.1';
 
 /* small local module helpers (kept local to avoid cross-screen coupling) */
 async function tryImport(path) { try { return await import(path); } catch { return null; } }
@@ -397,7 +397,7 @@ export async function render(container, ctx) {
   // Guarded import, exactly as the retired picker was: a build without the module
   // degrades to the engine's own deltas instead of throwing. Re-run below on a
   // report-date change and on a mode switch; being PURE, every re-run agrees.
-  const dwMod = await tryImport('../model/delta-window.js?v=v2026-08-05.1');
+  const dwMod = await tryImport('../model/delta-window.js?v=v2026-08-06.1');
   const stampWindow = dwMod && dwMod.stampWindowDeltas;
   // The chips need the parsed CSV rows: with no upload in this session (mock preview)
   // stampWindowDeltas leaves the engine's deltas alone and stamps no window, and the
@@ -481,9 +481,9 @@ export async function render(container, ctx) {
     const token = ++renderToken;
     model.reportDate = state.reportDate;
     stampDeltas(); // re-window the chips for the current report date (pure → idempotent)
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-08-05.1');
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-08-06.1');
     const buildSpec = pickFn(specMod, ['buildSpec', 'build', 'makeSpec', 'toSpec']);
-    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-08-05.1');
+    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-08-06.1');
     const renderFn = pickFn(rendMod, ['renderSpec', 'renderSlides', 'renderHtml', 'render']);
 
     if (!buildSpec || !renderFn) {
@@ -873,7 +873,7 @@ export async function render(container, ctx) {
     el('summary', { class: 'card__title', style: 'cursor:pointer', text: STR.review.labelsCardTitle }),
   ]);
   (async () => {
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-08-05.1');
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-08-06.1');
     const LABEL_NAMES = specMod && specMod.LABEL_NAMES;
     const DEFAULT_LABELS = (specMod && specMod.DEFAULT_LABELS) || {};
     if (!LABEL_NAMES || typeof LABEL_NAMES !== 'object') {
