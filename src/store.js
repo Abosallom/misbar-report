@@ -15,19 +15,19 @@
 // throws on write; on failure we fall back to an in-memory doc and expose
 // isEphemeral() so the UI can warn the user their edits will not persist.
 
-import { SETTINGS_KEY } from './contracts.js?v=v2026-08-06.1';
-import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-08-06.1';
-import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-08-06.1';
+import { SETTINGS_KEY } from './contracts.js?v=v2026-08-10.1';
+import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-08-10.1';
+import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-08-10.1';
 import {
   HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED, GRAFANA_SEED, REPORT_OPTIONS_SEED,
   SNAPSHOT_HISTORY_SEED, AUTOMATION_SEED, TASK_LOG_SEED,
-} from './seeds/defaults.js?v=v2026-08-06.1';
-import { DELTA_MODES, canonicalDeltaMode } from './model/delta-baseline.js?v=v2026-08-06.1';
+} from './seeds/defaults.js?v=v2026-08-10.1';
+import { DELTA_MODES, canonicalDeltaMode } from './model/delta-baseline.js?v=v2026-08-10.1';
 import {
   sanitizeTaskLog, recordShownTasks, TASK_LOG_LIMIT, TASK_KEY_MAX,
-} from './model/task-lifecycle.js?v=v2026-08-06.1';
+} from './model/task-lifecycle.js?v=v2026-08-10.1';
 
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 
 // taskLog key = 'ext'|'int' (3) + '|' (1) + up to TASK_KEY_MAX chars of task text.
 // A little headroom above that so a key is rejected only when it is genuinely
@@ -106,6 +106,11 @@ function backfillReportOptions(doc) {
   else for (const k of Object.keys(seed.kpiCards)) {
     if (typeof ro.kpiCards[k] !== 'boolean') ro.kpiCards[k] = seed.kpiCards[k];
   }
+  // Only the CONTAINER is backfilled — never an individual label. A stored label is a
+  // user-typed override that outranks DEFAULT_LABELS in build-spec's labelOf, and this
+  // pass has no way to tell a deliberate one from a stale copy of an old default;
+  // clearing such a copy is migrateV7toV8's job on the load path, once (and
+  // importSettings' pre-rename fixup's on the import path, which migrate() never sees).
   if (!isPlainObject(ro.labels)) ro.labels = {};
   // Manual-generate auto-download (v7). Fills only a MISSING key, like every flag
   // above, so a user who switched it OFF keeps it off across loads. Absent → the seed
@@ -399,6 +404,50 @@ function migrateV6toV7(doc) {
   return doc;
 }
 
+// The v7-era cover title, frozen here as a LITERAL on purpose. This is the string the
+// v7→v8 migration DELETES, not the string the deck prints: DEFAULT_LABELS.coverTitle
+// (slidespec/build-spec.js) was renamed to 'تقرير مسبار الأسبوعي', so reading the
+// comparison value from there would make it chase the current default forever and the
+// NEXT rename would silently start deleting overrides matching that one. A one-time
+// migration must be pinned to the exact value that existed when it was written. It also
+// keeps store.js free of any slidespec import — this layer persists config and knows
+// nothing about the deck.
+const V7_COVER_TITLE = 'تقرير مسبار اليومي';
+
+/**
+ * v7 → v8: let the cover-title rename REACH installs that used the labels editor.
+ *
+ * build-spec's labelOf reads `reportOptions.labels[key] ?? DEFAULT_LABELS[key]`, so a
+ * STORED override wins over the default outright — and the labels editor
+ * (ui/screen-review.js) persists one for every field the user typed into. Renaming the
+ * default from 'تقرير مسبار اليومي' to 'تقرير مسبار الأسبوعي' therefore reaches everyone
+ * EXCEPT those installs, which would keep printing the daily title forever:
+ * backfillReportOptions only fills an ABSENT key, it never clears a stored one. Same
+ * shape and same reason as migrateV6toV7 (deltaMode) and migrateV4toV5 (definitions
+ * slide) — a one-time reset of a value nobody actually chose.
+ *
+ * DELETE, never overwrite: removing the key restores the genuine "no override" state, so
+ * the cover follows DEFAULT_LABELS today AND after any future rename. Writing the new
+ * title in would just recreate this problem for the next one.
+ *
+ * Scoped by an EXACT match on the old default — any other title is a real edit and
+ * survives untouched. A user who deliberately retyped the old default byte-for-byte is
+ * INDISTINGUISHABLE from one who never chose anything, so they lose it and get the
+ * rename; that is accepted. Re-typing it in the labels editor afterwards sticks, because
+ * this runs ONCE and no later load ever touches a stored value again.
+ */
+function migrateV7toV8(doc) {
+  migrateSnapshotShape(doc); // same softening/backfill pass every other step runs
+  // Tolerant reads: the pass above already guarantees both containers, but a doc that
+  // reached storage hand-edited must not make the DELETE the thing that throws.
+  const labels = isPlainObject(doc.reportOptions) && isPlainObject(doc.reportOptions.labels)
+    ? doc.reportOptions.labels
+    : null;
+  if (labels && labels.coverTitle === V7_COVER_TITLE) delete labels.coverTitle;
+  doc.schemaVersion = 8;
+  return doc;
+}
+
 /** v5 → v7: run the v5→v6 transform, then v6→v7. */
 function migrateV5toV7(doc) {
   migrateV5toV6(doc);
@@ -423,10 +472,46 @@ function migrateV2toV7(doc) {
   return migrateV6toV7(doc);
 }
 
-/** v1 → v7: chain every transform so the oldest docs land on the current schema. */
+/** v1 → v7: chain every transform so the oldest docs reach the v7 shape. */
 function migrateV1toV7(doc) {
   migrateV1toV6(doc);
   return migrateV6toV7(doc);
+}
+
+/** v6 → v8: run the v6→v7 transform, then v7→v8. */
+function migrateV6toV8(doc) {
+  migrateV6toV7(doc);
+  return migrateV7toV8(doc);
+}
+
+/** v5 → v8: run the v5→v7 chain, then v7→v8. */
+function migrateV5toV8(doc) {
+  migrateV5toV7(doc);
+  return migrateV7toV8(doc);
+}
+
+/** v4 → v8: run the v4→v7 chain, then v7→v8. */
+function migrateV4toV8(doc) {
+  migrateV4toV7(doc);
+  return migrateV7toV8(doc);
+}
+
+/** v3 → v8: run the v3→v7 chain, then v7→v8. */
+function migrateV3toV8(doc) {
+  migrateV3toV7(doc);
+  return migrateV7toV8(doc);
+}
+
+/** v2 → v8: run the v2→v7 chain, then v7→v8. */
+function migrateV2toV8(doc) {
+  migrateV2toV7(doc);
+  return migrateV7toV8(doc);
+}
+
+/** v1 → v8: chain every transform so the oldest docs land on the current schema. */
+function migrateV1toV8(doc) {
+  migrateV1toV7(doc);
+  return migrateV7toV8(doc);
 }
 
 /** Version-check + migrate/reset. Unknown versions reset to seeds. */
@@ -436,12 +521,13 @@ function migrate(doc) {
     return persist(buildSeedDoc());
   }
   if (doc.schemaVersion === SCHEMA_VERSION) return migrateSnapshotShape(doc);
-  if (doc.schemaVersion === 6) return persist(migrateV6toV7(doc));
-  if (doc.schemaVersion === 5) return persist(migrateV5toV7(doc));
-  if (doc.schemaVersion === 4) return persist(migrateV4toV7(doc));
-  if (doc.schemaVersion === 3) return persist(migrateV3toV7(doc));
-  if (doc.schemaVersion === 2) return persist(migrateV2toV7(doc));
-  if (doc.schemaVersion === 1) return persist(migrateV1toV7(doc));
+  if (doc.schemaVersion === 7) return persist(migrateV7toV8(doc));
+  if (doc.schemaVersion === 6) return persist(migrateV6toV8(doc));
+  if (doc.schemaVersion === 5) return persist(migrateV5toV8(doc));
+  if (doc.schemaVersion === 4) return persist(migrateV4toV8(doc));
+  if (doc.schemaVersion === 3) return persist(migrateV3toV8(doc));
+  if (doc.schemaVersion === 2) return persist(migrateV2toV8(doc));
+  if (doc.schemaVersion === 1) return persist(migrateV1toV8(doc));
   // Future schema bumps add forward-migration cases above this line.
   console.warn(
     `[misbar/store] unsupported schemaVersion ${doc.schemaVersion} ` +
@@ -593,7 +679,7 @@ export function exportSettings() {
 // Schema versions an import accepts: every version migrate() can transform, plus
 // the current one. Extend this WITH the migration dispatcher — a version that can
 // be loaded from storage but not imported orphans that generation's backups.
-const IMPORTABLE_VERSIONS = new Set([1, 2, 3, 4, 5, 6, SCHEMA_VERSION]);
+const IMPORTABLE_VERSIONS = new Set([1, 2, 3, 4, 5, 6, 7, SCHEMA_VERSION]);
 
 function validateImport(doc) {
   if (!isPlainObject(doc)) {
@@ -1059,6 +1145,10 @@ export function importSettings(jsonText) {
   validateImport(incoming);
   const wasV1 = incoming.schemaVersion === 1;
   const preWeekBackup = typeof incoming.schemaVersion === 'number' && incoming.schemaVersion <= 6;
+  // Pre-COVER-RENAME backup: v7 is the LAST schema whose cover title was the daily one,
+  // so the cutoff is <= 7 here and <= 6 for deltaMode above — the two migrations shipped
+  // one version apart and each fixup has to match its own.
+  const preRenameBackup = typeof incoming.schemaVersion === 'number' && incoming.schemaVersion <= 7;
   incoming = pickImportKeys(incoming); // discard unknown keys — nothing but config may persist
   if (wasV1) {
     // A v1 backup's cancelledByMonth carries max-era (data-derived) months that
@@ -1075,8 +1165,25 @@ export function importSettings(jsonText) {
     // the current schemaVersion, so migrate() never routes the doc through v6→v7
     // again). Drop it and let the device's migrated value stand — the same
     // backup-needs-the-migration idea as the wasV1 fixup above. A deltaMode chosen
-    // AFTER v7 shipped travels in a v7 backup and imports untouched.
+    // AFTER v7 shipped travels in a v7-or-later backup and imports untouched.
     delete incoming.reportOptions.deltaMode;
+  }
+  if (preRenameBackup && incoming.reportOptions && incoming.reportOptions.labels
+      && incoming.reportOptions.labels.coverTitle === V7_COVER_TITLE) {
+    // Same shape, same reason as the deltaMode fixup above, for the v7→v8 cover-title
+    // rename: a v1-v7 backup's coverTitle override that EXACTLY equals the retired daily
+    // default is "a default nobody chose" (migrateV7toV8's premise). Importing it verbatim
+    // would permanently undo that migration — deepMergeImportWins lets the import win and
+    // saveSettings stamps SCHEMA_VERSION, so migrate() never routes the doc through
+    // v7→v8 again and the stale title would survive every future load, defeating the
+    // "cover is ALWAYS الأسبوعي" rule. Drop the key (never overwrite: absent is the real
+    // no-override state, so the cover follows DEFAULT_LABELS today and after the next
+    // rename) and let the device's post-migration state stand.
+    //
+    // Exact match only, scoped by version — identical trade-off to migrateV7toV8: a title
+    // retyped in the labels editor AFTER v8 shipped travels in a v8 backup and imports
+    // untouched, and any other string is a real edit that survives from any version.
+    delete incoming.reportOptions.labels.coverTitle;
   }
 
   const current = clone(loadSettings());

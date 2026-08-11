@@ -20,17 +20,27 @@
 // in spirit: two runs on one day compared against different baselines. The chips now
 // come from the DATA: a window on the calendar, and the rows' own timestamps.
 //
-// THE RULE. deltas[key] = asof(windowEnd)[key] − asof(dayBefore(windowStart))[key]
-// over engine/asof.js's 10 NUMBER_KEYS. Subtracting two as-of states one window apart
-// gives, for each key, exactly what happened INSIDE the window:
-//   • EVENT keys (total, collected, dispatched, received, completed, rejected) are
-//     monotonic counters of dated milestones, so the difference IS the in-window event
-//     count — "3 orders dated this week" ⇒ deltas.total === 3. This is the number
-//     Talal asked for.
-//   • STATE keys (awaitingDispatch, shippedNotReceived, awaitingResults, lateNoResult)
-//     are queue depths, not counters, so their difference is a SIGNED NET CHANGE over
-//     the window (a queue that drained shows '−N'). Both surfaces render signed chips,
-//     so this reads correctly without extra machinery.
+// THE RULE — TWO KEY CLASSES, TWO MEANINGS (round 4, 2026-08-06). Both are read off the
+// same pair of as-of states, but they are NOT the same arithmetic:
+//   • CUMULATIVE / EVENT keys (total, collected, dispatched, received, completed,
+//     rejected) — monotone counters of dated milestones, so
+//         deltas[key] = asof(windowEnd)[key] − asof(dayBefore(windowStart))[key]
+//     IS the in-window event count: "3 orders dated this week" ⇒ deltas.total === 3.
+//   • QUEUE keys (asof.js QUEUE_KEYS: awaitingDispatch, shippedNotReceived,
+//     awaitingResults, lateNoResult) — depths, not counters. Their DIFFERENCE was a
+//     signed net change, which answered a question the chip never asked: a week in which
+//     10 samples shipped and 12 were received rendered '−2' beside a queue that had in
+//     fact taken in 10 new members. They are now SURVIVING ENTRANTS —
+//         deltas[key] = asof(windowEnd, sinceIso = windowStart)[key]
+//     read DIRECTLY off the gated pass — i.e. rows that ENTERED the state inside the
+//     window and are STILL in it at the end. That count is a subset of the end depth, so
+//     it is ALWAYS ≥ 0 (see asof.js's monotone-exit argument), and it can be POSITIVE
+//     while the queue's own big cumulative number FELL. That divergence is the point, not
+//     a defect: the card is a depth, the chip is the week's intake that is still waiting.
+// WHY ONE gated end-pass serves both classes: asof.js's sinceIso gate touches ONLY the
+// four queue increments, leaving the six event counters (and every approx flag) exactly
+// as the ungated call produces them — so the subtraction above is unaffected by it. The
+// "before" pass is PLAIN (never gated): its queue depths are simply unread.
 //
 // THE WINDOW.
 //   mode 'week' (the DEFAULT) → [Sunday-of-week(reportDate), reportDate].
@@ -49,18 +59,22 @@
 // two copies could pick different baselines and the deck silently won). A pure
 // function of (rows, reportDate, mode) cannot disagree with itself.
 
-import { computeNumbersAsOf, NUMBER_KEYS } from '../engine/asof.js?v=v2026-08-06.1';
+import { computeNumbersAsOf, NUMBER_KEYS, QUEUE_KEYS } from '../engine/asof.js?v=v2026-08-10.1';
 // The Sun-based calendar math has ONE owner — model/delta-baseline.js — and this module
 // imports it rather than re-deriving it. A second copy of "which Sunday opens this week"
 // is exactly how the review banner, the deck legend and the history panel drift apart.
 // Re-exported below so a consumer can reach the math through either module.
 import {
   isoToDays, isoWeekday, weekStartDay, normalizeDeltaMode,
-} from './delta-baseline.js?v=v2026-08-06.1';
+} from './delta-baseline.js?v=v2026-08-10.1';
 
 export { isoToDays, isoWeekday, weekStartDay };
 
 const ISO_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+// The queue key class as a SET — asof.js owns the list, this module only needs the O(1)
+// "which arithmetic does this key take?" lookup inside the per-key loop below.
+const QUEUE_KEY_SET = new Set(QUEUE_KEYS);
 
 /** True for a well-formed 'yyyy-mm-dd' string. */
 function isIso(s) {
@@ -103,7 +117,10 @@ export function windowFor(reportDate, mode) {
  *
  *   { deltas, window: {start, end}, mode, approx }
  *
- * deltas holds all 10 NUMBER_KEYS, signed. `approx` is the UNION of the two as-of
+ * deltas holds all 10 NUMBER_KEYS: the six CUMULATIVE keys as signed in-window event
+ * counts, the four QUEUE_KEYS as surviving-entrant counts (≥ 0 by construction — read
+ * the header's two-class rule before trying to reconcile one against its card).
+ * `approx` is the UNION of the two as-of
  * approximation maps and is present only when non-empty; it bubbles asof.js's own
  * caveats, of which one is operator-visible: `rejected` (and therefore `completed`)
  * when a counted rejected row had to be dated by the last milestone it reached, because
@@ -127,13 +144,26 @@ export function computeWindowDeltas({ rows, tatTests, reportDate, mode, opts = {
   const beforeIso = isoFromDays(isoToDays(w.start) - 1);
   const rowsArr = Array.isArray(rows) ? rows : [];
 
+  // TWO passes, and only two — the gate makes the second do double duty (header rule).
+  // `before` is PLAIN: it is the subtrahend for the six cumulative keys, and its own queue
+  // depths are deliberately unread. `end` is GATED at the window start, so its six
+  // cumulative counters are still the full as-of totals (the gate cannot reach them) while
+  // its four queue counters are already the window's surviving entrants.
   const before = computeNumbersAsOf({ rows: rowsArr, tatTests, asOfIso: beforeIso, opts });
-  const end = computeNumbersAsOf({ rows: rowsArr, tatTests, asOfIso: w.end, opts });
+  const end = computeNumbersAsOf({
+    rows: rowsArr, tatTests, asOfIso: w.end, sinceIso: w.start, opts,
+  });
 
   const deltas = {};
   for (const k of NUMBER_KEYS) {
-    const a = Number(before.numbers[k]);
     const b = Number(end.numbers[k]);
+    if (QUEUE_KEY_SET.has(k)) {
+      // Queue key: the gated end value IS the answer — an entrant COUNT, not a difference.
+      // Subtracting `before` here would double-count the drain and could go negative again.
+      deltas[k] = Number.isFinite(b) ? b : 0;
+      continue;
+    }
+    const a = Number(before.numbers[k]);
     deltas[k] = (Number.isFinite(a) && Number.isFinite(b)) ? b - a : 0;
   }
 
@@ -146,7 +176,11 @@ export function computeWindowDeltas({ rows, tatTests, reportDate, mode, opts = {
 
 /**
  * stampWindowDeltas(model, {rows, tatTests, settings, mode, opts}) — the ONE stamper.
- * Writes model.kpi.deltas (SIGNED — a drop must surface as '−N', never be clamped) and
+ * Writes model.kpi.deltas — NOT clamped here: it stores whatever computeWindowDeltas
+ * produced, which is a signed event count for the six cumulative keys and an entrant
+ * count (≥ 0) for the four queue keys. Suppressing non-positive values is a RENDERING
+ * decision and belongs to the surfaces, so that the deck, the review banner and any
+ * future reader all decide from the same unedited numbers. It also writes
  * model.deltaWindow {start, end, mode, approx?}, which REPLACES the retired
  * model.deltaBaseline everywhere (build-spec's legend, the review banner).
  *

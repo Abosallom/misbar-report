@@ -1,19 +1,19 @@
 // ui/screen-review.js — review/edit report content with a live slide preview (Track E).
-import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-08-06.1';
-import { el, editableTable, textareaField, toast } from './components.js?v=v2026-08-06.1';
-import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-08-06.1';
-import { autoDraft, splitTaskLists } from '../model/drafts.js?v=v2026-08-06.1';
-import { buildHistoryPanel } from './history-table.js?v=v2026-08-06.1';
+import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-08-10.1';
+import { el, editableTable, textareaField, toast } from './components.js?v=v2026-08-10.1';
+import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-08-10.1';
+import { autoDraft, splitTaskLists } from '../model/drafts.js?v=v2026-08-10.1';
+import { buildHistoryPanel } from './history-table.js?v=v2026-08-10.1';
 import {
   normalizeDeltaMode, isWeekDeltaMode, DEFAULT_DELTA_MODE,
-} from '../model/delta-baseline.js?v=v2026-08-06.1';
+} from '../model/delta-baseline.js?v=v2026-08-10.1';
 // Same module instance drafts.js already imports (identical specifier) — the grace
 // re-check below MUST use task-lifecycle's own identity/status vocabulary, never a
 // second local copy of it. Static, not guarded: drafts.js (imported above) already
 // depends on this module, so there is no new failure mode.
 import {
   CLOSED as CLOSED_STATUS, LIST_EXTERNAL, LIST_INTERNAL, taskKey,
-} from '../model/task-lifecycle.js?v=v2026-08-06.1';
+} from '../model/task-lifecycle.js?v=v2026-08-10.1';
 
 /* small local module helpers (kept local to avoid cross-screen coupling) */
 async function tryImport(path) { try { return await import(path); } catch { return null; } }
@@ -142,7 +142,8 @@ const chipStyle = (on) => 'border-radius:999px;padding:6px 14px;font-weight:700;
     : 'background:var(--white);color:var(--slate-500);border:1px solid var(--border-dark);text-decoration:line-through;opacity:.75;');
 
 /* 'ما الجديد' banner — delta keys → Arabic chip label + colour intent. Keys mirror
- * EngineOutput.deltas; labels are tuned for the signed '+N/−N {label}' phrasing.
+ * EngineOutput.deltas; labels are tuned for the '+N {label}' phrasing — chips are
+ * POSITIVE-ONLY and always signed '+' (see bannerChipVisible below), never '−N'.
  * Order = display order (headline & concerns first, flow counts last). */
 const DELTA_META = [
   { key: 'completed', label: 'نتائج مكتملة', intent: 'good' },
@@ -163,6 +164,25 @@ const DELTA_CHIP_TONE = {
   info: 'background:var(--info-bg,#E0E7FF);color:var(--info-text,#1E3A8A);border:1px solid rgba(30,58,138,.30)',
 };
 const DELTA_CHIP_BASE = 'display:inline-flex;align-items:center;gap:4px;border-radius:999px;padding:6px 13px;font-weight:800;font-size:.82rem;line-height:1.3;white-space:nowrap';
+
+/* THE BANNER CHIP FILTER (R4, 2026-08-10) — POSITIVE-ONLY, and that can never hide a
+ * real drop, because after R4 no chip value IS a drop:
+ *   • the four QUEUE keys (awaitingDispatch / shippedNotReceived / awaitingResults /
+ *     lateNoResult) are SURVIVING ENTRANTS — rows that ENTERED the state inside the
+ *     window and are STILL in it at window end (model/delta-window.js). That counts
+ *     arrivals, not net queue movement, so it is >= 0 BY CONSTRUCTION and can read '+N'
+ *     on a week whose queue shrank overall.
+ *   • the six CUMULATIVE keys (total/collected/dispatched/received/completed/rejected)
+ *     stay in-window event counts — asof(end) − asof(dayBefore(start)) over monotonic
+ *     counters — so they are >= 0 too.
+ *   • the engine's own deltas, the fallback that survives when rows are unavailable and
+ *     nothing was stamped, are already clamped: Math.max(0, …) in engine/engine.js.
+ * So '> 0' drops zeros and nothing else. It is ALSO the deck's rule — build-spec's
+ * fmtDelta emits a chip only for n > 0 — so the operator's banner and the delivered
+ * slide can never disagree about which chips exist. A '!== 0' filter here would have
+ * manufactured exactly that disagreement the moment a value went negative.
+ * EXPORTED so node tests can pin the predicate without a DOM. */
+export const bannerChipVisible = (n) => Number.isFinite(n) && n > 0;
 
 /* Delta-mode pills — MODULE SCOPE and EXPORTED so the registry test can pin them against
  * DELTA_MODES (model/delta-baseline.js) and against screen-settings' DELTA_MODE_OPTIONS:
@@ -397,7 +417,7 @@ export async function render(container, ctx) {
   // Guarded import, exactly as the retired picker was: a build without the module
   // degrades to the engine's own deltas instead of throwing. Re-run below on a
   // report-date change and on a mode switch; being PURE, every re-run agrees.
-  const dwMod = await tryImport('../model/delta-window.js?v=v2026-08-06.1');
+  const dwMod = await tryImport('../model/delta-window.js?v=v2026-08-10.1');
   const stampWindow = dwMod && dwMod.stampWindowDeltas;
   // The chips need the parsed CSV rows: with no upload in this session (mock preview)
   // stampWindowDeltas leaves the engine's deltas alone and stamps no window, and the
@@ -481,9 +501,9 @@ export async function render(container, ctx) {
     const token = ++renderToken;
     model.reportDate = state.reportDate;
     stampDeltas(); // re-window the chips for the current report date (pure → idempotent)
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-08-06.1');
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-08-10.1');
     const buildSpec = pickFn(specMod, ['buildSpec', 'build', 'makeSpec', 'toSpec']);
-    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-08-06.1');
+    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-08-10.1');
     const renderFn = pickFn(rendMod, ['renderSpec', 'renderSlides', 'renderHtml', 'render']);
 
     if (!buildSpec || !renderFn) {
@@ -873,7 +893,7 @@ export async function render(container, ctx) {
     el('summary', { class: 'card__title', style: 'cursor:pointer', text: STR.review.labelsCardTitle }),
   ]);
   (async () => {
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-08-06.1');
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-08-10.1');
     const LABEL_NAMES = specMod && specMod.LABEL_NAMES;
     const DEFAULT_LABELS = (specMod && specMod.DEFAULT_LABELS) || {};
     if (!LABEL_NAMES || typeof LABEL_NAMES !== 'object') {
@@ -956,8 +976,9 @@ export async function render(container, ctx) {
 
   // 'نشاط الأسبوع' banner — the first thing the operator sees. Reads model.kpi.deltas,
   // which model/delta-window.js computed as the IN-WINDOW ACTIVITY from the rows' own
-  // dates: a coloured chip per NON-ZERO delta (signed, so a drained queue shows '−N'),
-  // else a calm single line. Rebuilt on a delta-mode switch.
+  // dates: a coloured '+N' chip per POSITIVE delta (bannerChipVisible — queue keys are
+  // surviving entrants, so a drained queue still reports the week's arrivals), else a
+  // calm single line. Rebuilt on a delta-mode switch.
   //
   // TWO DISCLOSURES DIED HERE with the baseline they described. anchorFallbackNote
   // ("no report was stored before this week's Sunday, so we compared to the newest one
@@ -996,16 +1017,13 @@ export async function render(container, ctx) {
 
   function buildDeltaBanner() {
     const deltas = (kpi && kpi.deltas) || {};
-    // stampWindowDeltas stores SIGNED deltas and the exec slide renders them through
-    // fmtDelta ('+N' on a rise, '−N' on a drop), so filter on ≠ 0 — not > 0. The four
-    // STATE keys (awaitingDispatch/shippedNotReceived/awaitingResults/lateNoResult) are
-    // queue depths, so their window value is a signed NET change and a drained queue is
-    // a routine '−N'; a > 0 filter would show 'لا نشاط' here while the delivered deck
-    // shows '−12'.
-    const active = DELTA_META.filter((m) => {
-      const n = Number(deltas[m.key]);
-      return Number.isFinite(n) && n !== 0;
-    });
+    // Positive-only, through the module-scope exported predicate — read its comment
+    // (why > 0 cannot hide a real negative, and why the deck applies the same rule)
+    // before ever relaxing this back to '!== 0'. Zero ⇒ no chip; all-zero ⇒ words.empty.
+    // The value is passed RAW, not Number()-coerced: build-spec's fmtDelta receives the
+    // raw value too, so a corrupt string '5' is rejected by Number.isFinite on BOTH
+    // surfaces instead of chipping here and not on the deck.
+    const active = DELTA_META.filter((m) => bannerChipVisible(deltas[m.key]));
     // week vs single-day window phrasing, one decision — read at call time from the
     // stamped window (authoritative) with the settings mode as the only fallback.
     const words = deltaWording(model.reportOptions.deltaMode, model.deltaWindow);
@@ -1020,18 +1038,20 @@ export async function render(container, ctx) {
         note,
       ]);
     }
-    // Sign glyphs match build-spec's fmtDelta exactly (ASCII '+' / U+2212 '−') so the
-    // banner and the exec slide of the same run never read differently.
+    // ALWAYS the ASCII '+' — a surviving chip is > 0 by the filter above, and build-spec's
+    // fmtDelta prints the same '+N' for the same key, so the banner and the exec slide of
+    // one run never read differently. The '−' branch is GONE with the signed model; do not
+    // reintroduce it without changing both surfaces at once.
     // RTL: the signed number is its OWN dir=ltr flex item. As part of one Arabic
-    // text run the leading '+' / '−' (bidi class ES → ON → resolved to the RTL
-    // paragraph level) rendered on the WRONG side of the digits ('12+' instead of
-    // '+12'). Same isolation the history panel's delta and the upload hero pill use.
+    // text run the leading '+' (bidi class ES → ON → resolved to the RTL paragraph
+    // level) rendered on the WRONG side of the digits ('12+' instead of '+12'). Same
+    // isolation the history panel's delta and the upload hero pill use.
     const chips = active.map((m) => {
       const n = Number(deltas[m.key]);
       return el('span', {
         style: DELTA_CHIP_BASE + ';' + (DELTA_CHIP_TONE[m.intent] || DELTA_CHIP_TONE.info),
       }, [
-        el('span', { dir: 'ltr', text: n > 0 ? '+' + n : '−' + Math.abs(n) }),
+        el('span', { dir: 'ltr', text: '+' + n }),
         el('span', { text: m.label }),
       ]);
     });

@@ -74,9 +74,42 @@
 // history panel's نسبة الاكتمال. Dating by the last reached milestone is the
 // earliest defensible day and restores the partition, while still resolving to
 // SOME day for every row so the CROWN identity at a saturated as-of is unchanged.
+//
+// SURVIVING ENTRANTS — the OPTIONAL `sinceIso` gate (round 4, 2026-08-06). Passing
+// sinceIso narrows the four QUEUE_KEYS — and ONLY those four — to the rows that
+// ENTERED the state on or after that day and are STILL in it at asOf. The entry day
+// per key (the day the row became a member, which is NOT always the day it was last
+// touched):
+//   awaitingDispatch    entry = orderDate   — a row joins the pre-dispatch queue when ordered
+//   shippedNotReceived  entry = dispatched
+//   awaitingResults     entry = received
+//   lateNoResult        entry = the DUE day — a row ENTERS lateness on its due day, not
+//                       on the day it was received; before the due day it is merely pending
+// Everything else is untouched by the gate: the six EVENT keys (total, collected,
+// dispatched, received, completed, rejected), the cancelled/rejected dating, the approx
+// flags and opts.excludeNoTat all behave exactly as they do ungated. That is deliberate —
+// ONE gated call then serves BOTH key classes: the caller subtracts two as-of states for
+// the event keys and reads the SAME gated call directly for the queue keys
+// (model/delta-window.js computeWindowDeltas).
+//
+// WHY THE GATED COUNT IS ALWAYS ≥ 0, AND IS THE SET THE CHIP CLAIMS. Membership in a
+// queue at asOf is already an intersection of this file's own per-key tests; the gate
+// adds ONE more conjunct (entry day ≥ sinceDay), so the result is a SUBSET of the ungated
+// count — a count, never a difference of two counts, hence never negative. It is also
+// exactly "what entered during the window and is still here", because every EXIT from a
+// queue (dispatched / received / resulted / rejected-by-asOf) is MONOTONE in the as-of
+// day: once an exit test is true it stays true as asOf moves forward, so a row inside the
+// queue AT THE END was inside it continuously since its entry day. Therefore
+//   membership-at-end ∩ entered-in-window  ==  the window's SURVIVING entrants.
+// CONSEQUENCE the reader must accept: a queue whose TOTAL fell over the window can still
+// show a POSITIVE gated value (many exits, a few entrants). That is the intended reading
+// of the chip, not a contradiction with the big cumulative number beside it.
+// ABSENT sinceIso ⇒ every gate short-circuits to true and the output is byte-identical to
+// the ungated function — which is what leaves the CROWN identity above, buildWeekNumbers
+// and every existing caller exactly as they were.
 
-import { parseDateTime, toEpochDay, workday, MS_PER_DAY } from './workday.js?v=v2026-08-06.1';
-import { buildTatIndex, resolveTat } from './tat.js?v=v2026-08-06.1';
+import { parseDateTime, toEpochDay, workday, MS_PER_DAY } from './workday.js?v=v2026-08-10.1';
+import { buildTatIndex, resolveTat } from './tat.js?v=v2026-08-10.1';
 
 // engine.js's cascade keys off these exact rawStatus literals (not exported).
 const RAW_CANCELLED = 'Order Cancelled';
@@ -85,6 +118,19 @@ const RAW_REJECTED = 'Result Rejected';
 /** The 10 published numbers, in the app's canonical order (currentNumbersOf). */
 export const NUMBER_KEYS = Object.freeze([
   'total', 'collected', 'dispatched', 'received', 'completed', 'rejected',
+  'awaitingDispatch', 'shippedNotReceived', 'awaitingResults', 'lateNoResult',
+]);
+
+/**
+ * THE QUEUE KEY CLASS — the subset of NUMBER_KEYS that is a STATE (a depth: "how many
+ * rows sit here at this instant"), not a monotone counter of dated events. These are
+ * the ONLY keys the optional `sinceIso` gate below narrows, and the only keys a window
+ * reads as SURVIVING ENTRANTS (entered in-window AND still in the state at the window's
+ * end, hence always ≥ 0) instead of as a difference of two as-of states. The other six
+ * NUMBER_KEYS are the EVENT class and stay in-window event counts. See the
+ * "SURVIVING ENTRANTS" header note for the entry day of each key and the ≥ 0 argument.
+ */
+export const QUEUE_KEYS = Object.freeze([
   'awaitingDispatch', 'shippedNotReceived', 'awaitingResults', 'lateNoResult',
 ]);
 
@@ -120,14 +166,37 @@ function pickNumbers(numbers) {
  * @param {import('../contracts.js').OrderRow[]} args.rows
  * @param {Object<string,number>} args.tatTests  test name → business days (engine TAT lookup)
  * @param {string} args.asOfIso  'YYYY-MM-DD' — the as-of / TODAY date
+ * @param {string} [args.sinceIso]  'YYYY-MM-DD' — OPTIONAL window floor. When given, the
+ *   four QUEUE_KEYS count only rows whose ENTRY day into that state is ≥ sinceIso (the
+ *   window's surviving entrants); the other six keys and the approx flags are unaffected.
+ *   Absent ⇒ byte-identical to the ungated function. See the header's SURVIVING ENTRANTS note.
  * @param {{tatFallbackFromCsv?:boolean}} [args.opts]  TAT resolution opts (engine defaults: fallback ON)
  * @returns {{numbers:Object<string,number>, approx:Object<string,boolean>}}
  */
-export function computeNumbersAsOf({ rows, tatTests, asOfIso, opts = {} } = {}) {
+export function computeNumbersAsOf({ rows, tatTests, asOfIso, sinceIso, opts = {} } = {}) {
   const asOfDay = toEpochDay(parseDateTime(asOfIso));
   if (asOfDay == null) {
     throw new Error('computeNumbersAsOf: asOfIso (YYYY-MM-DD) is required');
   }
+  // The optional queue-entry floor, in the SAME units as asOfDay and dueMs below
+  // (epoch-ms midnights) so the three compare directly, with no unit conversion anywhere.
+  // ABSENT (undefined/null) ⇒ sinceDay stays null ⇒ every gate short-circuits to true.
+  // PRESENT-but-unparseable THROWS, exactly as asOfIso does: a caller that asked to narrow
+  // the chips must never be silently handed the full queue depth instead.
+  let sinceDay = null;
+  if (sinceIso !== undefined && sinceIso !== null) {
+    sinceDay = toEpochDay(parseDateTime(sinceIso));
+    if (sinceDay == null) {
+      throw new Error('computeNumbersAsOf: sinceIso must be YYYY-MM-DD when present');
+    }
+  }
+  /**
+   * "This row ENTERED its queue inside the window" — the gate applied to the four
+   * QUEUE_KEYS ONLY. Ungated (always true) when sinceIso was absent, which is what makes
+   * the no-arg call byte-identical. A null entry day can only reach here for a row the
+   * key's own membership test already admitted, so it is gated OUT rather than guessed at.
+   */
+  const enteredInWindow = (entryD) => sinceDay == null || (entryD != null && entryD >= sinceDay);
   const tatIndex = buildTatIndex(tatTests);
   const rowsArr = Array.isArray(rows) ? rows : [];
 
@@ -225,12 +294,19 @@ export function computeNumbersAsOf({ rows, tatTests, asOfIso, opts = {} } = {}) 
     // rejection was dated. Guarding on isRejected would drop it out of every bucket in
     // that window and break the identity from the other side (total 1, buckets 0).
     // Guarding on rejectedByAsOf keeps every row in exactly ONE bucket on every date.
-    if (orderByAsOf && !dispatchedByAsOf && !rejectedByAsOf) awaitingDispatch++;
+    //
+    // The trailing enteredInWindow(...) on these three (and on lateNoResult below) is the
+    // OPTIONAL surviving-entrants gate — a no-op unless the caller passed sinceIso. Its
+    // argument is the row's ENTRY day into THIS queue, never the day it last moved.
+    if (orderByAsOf && !dispatchedByAsOf && !rejectedByAsOf
+        && enteredInWindow(orderD)) awaitingDispatch++;
 
-    if (dispatchedByAsOf && !receivedByAsOf && !rejectedByAsOf) shippedNotReceived++;
+    if (dispatchedByAsOf && !receivedByAsOf && !rejectedByAsOf
+        && enteredInWindow(dispatchedD)) shippedNotReceived++;
 
     // awaitingResults (engine: receivedMs != null && resultedMs == null && !rejected).
-    if (receivedByAsOf && !resultedByAsOf && !rejectedByAsOf) awaitingResults++;
+    if (receivedByAsOf && !resultedByAsOf && !rejectedByAsOf
+        && enteredInWindow(receivedD)) awaitingResults++;
 
     // lateNoResult (engine: status === LATE && resultedMs == null). LATE =
     // non-cancelled, non-rejected, received, StdTAT resolved, and DueDate ON or
@@ -246,7 +322,10 @@ export function computeNumbersAsOf({ rows, tatTests, asOfIso, opts = {} } = {}) 
         const dueMs = workday(receivedD, tat); // workday floors start internally
         // day-granular: due day ON or before asOf day (2026-08-05 boundary change —
         // `>` became `>=`, mirroring engine.js's `delay < 0 → ON_TIME`).
-        if (asOfDay >= dueMs) lateNoResult++;
+        // The gate's entry day here is dueMs, NOT receivedD: a row ENTERS lateness on its
+        // OWN due day (that is the day this test first flips true), so a row received long
+        // before the window but falling due inside it is a genuine in-window entrant.
+        if (asOfDay >= dueMs && enteredInWindow(dueMs)) lateNoResult++;
       }
     }
   }

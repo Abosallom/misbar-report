@@ -22,7 +22,7 @@
 //   m.reportOptions.kpiCards[key] toggles the 7 exec KPI cards (row geometry repacks)
 //                                 + the OPT-IN 'turnaround' block on the monthly slide
 //   m.overrides[key]              per-run manual NUMBER overrides (suppresses that delta chip)
-import { COLORS as C, GEOM } from '../theme.js?v=v2026-08-06.1';
+import { COLORS as C, GEOM } from '../theme.js?v=v2026-08-10.1';
 
 // OPT-IN kpiCards KEYS. reportOptions.kpiCards normally reads "on unless === false"
 // (see buildExec's cardDefs filter). The keys in this set INVERT that: they render only
@@ -61,7 +61,11 @@ export const DEFAULT_LABELS = {
   subheadChallenges: 'تحديات',
   subheadRisks: 'المخاطر',
   // Cover + thanks
-  coverTitle: 'تقرير مسبار اليومي',
+  // ALWAYS 'الأسبوعي' — for BOTH variants (user decision 2026-08-10). The deck's chips
+  // now report a WEEK's activity window (see execDeltaLegendWeekWindow), so a cover that
+  // said 'اليومي' contradicted the legend two slides later. The daily/weekly distinction
+  // survives only in the chip window itself, never in the cover's name.
+  coverTitle: 'تقرير مسبار الأسبوعي',
   coverSubtitle: 'متابعة تقدم الطلبات وقياس جاهزية المختبرات',
   coverPreparedBy: 'إعداد: لين لخدمات الأعمال',
   thanks: 'شكرا لكم',
@@ -264,6 +268,11 @@ export const DEFAULT_LABELS = {
   funnelStage: 'المرحلة',
   funnelCount: 'العدد',
   funnelDesc: 'الوصف',
+  // Funnel OWNERSHIP-BRACKET labels — who owns which half of the journey. Stages 1-3
+  // (إنشاء · سحب · شحن) happen at the hospital, stages 4-5 (إستلام · إصدار نتيجة) at the
+  // lab. Rendered next to the ⊐ brackets on the right of the funnel; see buildExecFunnel.
+  funnelGroupHospital: 'المستشفى',
+  funnelGroupLabs: 'المختبرات',
   // Chart series / titles that are static text
   chartActual: 'الفعلي',            // turnaround line — actual series
   chartExpected: 'المتوقع',         // turnaround line — expected series
@@ -374,6 +383,8 @@ export const LABEL_NAMES = {
   funnelStage: 'ترويسة القمع: المرحلة',
   funnelCount: 'ترويسة القمع: العدد',
   funnelDesc: 'ترويسة القمع: الوصف',
+  funnelGroupHospital: 'قوس القمع: مراحل المستشفى (١–٣)',
+  funnelGroupLabs: 'قوس القمع: مراحل المختبرات (٤–٥)',
   chartActual: 'سلسلة زمن الإنجاز: الفعلي',
   chartExpected: 'سلسلة زمن الإنجاز: المتوقع',
   chartDaysAxis: 'عنوان محور الأيام',
@@ -440,10 +451,28 @@ const fmtDate = (iso) => { const [y, m, d] = iso.split('-'); return `${d} / ${m}
 const pctLab = (n) => (n === 0 ? '0%' : n.toFixed(1) + '%');           // late-%
 const pctMonthly = (n) => (n == null ? '-' : n === 100 ? '100%' : n.toFixed(1) + '%');
 const bullets = (items) => items.map((s) => '•  ' + s).join('\n');
-// Exec delta-chip text: '+N' for a rise, '−N' for a drop (− is U+2212, not a hyphen);
-// 0 / non-finite → undefined so the chip is hidden (keep current behaviour). ALL chips
-// are green now (user decision 2026-07-23) — the old BAD_DELTA red-chip logic is gone.
-const fmtDelta = (n) => (Number.isFinite(n) && n !== 0 ? (n > 0 ? '+' + n : '−' + Math.abs(n)) : undefined);
+// Exec delta-chip text: POSITIVE-ONLY (user decision 2026-08-10). '+N' for a rise;
+// 0, negative and non-finite ALL collapse to undefined, i.e. NO CHIP AT ALL. The old
+// '−N' drop form (− was U+2212, not a hyphen) is GONE — a chip is now strictly an
+// "this much happened during the window" badge, never a net-movement one.
+//
+// WHY a drop can no longer be printed: the chips read a WINDOW, not a baseline diff.
+// The four QUEUE metrics (awaitingDispatch / shippedNotReceived / awaitingResults /
+// lateNoResult) are counted as SURVIVING ENTRANTS — rows that entered the state inside
+// [window.start .. window.end] and are still in it at window.end — so they are ≥ 0 by
+// construction and can be positive while the card's cumulative total is falling. The
+// CUMULATIVE metrics (total/collected/dispatched/received/completed/rejected) stay
+// in-window EVENT counts, also ≥ 0 on well-formed rows. A negative therefore means the
+// number is not the window activity this chip claims to show (a legacy engine delta, or
+// backdated/corrected rows re-shaping the asof() pair) — printing '−N' beside a
+// CUMULATIVE big number would read as "the total fell", which is not what it measures.
+// Hiding is the honest degradation: the big number is unaffected, the reader just loses
+// one badge. ALL chips are green (user decision 2026-07-23) — the BAD_DELTA red-chip
+// logic is long gone, so a drop had no colour of its own to be read by anyway.
+//
+// anyChip (the legend gate) and the funnel's stageDelta both route through here, so the
+// legend and every chip surface follow this rule automatically — nothing else to gate.
+const fmtDelta = (n) => (Number.isFinite(n) && n > 0 ? '+' + n : undefined);
 // Delta-chip legend text — it names the ACTIVITY WINDOW the chips were counted over,
 // read straight off model.deltaWindow {start, end, mode} (model/delta-window.js). One
 // source, two surfaces: the review banner's deltaWording (ui/screen-review.js) reads the
@@ -524,12 +553,34 @@ function buildCover(m) {
 // an ink-line formula: value 34pt at (x+0.08, y+0.13, w−0.24, 0.72), label 11.5pt at
 // (x+0.08, y+0.90, w−0.16, 0.42) with NO line-spacing override (the reference slide
 // carries zero <a:lnSpc>), sublabel 9.5pt at (x+0.08, y+1.28, w−0.16, 0.28).
-// The one deliberate departure is the delta chip: the reference's chip box sits at
-// (x+0.10, y+0.30, 0.9, 0.42) at 20pt, i.e. straight over the restored 34pt value band
-// (y+0.13 → y+0.85). It only looked clean in the reference because the '+N' runs were
-// hand-deleted there. The chips are a KEPT feature, so they stay pinned to the TOP-LEFT
-// corner at 13pt where they are left-aligned and the value is right-aligned — the two
-// can never touch. See the delta-legend note in buildExecFunnel.
+// The one deliberate departure is the delta chip's POSITION — no longer its SIZE.
+// The reference's chip box sits at (x+0.10, y+0.30, 0.9, 0.42) at 20pt, i.e. straight
+// over the restored 34pt value band (y+0.13 → y+0.85); it only looked clean there
+// because the '+N' runs had been hand-deleted. So the chip keeps the TOP-LEFT corner
+// this generator moved it to — left-aligned against a right-aligned value — but as of
+// 2026-08-10 it is drawn at the REFERENCE'S OWN 20pt, not the 13pt this comment used to
+// justify. 13pt was chosen when the only worry was clearance; the user's round-4 review
+// called the chip illegible at that size and set the ratio bar at 55-65% of the number
+// it annotates. 20/34 = 58.8%, mid-band, and it is the size the deck was designed with.
+// The box grows with the type: (x+0.06, y+0.04, 0.90, 0.30) — 0.90in wide so a 20pt
+// '+123' has room to set on ONE line (0.55in at 13pt would have wrapped it), and pushed
+// up to y+0.04 to spend the extra height upward, away from the value's optical centre.
+// The box h 0.30 is SMALLER than the 20pt line box (≈0.52in by the 0.0258in/pt Cairo
+// constant measured for the funnel chips); with the renderers' default valign 'top' the
+// overflow spills DOWNWARD off an unfilled, unbordered text box, which is invisible. Do
+// NOT "fix" it by adding valign:'middle' — that would re-centre the ink INTO the 34pt
+// value band, which is the one thing the top-left placement exists to avoid.
+// CLEARANCE IS HORIZONTAL, and it is TIGHTER than at 13pt: the chip's ink grows
+// rightward from x+0.11 (box + pptxgenjs' 0.05in inset) while the value's grows leftward
+// from x+1.429, over 1.319in of shared span on a 1.639in card. MEASURED against the
+// deck's own Cairo-700 metrics (digits ≈0.56em tabular): a 1-2-digit chip beside the
+// 3-digit values this deck prints today clears by 0.155–0.31in — real but not the ≈0.5in
+// an eyeball guess suggests. A 4-DIGIT value is a genuine collision at 20pt (≈0.11in of
+// horizontal ink overlap, ≈0.07in vertical on the PPTX path) and NO size inside the
+// user's 55–65% band resolves it — which is why the emitter below falls back to the
+// pre-round-4 13pt box once the value string reaches 4 characters: that geometry's
+// clearance against 4-digit values is proven by every deck shipped before 2026-08-10.
+// See the delta-legend note in buildExecFunnel.
 // EMPHASIS (emph: true) is the treatment the user hand-built for الطلبات المتأخرة on the
 // reference slide: he duplicated the 0.063in accent bar twice, stretched each to the full
 // card width and dropped one on the card's top edge and one on its bottom edge, so the
@@ -550,7 +601,13 @@ function kpiCard({ x, w, v, vc, lab, sub, ac, delta, emph }) {
   ];
   // delta chip — TOP-LEFT corner, left-aligned; horizontally clear of the value.
   // ALWAYS green now (user decision 2026-07-23) — no per-metric colour branching.
-  if (delta) els.push(text(x + 0.06, y + 0.06, 0.55, 0.24, delta, 13, { bold: true, color: C.deltaGreen, align: 'left', valign: 'middle' }));
+  // 20pt = 58.8% of the 34pt value (user decision 2026-08-10); see the size note above,
+  // including why a 4-character value drops the chip back to the proven 13pt box.
+  if (delta) {
+    els.push(String(v).length >= 4
+      ? text(x + 0.06, y + 0.06, 0.55, 0.24, delta, 13, { bold: true, color: C.deltaGreen, align: 'left' })
+      : text(x + 0.06, y + 0.04, 0.90, 0.30, delta, 20, { bold: true, color: C.deltaGreen, align: 'left' }));
+  }
   // sublabel — 9.5pt (reference: sz=950)
   if (sub) els.push(text(x + 0.08, y + 1.28, w - 0.16, 0.28, sub, 9.5, { color: C.slate500, align: 'right', valign: 'top', rtl: true }));
   // emphasis bars LAST so they paint over the card body, as they do in the reference.
@@ -652,9 +709,10 @@ function buildExecFunnel(m) {
     ? { cardW: KPI_REF_W, xOf: (i) => KPI_REF_X[i] }
     : kpiRowGeom(visible.length);
   // ALL delta chips are green now (user decision 2026-07-23) — the old BAD_DELTA
-  // red-chip branch was removed. fmtDelta yields '+N' on a rise, '−N' on a drop, and
-  // nothing (chip hidden) for a 0/missing delta. An overridden card value suppresses
-  // its chip (a manual number has no meaningful delta vs the baseline).
+  // red-chip branch was removed. fmtDelta yields '+N' on a rise and NOTHING for a
+  // 0/negative/missing delta (positive-only since 2026-08-10 — see fmtDelta). An
+  // overridden card value suppresses its chip: a hand-typed number is not the result of
+  // the window's activity, so no count of that activity belongs beside it.
   const kpiEls = visible.flatMap((c, i) => kpiCard({
     x: xOf(i), w: cardW, v: String(c.v), vc: c.vc, lab: c.lab, sub: c.sub, ac: c.ac,
     delta: isOv(c.dk) ? undefined : fmtDelta(d[c.dk]), emph: c.emph,
@@ -685,6 +743,9 @@ function buildExecFunnel(m) {
 
   // A green "+N" chip is shown this run when a visible KPI card OR an intermediate
   // funnel stage has a positive, non-overridden delta. Drives the legend (Fix 3).
+  // "Positive" needs no test of its own here: fmtDelta is positive-only, so `!== undefined`
+  // IS the positivity test, and the legend can never announce a window whose chips all
+  // turned out to be hidden zeros/drops.
   const anyChip = visible.some((c) => !isOv(c.dk) && fmtDelta(d[c.dk]) !== undefined)
     || rows.some((r) => !KPI_DELTA_KEYS.has(r.key) && !isOv(r.ov) && fmtDelta(d[r.key]) !== undefined);
 
@@ -709,11 +770,9 @@ function buildExecFunnel(m) {
     text(9.05, 2.906, 3.0, 0.3, L('funnelStage'), 10, { bold: true, color: C.slate500, align: 'right', valign: 'middle', rtl: true }),
     text(8.629, 2.906, 1.0, 0.3, L('funnelCount'), 10, { bold: true, color: C.slate500, align: 'center', valign: 'middle', rtl: true }),
     text(0.05, 2.906, 2.9, 0.3, L('funnelDesc'), 10, { bold: true, color: C.slate500, align: 'right', valign: 'middle', rtl: true }),
-    // Brackets
-    rect(12.03, 3.501, 0.02, 1.3, C.slate600),
-    text(12.35, 3.824, 0.9, 0.55, 'المستشفى', 12, { bold: true, color: C.slate900, align: 'right', valign: 'middle', rtl: true }),
-    rect(12.03, 5.451, 0.02, 0.685, C.slate600),
-    text(12.25, 5.496, 0.95, 0.55, 'المختبرات', 12, { bold: true, color: C.slate900, align: 'right', valign: 'middle', rtl: true }),
+    // The ownership brackets used to be built HERE, as two bare spines at x 12.03 with
+    // hard-coded Arabic labels. They are now a proper ⊐ built AFTER the rows loop —
+    // see the block below it for why the order matters.
   ];
   // THE BARS CARRY NO TEXT (user decision 2026-08-04). The stage count has always sat
   // outside the track in its own column (x 8.629, w 1.0); the DELTA chip used to be drawn
@@ -722,17 +781,27 @@ function buildExecFunnel(m) {
   // (KPI_DELTA_KEYS suppresses 1 and 5), so the offence was intermittent as well.
   // Both numbers now STACK in the count column: the count occupies the upper 0.30in of the
   // row (valign bottom, so it keeps sitting on the bar's optical centre) and the chip goes
-  // directly beneath it at rowY+0.40, 9.5pt.
-  // THE 0.40 IS MEASURED, NOT CHOSEN. A row's pitch is 0.65in (0.686 on the last step) and
-  // the two LINE BOXES nearly fill it: self-hosted Cairo gives the 14pt count a 0.365in
-  // line box and the 9.5pt chip a 0.245in one — 0.610in of the 0.650in pitch, i.e. 0.040in
-  // of total slack to divide between the two gaps. With valign bottom the count's line box
-  // ends 0.068in below its box (flex-end + half-leading), so it runs rowY+0.003 → rowY+0.368;
-  // the chip's starts 0.015in above its box, so at rowY+0.40 it runs rowY+0.385 → rowY+0.630
-  // and the NEXT row's count starts at rowY+0.653. Both gaps are ≈0.02in and both are
-  // POSITIVE — a browser Range probe over the whole slide reports zero overlapping pairs,
-  // where the old 0.33 offset reported three (one per chip). Glyph ink is a good deal
+  // directly beneath it at rowY+0.40, 9pt.
+  // THE 0.40 IS MEASURED, NOT CHOSEN, and it SURVIVES the 2026-08-10 resize UNCHANGED.
+  // A row's pitch is 0.65in (0.686 on the last step) and the two LINE BOXES nearly fill it:
+  // self-hosted Cairo gives the 14pt count a 0.365in line box, and the chip's scales with
+  // its size at ≈0.0258in/pt (the measured 9.5pt box was 0.245in), so the 9pt chip's is
+  // ≈0.235in. That is 0.600in of the 0.650in pitch — 0.050in of total slack to divide
+  // between the two gaps, up from the 0.040in the 9.5pt chip left.
+  // With valign bottom the count's line box ends 0.068in below its box (flex-end +
+  // half-leading), so it runs rowY+0.003 → rowY+0.368. The chip is valign middle in a
+  // 0.22in box at rowY+0.40, so its 0.235in line box centres on rowY+0.51 and runs
+  // rowY+0.393 → rowY+0.628 (it now starts ≈0.008in above its box, where the taller
+  // 9.5pt box started 0.015in above). The NEXT row's count starts at rowY+0.653.
+  // BOTH GAPS GREW AND BOTH STAY POSITIVE: count→chip 0.0195 → 0.025in, chip→next-count
+  // 0.0225 → 0.025in; the last step's 0.686 pitch makes its lower gap wider still. The
+  // 0.40 offset is therefore kept as-is — shrinking the chip buys clearance, it does not
+  // need to be spent on repositioning. A browser Range probe over the whole slide reported
+  // zero overlapping pairs at 9.5pt (the old 0.33 offset reported three, one per chip), and
+  // every gap here is strictly larger than the ones it passed with. Glyph ink is a good deal
   // smaller than these line boxes, so the visual gap is wider than the numbers suggest.
+  // WHY 9 AND NOT 9.5: the user's round-4 rule is that a chip reads at 55-65% of the number
+  // it annotates. 9/14 = 64.3% (9.5 was 67.9%, over the bar); the KPI chip sits at 58.8%.
   // The column's x-range (8.629→9.629) formally overlaps the track's right edge (…→8.92),
   // but both strings are CENTRE-aligned in the 1.0in box, so their ink starts at ≈8.97 —
   // clear of the fill, as the count already was before this change (probe: zero text ink
@@ -749,12 +818,60 @@ function buildExecFunnel(m) {
     );
     // Stage delta chip — de-duplicated: endpoint metrics (total/completed) are shown
     // on their KPI cards, so the funnel only surfaces intermediate flow deltas; and an
-    // overridden stage value suppresses its chip.
+    // overridden stage value suppresses its chip. Positive-only, like every other chip
+    // (fmtDelta): stages 2/3/4 count in-window flow EVENTS, so the only ways to reach
+    // here with a non-positive number are a quiet window or backdated rows — neither is
+    // something to print '−N' about under a cumulative stage count.
     const stageDelta = (KPI_DELTA_KEYS.has(r.key) || isOv(r.ov)) ? undefined : fmtDelta(d[r.key]);
     if (stageDelta) {
-      els.push(text(8.629, rowY[i] + 0.40, 1.0, 0.22, stageDelta, 9.5, { bold: true, color: C.deltaGreen, align: 'center', valign: 'middle' }));
+      els.push(text(8.629, rowY[i] + 0.40, 1.0, 0.22, stageDelta, 9, { bold: true, color: C.deltaGreen, align: 'center', valign: 'middle' }));
     }
   });
+  // -- OWNERSHIP BRACKETS — who owns which half of the journey (user picture, round 4).
+  // Stages 1-3 (إنشاء · سحب · شحن) are the HOSPITAL's, stages 4-5 (إستلام · إصدار نتيجة)
+  // the LABS'. The shape is a ⊐ per the user's reference picture, drawn OUTSIDE the stage
+  // accent bars (x 11.97, w 0.06 → right edge 12.03) on the right margin:
+  //   • two horizontal STUBS leaving the accent bars at 12.03 and running 0.25in right,
+  //   • a vertical SPINE at 12.28 joining their far ends,
+  //   • the group LABEL right of the spine at 12.32, centred on the group's own span.
+  // Every y here is derived from the accent bars, not chosen: a bar is accentY[i] high
+  // 0.45, so its vertical CENTRE is accentY[i]+0.225 = [3.501, 4.151, 4.801, 5.451, 6.137].
+  // The stubs sit on the first and last centre of their group and the spine spans centre
+  // to centre; the ±0.010 in every y/h is half the 0.02in thickness, so the drawn edges —
+  // not the drawn centres — line up with the bar centres. The hospital label's box
+  // (12.32, 3.876, h 0.55) centres on 4.151, the MIDDLE stage's bar; the labs label's
+  // (12.32, 5.519, h 0.55) centres on 5.794, the midpoint of 5.451 and 6.137.
+  //
+  // AFTER THE LOOP, DELIBERATELY — two independent reasons, do not fold this back into
+  // the `els` literal above:
+  //   1. Z-ORDER. Both renderers paint in array order, so the block that comes later wins.
+  //      The old brackets were built BEFORE the loop, which put the accent bars on top of
+  //      them, and the old spine's left edge (12.03) sat exactly ON the bars' right edge —
+  //      a seam that a later, over-painting bar can eat once the coordinates are rounded
+  //      to EMU or to device pixels. These stubs START at that very edge on purpose (the
+  //      join IS the picture), so they must be the ones drawn last.
+  //   2. TEXT ADJACENCY. test/compliance-completed.test.mjs walks the slide's text elements
+  //      in order and asserts execTexts[iStage + 1] is stage 5's count — the stage label and
+  //      its value must stay neighbours. Anything text-bearing inserted INSIDE the loop
+  //      breaks that; appended after it, these two labels are harmless.
+  // FILLED RECTS ONLY — no `line:` and no `radius:`. A hairline stroke is specified in
+  // POINTS by pptxgenjs and in PIXELS by the HTML/PDF path, so a 0.02in rule drawn as a
+  // border lands at two different widths in the two renderers, and a radius on a 0.02in
+  // rect would round it away to nothing. A filled rect is inches in both paths — the only
+  // shape here whose drawn size is the same in the PPTX and in the HTML/PDF preview.
+  els.push(
+    // Hospital — stages 1-3, spanning bar centres 3.501 → 4.801.
+    rect(12.28, 3.491, 0.02, 1.32, C.slate600),
+    rect(12.03, 3.491, 0.25, 0.02, C.slate600),
+    rect(12.03, 4.791, 0.25, 0.02, C.slate600),
+    text(12.32, 3.876, 1.0, 0.55, L('funnelGroupHospital'), 12, { bold: true, color: C.slate900, align: 'right', valign: 'middle', rtl: true }),
+    // Labs — stages 4-5, spanning bar centres 5.451 → 6.137 (the last pitch is 0.686,
+    // not 0.650, so this spine is 0.706 tall against the hospital's 1.320).
+    rect(12.28, 5.441, 0.02, 0.706, C.slate600),
+    rect(12.03, 5.441, 0.25, 0.02, C.slate600),
+    rect(12.03, 6.127, 0.25, 0.02, C.slate600),
+    text(12.32, 5.519, 1.0, 0.55, L('funnelGroupLabs'), 12, { bold: true, color: C.slate900, align: 'right', valign: 'middle', rtl: true }),
+  );
   // Delta-chip legend — only when at least one green "+N" chip is visible this run.
   if (anyChip) {
     els.push(text(0.5, 0.72, 6.0, 0.18, deltaLegendText(L, m.deltaWindow), 8.5, { color: C.deltaGreen, align: 'left', valign: 'middle', rtl: true }));

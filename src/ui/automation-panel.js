@@ -14,10 +14,10 @@
 // (window.__misbarAutoRun / misbar:autorun / misbar:autodone — AUTOMATION.md §4)
 // so an unattended run paints its progress here and its produced files get
 // download rows. It never starts a second run on top of one it can see.
-import { el, toast, progressBar } from './components.js?v=v2026-08-06.1';
-import { triggerDownload } from './late-labs-section.js?v=v2026-08-06.1';
+import { el, toast, progressBar } from './components.js?v=v2026-08-10.1';
+import { triggerDownload } from './late-labs-section.js?v=v2026-08-10.1';
 
-const PIPELINE_URL = '../automation/pipeline.js?v=v2026-08-06.1';
+const PIPELINE_URL = '../automation/pipeline.js?v=v2026-08-10.1';
 const SHEET_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 /* ---- the ?auto= run bus published by main.js (AUTOMATION.md §4) ---------- */
@@ -573,7 +573,7 @@ export function buildAutomationPanel({ store, state, ctx } = {}) {
     el('div', { class: 'card__title', text: '⚡ التشغيل التلقائي' }),
     el('p', {
       class: 'small muted', style: 'margin:0 0 8px',
-      text: 'شغّل التقرير اليومي كاملاً بضغطة واحدة، أو فعّل الخطوات التي تريدها لتعمل تلقائياً. جميع الخيارات معطّلة افتراضياً، ولا يتم إرسال أي بريد تلقائياً.',
+      text: 'شغّل خطوات التقرير كاملةً بضغطة واحدة، أو فعّل الخطوات التي تريدها لتعمل تلقائياً. جميع الخيارات معطّلة افتراضياً، ولا يتم إرسال أي بريد تلقائياً.',
     }),
     masterRow,
     el('div', { style: 'margin-top:2px' }, subRows),

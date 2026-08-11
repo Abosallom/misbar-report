@@ -17,7 +17,11 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
-import { computeNumbersAsOf, buildWeekNumbers, NUMBER_KEYS } from '../src/engine/asof.js';
+// QUEUE_KEYS (section 5) is imported rather than re-listed locally: it is the module's own
+// statement of which four keys the `sinceIso` gate narrows, and the event class is asserted
+// below as its COMPLEMENT, so promoting a key to the queue class in asof.js and forgetting
+// it here is a test failure instead of silent under-coverage.
+import { computeNumbersAsOf, buildWeekNumbers, NUMBER_KEYS, QUEUE_KEYS } from '../src/engine/asof.js';
 import { compute } from '../src/engine/engine.js';
 import { GOLDEN_ORDERS } from './fixtures/golden-orders.js';
 import { TAT_LOOKUP } from '../src/seeds/tat-lookup.js';
@@ -420,4 +424,229 @@ test('excludeNoTat drops ONLY received No-Match rows — never cancelled, reject
   // as-of mirror would count a different row set than the deck's totals.
   const truthy = computeNumbersAsOf({ rows, tatTests: {}, asOfIso: '2026-07-09', opts: { excludeNoTat: 1 } }).numbers;
   assert.deepEqual(truthy, off, 'non-boolean truthy flag must behave as OFF, matching the engine');
+});
+
+// =============================================================================
+// 5. SURVIVING ENTRANTS — the OPTIONAL `sinceIso` gate (round 4, 2026-08-06)
+// =============================================================================
+// `sinceIso` narrows the four QUEUE_KEYS — and ONLY those four — to rows that ENTERED
+// the state on or after that day and are STILL in it at asOf. It exists so ONE gated
+// call can serve both key classes: model/delta-window.js subtracts two as-of states for
+// the six EVENT keys and reads this same call directly for the four queue keys.
+//
+// THE ENTRY DAY IS PER-KEY, and it is the day the row's membership test FIRST flipped
+// true — not the day the row was last touched:
+//   awaitingDispatch   → orderDate
+//   shippedNotReceived → dispatched
+//   awaitingResults    → received
+//   lateNoResult       → the DUE day (a row enters lateness when it falls due, and it
+//                        can fall due long after it was received — see the late case)
+// Everything else — the six event keys, the cancelled/rejected dating, the approx flags
+// and opts.excludeNoTat — must behave EXACTLY as it does ungated. The cases below pin
+// each of those halves separately, because a gate that leaked into the event keys would
+// silently re-scope the deck's cumulative numbers, which is the one thing this round was
+// forbidden to touch.
+
+/** A full row with everything nulled; the gate cases set only the dates they turn on. */
+const qrow = (o) => ({
+  orderDate: null, facility: 'Lab Q', orderId: null, lineNo: null, loinc: null,
+  testName: 'ANY TEST', collected: null, dispatched: null, received: null, resulted: null,
+  rawStatus: 'In Progress', tatDaysCsv: null,
+  specimenNo: null, shipmentId: null, orderingFacilityId: null, performingFacilityId: null,
+  ...o,
+});
+
+// The July 2026 calendar these cases are counted on. 07-05 is a SUNDAY, so the Saudi work
+// week runs Sun 07-05 → Thu 07-09 and Fri 07-03 / Sat 07-04 are the PRECEDING weekend:
+//   Wed 07-01, Thu 07-02, Fri 07-03, Sat 07-04, Sun 07-05, Mon 07-06, Tue 07-07,
+//   Wed 07-08, Thu 07-09
+const Q_ASOF = '2026-07-09';  // the window's end — every gated call below reads this day
+const Q_SINCE = '2026-07-05'; // the window's floor — Sunday
+const Q_ZERO = {
+  total: 0, collected: 0, dispatched: 0, received: 0, completed: 0, rejected: 0,
+  awaitingDispatch: 0, shippedNotReceived: 0, awaitingResults: 0, lateNoResult: 0,
+};
+const gated = (rows, sinceIso) => computeNumbersAsOf({ rows, tatTests: {}, asOfIso: Q_ASOF, sinceIso }).numbers;
+const ungated = (rows) => computeNumbersAsOf({ rows, tatTests: {}, asOfIso: Q_ASOF }).numbers;
+
+test('sinceIso ABSENT is the identity — the gate cannot change a call that never asked for it', () => {
+  // Every pre-round-4 caller (buildWeekNumbers, the CROWN identity above, the history
+  // panel) passes no sinceIso at all, so "absent ⇒ byte-identical" is what keeps this
+  // whole feature additive. Asserted on the richest row set there is, and on BOTH halves
+  // of the return value: `approx` is a statement about DATING, not about membership, so
+  // the gate must not perturb it either.
+  const base = { rows: GOLDEN_ORDERS, tatTests: TAT_LOOKUP, asOfIso: GOLDEN_ASOF };
+  const absent = computeNumbersAsOf(base);
+  // An explicitly-undefined key must behave exactly like a missing one: callers build this
+  // bag by spreading options, so `sinceIso: opts.sinceIso` with nothing stored is the
+  // NORMAL shape, not an edge case.
+  const undef = computeNumbersAsOf({ ...base, sinceIso: undefined });
+  const nul = computeNumbersAsOf({ ...base, sinceIso: null });
+  for (const [name, got] of [['undefined', undef], ['null', nul]]) {
+    assert.deepEqual(got.numbers, absent.numbers, `sinceIso ${name} must not gate anything`);
+    assert.deepEqual(got.approx, absent.approx, `sinceIso ${name} must not perturb approx`);
+  }
+  // A floor older than every row is the same statement reached from the other side: every
+  // entry day is ≥ it, so every gate conjunct is true and the counts are the ungated ones.
+  assert.deepEqual(
+    computeNumbersAsOf({ ...base, sinceIso: '2000-01-01' }).numbers, absent.numbers,
+    'a floor before all data admits everything',
+  );
+  // But a PRESENT-and-unparseable floor is a caller bug, not a no-op: silently ungating it
+  // would ship a chip counting the whole history under a legend naming one week. Note that
+  // '' is UNPARSEABLE, not absent — only undefined and null mean "no gate", and the
+  // difference is exactly the one a `sinceIso || undefined` shorthand would erase.
+  for (const bad of ['', '2026-7-5', '05-07-2026', 'sunday']) {
+    assert.throws(() => computeNumbersAsOf({ ...base, sinceIso: bad }), /sinceIso/,
+      `must reject ${JSON.stringify(bad)}`);
+  }
+  // sinceIso and asOfIso share ONE parser (workday.js parseDateTime), so they are lenient
+  // in exactly the same places — notably a raw epoch-ms number, which parseDateTime passes
+  // through by design. Pinned as a PAIR rather than asserted of sinceIso alone: the claim
+  // worth keeping is that the two params cannot drift into different accepted shapes, not
+  // that either one hand-validates an ISO string of its own.
+  const ms = Date.UTC(2026, 6, 5); // = '2026-07-05' as epoch-ms
+  assert.deepEqual(
+    computeNumbersAsOf({ ...base, sinceIso: ms }).numbers,
+    computeNumbersAsOf({ ...base, sinceIso: '2026-07-05' }).numbers,
+    'an epoch-ms floor resolves to the same day as its ISO spelling',
+  );
+  assert.deepEqual(
+    computeNumbersAsOf({ rows: GOLDEN_ORDERS, tatTests: TAT_LOOKUP, asOfIso: Date.UTC(2026, 6, 9) }).numbers,
+    absent.numbers,
+    'asOfIso is exactly as lenient — same parser, same shapes',
+  );
+});
+
+test('gate: awaitingDispatch enters on the ORDER day, inclusive at the floor', () => {
+  // Three rows ordered and collected, none ever dispatched, so all three are sitting in
+  // awaitingDispatch at 07-09 and the ONLY thing that separates them is their entry day.
+  const rows = [
+    qrow({ orderId: 'AD_BEFORE', orderDate: '2026-07-02', collected: '2026-07-02 08:00:00' }), // Thu, before
+    qrow({ orderId: 'AD_ON', orderDate: '2026-07-05', collected: '2026-07-05 08:00:00' }),     // Sun, the floor ITSELF
+    qrow({ orderId: 'AD_AFTER', orderDate: '2026-07-07', collected: '2026-07-07 08:00:00' }),  // Tue, inside
+  ];
+  assert.deepEqual(ungated(rows), { ...Q_ZERO, total: 3, collected: 3, awaitingDispatch: 3 });
+  // The gate is `entry ≥ since`, so AD_ON — which entered ON Sunday — is IN. Make that a
+  // strict `>` and every arrival on the window's first day vanishes from the week that is
+  // named after that very day.
+  assert.deepEqual(gated(rows, Q_SINCE), { ...Q_ZERO, total: 3, collected: 3, awaitingDispatch: 2 });
+  // The three EVENT keys these rows touch (total, collected) are untouched by the gate —
+  // visible above, and stated here so the claim is not an accident of the deepEqual.
+  assert.equal(gated(rows, Q_SINCE).total, ungated(rows).total);
+});
+
+test('gate: shippedNotReceived enters on the DISPATCH day, not the order day', () => {
+  // All three ordered on the SAME pre-window day (07-01) and never received, so if the
+  // gate read orderDate here — the awaitingDispatch entry day — all three would be
+  // excluded and the count would be 0 instead of 2.
+  const rows = [
+    qrow({ orderId: 'SN_BEFORE', orderDate: '2026-07-01', collected: '2026-07-01 08:00:00', dispatched: '2026-07-02 09:00:00' }),
+    qrow({ orderId: 'SN_ON', orderDate: '2026-07-01', collected: '2026-07-01 08:00:00', dispatched: '2026-07-05 09:00:00' }), // the floor itself
+    qrow({ orderId: 'SN_AFTER', orderDate: '2026-07-01', collected: '2026-07-01 08:00:00', dispatched: '2026-07-08 09:00:00' }),
+  ];
+  assert.deepEqual(ungated(rows), { ...Q_ZERO, total: 3, collected: 3, dispatched: 3, shippedNotReceived: 3 });
+  assert.deepEqual(gated(rows, Q_SINCE), { ...Q_ZERO, total: 3, collected: 3, dispatched: 3, shippedNotReceived: 2 });
+});
+
+test('gate: awaitingResults enters on the RECEIPT day, not the order or dispatch day', () => {
+  // Same trap one stage on: identical pre-window order+dispatch days, so only the receipt
+  // day can produce 2. tatDaysCsv 30 keeps every row far from its due date, which isolates
+  // this queue from lateNoResult (they overlap by definition — late ⊆ awaiting).
+  const rows = [
+    qrow({ orderId: 'AR_BEFORE', orderDate: '2026-06-25', collected: '2026-06-25 08:00:00', dispatched: '2026-06-26 09:00:00', received: '2026-07-02 10:00:00', tatDaysCsv: 30 }),
+    qrow({ orderId: 'AR_ON', orderDate: '2026-06-25', collected: '2026-06-25 08:00:00', dispatched: '2026-06-26 09:00:00', received: '2026-07-05 10:00:00', tatDaysCsv: 30 }), // the floor itself
+    qrow({ orderId: 'AR_AFTER', orderDate: '2026-06-25', collected: '2026-06-25 08:00:00', dispatched: '2026-06-26 09:00:00', received: '2026-07-08 10:00:00', tatDaysCsv: 30 }),
+  ];
+  assert.deepEqual(ungated(rows), { ...Q_ZERO, total: 3, collected: 3, dispatched: 3, received: 3, awaitingResults: 3 });
+  assert.deepEqual(gated(rows, Q_SINCE), { ...Q_ZERO, total: 3, collected: 3, dispatched: 3, received: 3, awaitingResults: 2 });
+});
+
+test('gate: lateNoResult enters on its DUE day — receipt is not when a row becomes late', () => {
+  // THE ONE KEY WHOSE ENTRY DAY IS DERIVED, not read off a column. All three rows are
+  // received BEFORE or EARLY IN the week and unresulted, so all three are late at 07-09;
+  // what separates them is when each FELL due, under the Fri+Sat weekend with tat 1:
+  //   LATE_PRE  received Wed 07-01 → Due = WORKDAY(07-01, 1) = Thu 07-02 — overdue since
+  //             BEFORE the window opened, so it is not this week's news ⇒ EXCLUDED
+  //   LATE_ON   received Thu 07-02 → Fri 07-03 and Sat 07-04 are the weekend, so the next
+  //             business day is Sun 07-05 — the floor ITSELF ⇒ INCLUDED (inclusive)
+  //   LATE_IN   received Tue 07-07 → Due = Wed 07-08, squarely inside ⇒ INCLUDED
+  const rows = [
+    qrow({ orderId: 'LATE_PRE', orderDate: '2026-06-25', collected: '2026-06-25 08:00:00', dispatched: '2026-06-26 09:00:00', received: '2026-07-01 10:00:00', tatDaysCsv: 1 }),
+    qrow({ orderId: 'LATE_ON', orderDate: '2026-06-25', collected: '2026-06-25 08:00:00', dispatched: '2026-06-26 09:00:00', received: '2026-07-02 10:00:00', tatDaysCsv: 1 }),
+    qrow({ orderId: 'LATE_IN', orderDate: '2026-06-25', collected: '2026-06-25 08:00:00', dispatched: '2026-06-26 09:00:00', received: '2026-07-07 10:00:00', tatDaysCsv: 1 }),
+  ];
+  const off = ungated(rows);
+  assert.deepEqual(off, { ...Q_ZERO, total: 3, collected: 3, dispatched: 3, received: 3, awaitingResults: 3, lateNoResult: 3 });
+  const on = gated(rows, Q_SINCE);
+  assert.equal(on.lateNoResult, 2, 'LATE_ON (due on the floor) and LATE_IN, but never LATE_PRE');
+
+  // THE CONSEQUENCE A READER MUST NOT MISTAKE FOR A BUG: the two queues gate on DIFFERENT
+  // entry days, so the ungated subset relation late ⊆ awaitingResults does NOT survive the
+  // gate. LATE_ON was received 07-02 — before the window — so it is not a surviving
+  // ENTRANT of awaitingResults, while its due day 07-05 makes it one of lateNoResult.
+  assert.equal(on.awaitingResults, 1, 'only LATE_IN was RECEIVED inside the window');
+  assert.ok(on.lateNoResult > on.awaitingResults,
+    'gated late may EXCEED gated awaiting — different entry days, deliberately');
+  // …while the CUMULATIVE numbers, which are what the slides print, keep the subset.
+  assert.ok(off.lateNoResult <= off.awaitingResults, 'the ungated subset relation is untouched');
+  // Gate on the received day instead and lateNoResult would read 1 here, silently hiding a
+  // sample that went overdue this week. That is the regression this case exists for.
+  assert.notEqual(on.lateNoResult, on.awaitingResults);
+});
+
+test('gate: an undated REJECTED row is still excluded from every queue, and approx is gate-blind', () => {
+  // A rejection carries no timestamp, so asof.js dates it by the last milestone the row
+  // reached (receipt, 07-07) and flags the approximation. The row's entry day into all
+  // THREE pre-completion queues is inside the window (order 07-06, dispatch 07-06, receipt
+  // 07-07), so a gate written as a standalone filter — rather than one more conjunct on
+  // the existing membership tests — would re-admit it to queues the rejection guard had
+  // already removed it from, and break the partition
+  //   total = awaitingDispatch + shippedNotReceived + awaitingResults + completed.
+  const rows = [
+    qrow({
+      orderId: 'REJ', orderDate: '2026-07-06', collected: '2026-07-06 08:00:00',
+      dispatched: '2026-07-06 09:00:00', received: '2026-07-07 10:00:00',
+      resulted: '', rawStatus: 'Result Rejected',
+    }),
+    // A cancelled row ordered in-window, so approx.total is exercised too: cancellation has
+    // no timestamp either, and that caveat is likewise a dating statement.
+    qrow({ orderId: 'CANC', orderDate: '2026-07-06', collected: '2026-07-06 08:00:00', rawStatus: 'Order Cancelled' }),
+  ];
+  const off = computeNumbersAsOf({ rows, tatTests: {}, asOfIso: Q_ASOF });
+  const on = computeNumbersAsOf({ rows, tatTests: {}, asOfIso: Q_ASOF, sinceIso: Q_SINCE });
+  const expected = {
+    ...Q_ZERO, total: 1, collected: 1, dispatched: 1, received: 1, completed: 1, rejected: 1,
+  };
+  assert.deepEqual(off.numbers, expected, 'ungated: rejected leaves the pipeline entirely');
+  assert.deepEqual(on.numbers, expected, 'gated: the exclusion holds, and no queue re-opens');
+  for (const k of QUEUE_KEYS) assert.equal(on.numbers[k], 0, `${k} must stay empty for a rejected row`);
+  // approx describes HOW rows were dated, never WHICH window they fall in, so it cannot
+  // move with the gate. Both caveats must be present and identical on both calls.
+  assert.deepEqual(on.approx, { total: true, rejected: true, completed: true });
+  assert.deepEqual(on.approx, off.approx, 'the gate must not touch the disclosure');
+});
+
+test('gate: the six EVENT keys are byte-identical gated vs ungated, on the golden data', () => {
+  // The invariant of the whole round, checked where it matters most — the 618-row snapshot
+  // whose numbers ARE the published deck. The cumulative headline figures (total …
+  // rejected) must not move by a single unit when a window floor is supplied, or the chips
+  // would have re-scoped the big numbers they sit beside.
+  const off = computeNumbersAsOf({ rows: GOLDEN_ORDERS, tatTests: TAT_LOOKUP, asOfIso: GOLDEN_ASOF });
+  const on = computeNumbersAsOf({ rows: GOLDEN_ORDERS, tatTests: TAT_LOOKUP, asOfIso: GOLDEN_ASOF, sinceIso: '2026-07-05' });
+  const EVENT_KEYS = NUMBER_KEYS.filter((k) => !QUEUE_KEYS.includes(k));
+  assert.deepEqual(EVENT_KEYS, ['total', 'collected', 'dispatched', 'received', 'completed', 'rejected'],
+    'the event class is the complement of QUEUE_KEYS — nothing else may be in it');
+  for (const k of EVENT_KEYS) {
+    assert.equal(on.numbers[k], off.numbers[k], `event key ${k} must not move with the gate`);
+  }
+  assert.deepEqual(on.approx, off.approx);
+  // The queue keys are a SUBSET filter, so each is bounded by its ungated value and by 0 —
+  // a count, never a difference of two counts, hence never negative.
+  for (const k of QUEUE_KEYS) {
+    assert.ok(on.numbers[k] >= 0, `${k} must not be negative`);
+    assert.ok(on.numbers[k] <= off.numbers[k], `${k}: gated ${on.numbers[k]} exceeds ungated ${off.numbers[k]}`);
+    // …and the gate must actually BITE on this fixture, or every bound above is vacuous.
+    assert.ok(on.numbers[k] < off.numbers[k], `${k}: the gate did nothing (${off.numbers[k]})`);
+  }
 });

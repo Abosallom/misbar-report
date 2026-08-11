@@ -14,9 +14,9 @@
 //
 // PHI rule unchanged: order rows live in `state` only. Nothing here logs a row
 // or writes one to storage — only aggregate numbers reach store.updateSnapshot.
-import { STR, todayISO, buildFileName } from '../i18n/ar.js?v=v2026-08-06.1';
-import { VARIANTS, normTest } from '../contracts.js?v=v2026-08-06.1';
-import { getGenLibs } from '../vendor-loader.js?v=v2026-08-06.1';
+import { STR, todayISO, buildFileName } from '../i18n/ar.js?v=v2026-08-10.1';
+import { VARIANTS, normTest } from '../contracts.js?v=v2026-08-10.1';
+import { getGenLibs } from '../vendor-loader.js?v=v2026-08-10.1';
 
 /* ------------------------------------------------------------------ *
  * Shared micro-helpers (same idioms the screens use)
@@ -266,7 +266,7 @@ function installFastTimers() {
 // Build the SlideSpec per VARIANT — the variant changes slide-5 content
 // (task rows), so one shared spec would leak internal tasks into NUPCO files.
 async function buildVariantSpec(model, variant) {
-  const mod = await tryImport('../slidespec/build-spec.js?v=v2026-08-06.1');
+  const mod = await tryImport('../slidespec/build-spec.js?v=v2026-08-10.1');
   const fn = pickFn(mod, ['buildSpec', 'build', 'makeSpec', 'toSpec']);
   if (!fn) return null;
   let spec = fn(model, { variant });
@@ -292,7 +292,7 @@ async function toBlob(result, kind) {
 // renderPptx(spec, {variant, PptxGenJS}) -> Promise<Blob>
 async function makePptx(spec, variant, libs) {
   if (!spec) return null;
-  const mod = await tryImport('../render/pptx-renderer.js?v=v2026-08-06.1');
+  const mod = await tryImport('../render/pptx-renderer.js?v=v2026-08-10.1');
   const fn = pickFn(mod, ['renderPptx', 'buildPptx', 'toPptx', 'makePptx', 'render']);
   if (!fn) return null;
   const r = await fn(spec, { variant, PptxGenJS: libs.PptxGenJS });
@@ -304,9 +304,9 @@ async function makePptx(spec, variant, libs) {
 // the host and before capture starts — screen-generate clones them into live thumbnails.
 async function makePdf(spec, variant, libs, host, onProgress, onSlides) {
   if (!spec) return null;
-  const rMod = await tryImport('../render/html-renderer.js?v=v2026-08-06.1');
+  const rMod = await tryImport('../render/html-renderer.js?v=v2026-08-10.1');
   const renderSlides = pickFn(rMod, ['renderSlides', 'renderSpec', 'renderHtml', 'render']);
-  const pMod = await tryImport('../render/pdf-export.js?v=v2026-08-06.1');
+  const pMod = await tryImport('../render/pdf-export.js?v=v2026-08-10.1');
   const exportPdf = pickFn(pMod, ['exportPdf', 'renderPdf', 'toPdf', 'buildPdf', 'render']);
   if (!renderSlides || !exportPdf) return null;
   host.innerHTML = '';
@@ -490,20 +490,20 @@ const PULL_REUSE_MS = 15000;
 
 /** Default heavy dependencies — every one overridable through `deps` (tests inject fakes). */
 const DEFAULT_DEPS = Object.freeze({
-  loadGrafana: () => import('../ingest/grafana.js?v=v2026-08-06.1'),
-  loadEngine: () => tryImport('../engine/engine.js?v=v2026-08-06.1'),
-  loadReportModel: () => import('../model/report-model.js?v=v2026-08-06.1'),
-  loadDeltaBaseline: () => tryImport('../model/delta-baseline.js?v=v2026-08-06.1'),
+  loadGrafana: () => import('../ingest/grafana.js?v=v2026-08-10.1'),
+  loadEngine: () => tryImport('../engine/engine.js?v=v2026-08-10.1'),
+  loadReportModel: () => import('../model/report-model.js?v=v2026-08-10.1'),
+  loadDeltaBaseline: () => tryImport('../model/delta-baseline.js?v=v2026-08-10.1'),
   // The delta-chip stamper. Guarded like the rest: a build without it degrades to the
   // engine's own clamped deltas instead of failing this module at load time.
-  loadDeltaWindow: () => tryImport('../model/delta-window.js?v=v2026-08-06.1'),
-  loadTaskLifecycle: () => tryImport('../model/task-lifecycle.js?v=v2026-08-06.1'),
-  loadLateLabs: () => import('../export/late-labs.js?v=v2026-08-06.1'),
-  loadTatSuggest: () => tryImport('../ingest/tat-suggest.js?v=v2026-08-06.1'),
-  loadTatLoinc: () => tryImport('../seeds/tat-lookup.js?v=v2026-08-06.1'),
+  loadDeltaWindow: () => tryImport('../model/delta-window.js?v=v2026-08-10.1'),
+  loadTaskLifecycle: () => tryImport('../model/task-lifecycle.js?v=v2026-08-10.1'),
+  loadLateLabs: () => import('../export/late-labs.js?v=v2026-08-10.1'),
+  loadTatSuggest: () => tryImport('../ingest/tat-suggest.js?v=v2026-08-10.1'),
+  loadTatLoinc: () => tryImport('../seeds/tat-lookup.js?v=v2026-08-10.1'),
   // Track 5's module; absent until it ships → the emails step reports 'skip'.
-  loadEmlDraft: () => tryImport('../export/eml-draft.js?v=v2026-08-06.1'),
-  loadDownload: () => tryImport('../ui/late-labs-section.js?v=v2026-08-06.1'),
+  loadEmlDraft: () => tryImport('../export/eml-draft.js?v=v2026-08-10.1'),
+  loadDownload: () => tryImport('../ui/late-labs-section.js?v=v2026-08-10.1'),
   produceReportFiles,
   now: () => Date.now(),
 });

@@ -1112,13 +1112,13 @@ const LOG_B = { openOn: '2026-06-20', closedOn: '2026-07-02' };
 test('first run seeds an EMPTY taskLog (the pre-ship exclusion mechanism)', () => {
   fresh();
   const s = store.loadSettings();
-  assert.equal(s.schemaVersion, 7, 'schema v7');
-  assert.equal(store.SCHEMA_VERSION, 7);
+  assert.equal(s.schemaVersion, 8, 'schema v8');
+  assert.equal(store.SCHEMA_VERSION, 8);
   assert.ok(s.taskLog && typeof s.taskLog === 'object' && !Array.isArray(s.taskLog));
   assert.deepEqual(s.taskLog, {}, 'empty on first run — no closed task has an open appearance yet');
 });
 
-test('v5 stored doc migrates to v7 and gains an empty taskLog, other fields preserved', () => {
+test('v5 stored doc migrates to the current schema and gains an empty taskLog, other fields preserved', () => {
   const mock = fresh();
   mock.setItem(
     SETTINGS_KEY,
@@ -1133,7 +1133,7 @@ test('v5 stored doc migrates to v7 and gains an empty taskLog, other fields pres
     }),
   );
   const s = store.loadSettings();
-  assert.equal(s.schemaVersion, 7, 'migrated');
+  assert.equal(s.schemaVersion, 8, 'migrated');
   assert.deepEqual(s.taskLog, {}, 'backfilled empty');
   assert.equal(s.tatLookup.CBC, 2, 'tatLookup preserved');
   assert.deepEqual(s.displayNames, { A: 'a' });
@@ -1144,10 +1144,10 @@ test('v5 stored doc migrates to v7 and gains an empty taskLog, other fields pres
   // The chain passes through v6→v7, which forces the new week-to-date default once.
   assert.equal(s.reportOptions.deltaMode, 'week', 'v6→v7 forces the new default');
   // Persisted, not just returned.
-  assert.equal(JSON.parse(mock.getItem(SETTINGS_KEY)).schemaVersion, 7);
+  assert.equal(JSON.parse(mock.getItem(SETTINGS_KEY)).schemaVersion, 8);
 });
 
-test('v1..v5 stored docs chain all the way to v7 and land on the week default', () => {
+test('v1..v5 stored docs chain all the way to the current schema and land on the week default', () => {
   for (const v of [1, 2, 3, 4, 5]) {
     const mock = fresh();
     mock.setItem(SETTINGS_KEY, JSON.stringify({
@@ -1156,7 +1156,7 @@ test('v1..v5 stored docs chain all the way to v7 and land on the week default', 
       snapshot: { asOf: '2026-07-01', prevCompleted: 11 },
     }));
     const s = store.loadSettings();
-    assert.equal(s.schemaVersion, 7, `v${v} → v7`);
+    assert.equal(s.schemaVersion, 8, `v${v} → v8`);
     assert.deepEqual(s.taskLog, {}, `v${v} chain backfills taskLog`);
     assert.equal(s.tatLookup.CBC, 2, `v${v} keeps user data`);
     assert.equal(s.reportOptions.deltaMode, 'week', `v${v} chain lands on the week default`);
@@ -1186,7 +1186,7 @@ test("v6 → v7 forces a stored 'daily' to 'week' exactly once, then a manual 'd
     taskLog: { 'int|أ': { openOn: '2026-07-01', closedOn: null } },
   }));
   const s = store.loadSettings();
-  assert.equal(s.schemaVersion, 7, 'stamped v7');
+  assert.equal(s.schemaVersion, 8, 'stamped with the current schema (v6→v7→v8)');
   assert.equal(s.reportOptions.deltaMode, 'week', 'the new default reached the existing install');
   assert.equal(s.tatLookup.CBC, 2, 'user data untouched');
   assert.deepEqual(s.taskLog, { 'int|أ': { openOn: '2026-07-01', closedOn: null } }, 'taskLog untouched');
@@ -1207,7 +1207,7 @@ test("v6 → v7 also migrates the retired weekly values to 'week'", () => {
       reportOptions: { excludeNoTat: false, slides: {}, kpiCards: {}, labels: {}, deltaMode: legacy },
     }));
     const s = store.loadSettings();
-    assert.equal(s.schemaVersion, 7);
+    assert.equal(s.schemaVersion, 8);
     assert.equal(s.reportOptions.deltaMode, 'week', `${legacy} → week`);
   }
 });
@@ -1320,8 +1320,8 @@ test('export → import → export is identity for the taskLog', async () => {
 test('importSettings accepts v4 and v5 backups (version-gate fix)', () => {
   // PRE-EXISTING BUG, fixed with this feature: validateImport gated on {1,2,3,current},
   // so every schema bump silently orphaned the previous version's backups — v4 was
-  // already unimportable and v5 would have joined it. IMPORTABLE_VERSIONS = {1..6, current}.
-  for (const v of [1, 2, 3, 4, 5, 6, 7]) {
+  // already unimportable and v5 would have joined it. IMPORTABLE_VERSIONS = {1..7, current}.
+  for (const v of [1, 2, 3, 4, 5, 6, 7, 8]) {
     fresh();
     store.loadSettings();
     assert.doesNotThrow(
@@ -1329,7 +1329,7 @@ test('importSettings accepts v4 and v5 backups (version-gate fix)', () => {
       `v${v} backup must import`,
     );
     assert.equal(store.loadSettings().displayNames[`v${v}`], 'x', `v${v} content landed`);
-    assert.equal(store.loadSettings().schemaVersion, 7, 'and the doc is stamped current');
+    assert.equal(store.loadSettings().schemaVersion, 8, 'and the doc is stamped current');
   }
   assert.throws(
     () => store.importSettings(JSON.stringify({ schemaVersion: 0 })),
@@ -1362,4 +1362,219 @@ test('importing a pre-v7 backup does not undo the week-default migration', () =>
     reportOptions: { excludeNoTat: false, slides: {}, kpiCards: {}, labels: {}, deltaMode: 'daily' },
   }));
   assert.equal(store.loadSettings().reportOptions.deltaMode, 'daily', 'post-v7 choice imports verbatim');
+});
+
+/* ------------------------------------------------------------------ *
+ * v7 → v8: the cover-title rename has to REACH installs that used the
+ * labels editor.
+ *
+ * build-spec's labelOf reads `reportOptions.labels[key] ?? DEFAULT_LABELS[key]`,
+ * so a STORED override beats the default outright — and the labels editor
+ * (ui/screen-review.js) persists one for every field the user typed into.
+ * Renaming DEFAULT_LABELS.coverTitle to 'تقرير مسبار الأسبوعي' therefore reaches
+ * everyone EXCEPT those installs, which would print the daily title forever:
+ * backfillReportOptions only fills an ABSENT key, it never clears a stored one.
+ * So the migration DELETES the override — restoring the real "no override"
+ * state, so the cover also follows any FUTURE rename — and only when it matches
+ * the old default EXACTLY, so a genuine edit survives. Precedent: migrateV6toV7
+ * (deltaMode) and migrateV4toV5 (definitions slide).
+ *
+ * The old default is a LITERAL here on purpose, exactly as store.js pins it:
+ * importing it from build-spec would make these cases chase whatever the current
+ * default is and stop testing the migration at all.
+ * ------------------------------------------------------------------ */
+const V7_COVER_TITLE = 'تقرير مسبار اليومي';
+
+test('v7 → v8 deletes a coverTitle override that is only the old default, exactly once', () => {
+  const mock = fresh();
+  mock.setItem(SETTINGS_KEY, JSON.stringify({
+    schemaVersion: 7,
+    tatLookup: { 'CBC': 2 },
+    reportOptions: {
+      excludeNoTat: false, slides: {}, kpiCards: {}, deltaMode: 'week',
+      labels: { coverTitle: V7_COVER_TITLE, kpiCompleted: 'فحوصات منجزة' },
+    },
+    taskLog: { 'int|أ': { openOn: '2026-07-01', closedOn: null } },
+  }));
+  const s = store.loadSettings();
+  assert.equal(s.schemaVersion, 8, 'stamped v8');
+  // DELETED, not overwritten with the new title — the key must be absent so the cover
+  // falls through to DEFAULT_LABELS today AND after the next rename.
+  assert.ok(!('coverTitle' in s.reportOptions.labels), 'the stale override is gone, not rewritten');
+  assert.equal(s.reportOptions.labels.kpiCompleted, 'فحوصات منجزة', 'other label overrides untouched');
+  assert.equal(s.tatLookup.CBC, 2, 'user data untouched');
+  assert.deepEqual(s.taskLog, { 'int|أ': { openOn: '2026-07-01', closedOn: null } }, 'taskLog untouched');
+  assert.equal(s.reportOptions.deltaMode, 'week', 'the v7 deltaMode choice untouched');
+  // Persisted with the bump, so this runs ONCE.
+  const stored = JSON.parse(mock.getItem(SETTINGS_KEY));
+  assert.equal(stored.schemaVersion, 8, 'persisted');
+  assert.ok(!('coverTitle' in stored.reportOptions.labels), 'persisted without the override');
+
+  // Typing the old title back in afterwards is a real choice and must SURVIVE every
+  // later load — a same-version load never rewrites a stored value again.
+  s.reportOptions.labels.coverTitle = V7_COVER_TITLE;
+  store.saveSettings(s);
+  assert.equal(store.loadSettings().reportOptions.labels.coverTitle, V7_COVER_TITLE, 'the manual choice sticks');
+  assert.equal(store.loadSettings().reportOptions.labels.coverTitle, V7_COVER_TITLE, 'and stays stuck on a second load');
+});
+
+test('v7 → v8 leaves any coverTitle that is not byte-for-byte the old default', () => {
+  // Exact match only. The near-misses are built by concatenation, not retyped, so an
+  // invisible difference in this RTL string can never be what makes the case pass.
+  const CUSTOM = [
+    'عنوان الغلاف الخاص بي',   // a genuinely different title
+    `${V7_COVER_TITLE} `,      // trailing space
+    ` ${V7_COVER_TITLE}`,      // leading space
+    `${V7_COVER_TITLE}!`,      // one character longer
+    '',                        // empty is still a stored value, not the old default
+  ];
+  for (const custom of CUSTOM) {
+    const mock = fresh();
+    mock.setItem(SETTINGS_KEY, JSON.stringify({
+      schemaVersion: 7,
+      reportOptions: {
+        excludeNoTat: false, slides: {}, kpiCards: {}, deltaMode: 'week',
+        labels: { coverTitle: custom },
+      },
+    }));
+    const s = store.loadSettings();
+    assert.equal(s.schemaVersion, 8);
+    assert.equal(s.reportOptions.labels.coverTitle, custom, `${JSON.stringify(custom)} survives`);
+    assert.equal(
+      JSON.parse(mock.getItem(SETTINGS_KEY)).reportOptions.labels.coverTitle, custom, 'and is persisted',
+    );
+  }
+});
+
+test('v7 → v8 tolerates an absent/malformed reportOptions or labels', () => {
+  // migrateSnapshotShape guarantees both containers before the delete, but a doc that
+  // reached storage hand-edited must not make the DELETE the thing that throws.
+  const CASES = [
+    ['no reportOptions at all', undefined],
+    ['reportOptions without labels', { excludeNoTat: false, slides: {}, kpiCards: {}, deltaMode: 'week' }],
+    ['labels null', { labels: null }],
+    ['labels not an object', { labels: 'nope' }],
+    ['labels without coverTitle', { labels: { kpiCompleted: 'فحوصات منجزة' } }],
+  ];
+  for (const [name, ro] of CASES) {
+    const mock = fresh();
+    const doc = { schemaVersion: 7, tatLookup: { X: 1 } };
+    if (ro !== undefined) doc.reportOptions = ro;
+    mock.setItem(SETTINGS_KEY, JSON.stringify(doc));
+
+    const s = store.loadSettings();
+    assert.equal(s.schemaVersion, 8, `${name} → v8`);
+    assert.ok(s.reportOptions && typeof s.reportOptions.labels === 'object' && s.reportOptions.labels !== null,
+      `${name}: labels container backfilled`);
+    // The migration only ever REMOVES — it never invents a title.
+    assert.ok(!('coverTitle' in s.reportOptions.labels), `${name}: no title invented`);
+    assert.equal(s.tatLookup.X, 1, `${name}: user data untouched`);
+  }
+  // The one label present in the last case is not collateral damage.
+  assert.equal(store.loadSettings().reportOptions.labels.kpiCompleted, 'فحوصات منجزة');
+});
+
+test('every migration entry point (v1..v7) lands on schemaVersion 8 and clears the stale title', () => {
+  // The whole chain must reach migrateV7toV8 — a wrapper that forgets the new step
+  // would leave exactly the oldest installs on the daily cover title.
+  for (const v of [1, 2, 3, 4, 5, 6, 7]) {
+    const mock = fresh();
+    mock.setItem(SETTINGS_KEY, JSON.stringify({
+      schemaVersion: v,
+      tatLookup: { 'CBC': 2 },
+      snapshot: { asOf: '2026-07-01', prevCompleted: 11 },
+      reportOptions: { labels: { coverTitle: V7_COVER_TITLE } },
+    }));
+    const s = store.loadSettings();
+    assert.equal(s.schemaVersion, 8, `v${v} → v8`);
+    assert.ok(!('coverTitle' in s.reportOptions.labels), `v${v} chain reaches the v7→v8 step`);
+    // Every earlier step still runs: v1's snapshot widening, the v4→v5 definitions
+    // reset, the v5→v6 taskLog backfill and the v6→v7 week default.
+    assert.equal(s.tatLookup.CBC, 2, `v${v} keeps user data`);
+    assert.equal(s.snapshot.numbers.completed, 11, `v${v} snapshot widened`);
+    assert.equal(s.reportOptions.slides.definitions, false, `v${v} definitions still reset`);
+    assert.deepEqual(s.taskLog, {}, `v${v} still backfills taskLog`);
+    assert.equal(s.reportOptions.deltaMode, 'week', `v${v} still lands on the week default`);
+    assert.equal(JSON.parse(mock.getItem(SETTINGS_KEY)).schemaVersion, 8, `v${v} persisted`);
+  }
+});
+
+test('importing a pre-rename backup does not resurrect the retired daily cover title', () => {
+  // The IMPORT twin of the load-path migration above, and the exact sibling of
+  // 'importing a pre-v7 backup does not undo the week-default migration': migrate()
+  // only runs on a doc read from STORAGE, so an imported v1-v7 backup carrying the old
+  // default as a labels override would merge import-wins and get stamped
+  // SCHEMA_VERSION — the stale title would then print forever, with nothing left to
+  // clear it. Cutoff is <= 7 here (v7 was the last daily-title schema), one higher than
+  // the deltaMode fixup's <= 6.
+  const mock = fresh();
+  // Device is a MIGRATED v7 install: coverTitle already cleared, another label kept.
+  mock.setItem(SETTINGS_KEY, JSON.stringify({
+    schemaVersion: 7,
+    reportOptions: {
+      excludeNoTat: false, slides: {}, kpiCards: {}, deltaMode: 'week',
+      labels: { coverTitle: V7_COVER_TITLE, kpiCompleted: 'فحوصات منجزة' },
+    },
+  }));
+  assert.ok(!('coverTitle' in store.loadSettings().reportOptions.labels), 'precondition: migrated');
+
+  store.importSettings(JSON.stringify({
+    schemaVersion: 7,
+    tatLookup: { 'CBC': 9 },
+    reportOptions: { excludeNoTat: true, slides: {}, kpiCards: {}, labels: { coverTitle: V7_COVER_TITLE } },
+  }));
+  const s = store.loadSettings();
+  assert.ok(!('coverTitle' in s.reportOptions.labels), 'stale override dropped, migrated state stands');
+  assert.equal(s.reportOptions.labels.kpiCompleted, 'فحوصات منجزة', "the device's other override survives");
+  assert.equal(s.reportOptions.excludeNoTat, true, 'the rest of the backup imported normally');
+  assert.equal(s.tatLookup.CBC, 9, 'user data imported normally');
+  assert.equal(s.schemaVersion, 8, 'stamped current');
+  assert.ok(
+    !('coverTitle' in JSON.parse(mock.getItem(SETTINGS_KEY)).reportOptions.labels),
+    'and persisted without it — nothing would clear it on a later load',
+  );
+
+  // Every pre-rename version, not just the newest one: the oldest backups are the ones
+  // most likely to carry the retired default.
+  for (const v of [1, 2, 3, 4, 5, 6, 7]) {
+    fresh();
+    store.loadSettings();
+    store.importSettings(JSON.stringify({
+      schemaVersion: v,
+      reportOptions: { slides: {}, kpiCards: {}, labels: { coverTitle: V7_COVER_TITLE } },
+    }));
+    assert.ok(
+      !('coverTitle' in store.loadSettings().reportOptions.labels),
+      `v${v} backup does not resurrect the daily title`,
+    );
+  }
+
+  // A title retyped in the labels editor AFTER v8 shipped is a real choice: it travels
+  // in a v8 backup and imports verbatim, even when it happens to be the old default.
+  fresh();
+  store.loadSettings();
+  store.importSettings(JSON.stringify({
+    schemaVersion: store.SCHEMA_VERSION,
+    reportOptions: { slides: {}, kpiCards: {}, labels: { coverTitle: V7_COVER_TITLE } },
+  }));
+  assert.equal(
+    store.loadSettings().reportOptions.labels.coverTitle, V7_COVER_TITLE,
+    'post-rename choice imports verbatim',
+  );
+
+  // And any OTHER title imports verbatim from any version — exact match only, same
+  // scoping as migrateV7toV8. Concatenated, never retyped: an invisible difference in
+  // this RTL string must not be what makes the case pass.
+  for (const custom of ['عنوان الغلاف الخاص بي', `${V7_COVER_TITLE} `, `${V7_COVER_TITLE}!`, '']) {
+    fresh();
+    store.loadSettings();
+    store.importSettings(JSON.stringify({
+      schemaVersion: 6,
+      reportOptions: { slides: {}, kpiCards: {}, labels: { coverTitle: custom } },
+    }));
+    assert.equal(
+      store.loadSettings().reportOptions.labels.coverTitle, custom,
+      `${JSON.stringify(custom)} imports from a v6 backup`,
+    );
+  }
 });

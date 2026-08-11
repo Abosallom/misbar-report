@@ -8,14 +8,14 @@
 // mirror of the automation panel), live source (Grafana + cached-tracker), and
 // backup (export/import).
 
-import { SNAPSHOT_SEED, REPORT_OPTIONS_SEED, AUTOMATION_SEED } from '../seeds/defaults.js?v=v2026-08-06.1';
-import { normalizeDeltaMode } from '../model/delta-baseline.js?v=v2026-08-06.1';
+import { SNAPSHOT_SEED, REPORT_OPTIONS_SEED, AUTOMATION_SEED } from '../seeds/defaults.js?v=v2026-08-10.1';
+import { normalizeDeltaMode } from '../model/delta-baseline.js?v=v2026-08-10.1';
 // NAMESPACE import on purpose: the access tab reads lock.currentUser(), which is a
 // newer export. A named import would throw at link time on any build of lock.js that
 // predates it (and take the whole settings screen down); a namespace import lets the
 // tab degrade to 'unknown user' instead. lock.js is DOM-free at module scope, so this
 // stays importable in bare Node (test/module-smoke).
-import * as lock from './lock.js?v=v2026-08-06.1';
+import * as lock from './lock.js?v=v2026-08-10.1';
 
 const TABS = [
   { id: 'tat', label: 'مدة الفحوصات' },
@@ -1151,7 +1151,7 @@ export function render(container, ctx) {
       h('div', { class: 'st-section' }, [
         h('p', {
           class: 'st-help',
-          text: 'تشغيل آلي للتقرير اليومي. جميع المفاتيح معطّلة افتراضياً؛ لا تُنفَّذ أي خطوة إلا بعد تفعيلها هنا. هذه نسخة مطابقة للوحة التشغيل الآلي — التعديل في أي منهما يظهر في الآخر.',
+          text: 'تشغيل آلي يومي للتقرير. جميع المفاتيح معطّلة افتراضياً؛ لا تُنفَّذ أي خطوة إلا بعد تفعيلها هنا. هذه نسخة مطابقة للوحة التشغيل الآلي — التعديل في أي منهما يظهر في الآخر.',
         }),
         // A field may carry an optional `hint` (one st-help line under its checkbox) —
         // used by autoDownload to separate it from the identically-worded, and totally

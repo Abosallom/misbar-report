@@ -13,17 +13,40 @@
 // (delta-baseline.js's pickDeltaBaseline). No stored history participates here at
 // all — the stamper is a pure function of rows + report date, so it is IDEMPOTENT
 // by construction, which is asserted directly below.
+//
+// ROUND 4 (2026-08-06) — THE TWO KEY CLASSES SPLIT, and only one of them moved.
+// The paragraph above still describes the six EVENT keys exactly: they stay the
+// in-window event count, asof(end) − asof(dayBefore(start)). The four QUEUE keys
+// (engine/asof.js QUEUE_KEYS) stopped being a signed net change and became
+// SURVIVING ENTRANTS — rows that ENTERED the state inside the window and are STILL
+// in it at the window's end. That makes them a COUNT, so they are always ≥ 0, and
+// it makes them answer the question Talal actually asked ("how much work landed in
+// this queue this week?") instead of the one a net change answers ("how much did
+// the pile move?"). The two questions genuinely differ: a queue whose TOTAL FELL
+// across the window can still report a POSITIVE number, because many pre-window
+// members left while a few in-window entrants stayed. That is not a contradiction
+// with the big cumulative number beside it — it is the point — and it is pinned as
+// its own flagship case in section 3.
+// Chips are POSITIVE-ONLY on both surfaces now (build-spec fmtDelta, screen-review
+// bannerChipVisible), so a negative was never renderable; what changed here is the
+// MEANING of the number, not merely its sign.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
   computeWindowDeltas, windowFor, stampWindowDeltas, isoFromDays, isoToDays,
 } from '../src/model/delta-window.js';
-import { NUMBER_KEYS } from '../src/engine/asof.js';
+// QUEUE_KEYS is IMPORTED, not re-declared: this file used to carry its own STATE_KEYS
+// literal, so the exhaustive-split assertion below could only ever prove the local copy
+// was exhaustive — a key promoted to the queue class in asof.js and forgotten here would
+// have kept passing while every case in section 3 silently tested the wrong four keys.
+// computeNumbersAsOf is imported for ONE purpose: the flagship case reads the raw as-of
+// depths at both window endpoints, so "the total fell while the delta is positive" is
+// SHOWN from the fixture rather than asserted by narration.
+import { NUMBER_KEYS, QUEUE_KEYS, computeNumbersAsOf } from '../src/engine/asof.js';
 import { DEFAULT_DELTA_MODE } from '../src/model/delta-baseline.js';
 
 const EVENT_KEYS = ['total', 'collected', 'dispatched', 'received', 'completed', 'rejected'];
-const STATE_KEYS = ['awaitingDispatch', 'shippedNotReceived', 'awaitingResults', 'lateNoResult'];
 
 /** A full OrderRow with everything nulled — only the fields a case cares about are set. */
 const row = (o) => ({
@@ -153,53 +176,147 @@ test('the window is INCLUSIVE at both ends — Sunday\'s and the report day\'s o
 });
 
 // =============================================================================
-// 3. STATE KEYS — signed net change, never a count
+// 3. QUEUE KEYS — SURVIVING ENTRANTS, a count that can never be negative
 // =============================================================================
 
-test('STATE keys are a SIGNED NET CHANGE — a queue that drained shows a negative', () => {
-  // One row that was already sitting in awaitingResults before the week (received
-  // 07-02) and got its result INSIDE the week (07-06). Nothing entered the queue,
-  // one thing left it: the net change must be −1, not 0 and not +1.
+test('QUEUE keys are SURVIVING ENTRANTS — a queue that only DRAINED shows 0, not −1', () => {
+  // Row D alone, re-derived field by field from the fixture above:
+  //   orderDate 07-01, collected 07-01, dispatched 07-01, received 07-02,
+  //   resulted 07-06, rawStatus 'Result Available'.
+  // Window Sun 07-05 .. Thu 07-09, so the queue pass runs at asOf 07-09 with
+  // sinceIso 07-05 and the event anchor is Sat 07-04.
+  //
+  // QUEUE keys — membership at asOf 07-09, before the entry-day gate even matters:
+  //   awaitingDispatch   needs !dispatched≤07-09; dispatched 07-01 ⇒ OUT  ⇒ 0
+  //   shippedNotReceived needs !received≤07-09;   received 07-02   ⇒ OUT  ⇒ 0
+  //   awaitingResults    needs !resulted≤07-09;   resulted 07-06   ⇒ OUT  ⇒ 0
+  //   lateNoResult       is a subset of awaitingResults            ⇒ 0
+  // D sat in awaitingResults from 07-02 and left on 07-06, i.e. it ENTERED before the
+  // window opened and did not survive to its end — it fails BOTH halves of "surviving
+  // entrant" and contributes nothing. Under the retired net-change rule this same row
+  // produced −1 (depth 1 → 0); the drain is real, but it is not activity that ARRIVED
+  // this week, and a count of arrivals has no way to express it. That is the whole
+  // change: the chip stopped reporting the pile's motion and started reporting intake.
   const drained = [WEEK_ROWS.find((r) => r.orderId === 'D')];
   const res = computeWindowDeltas({ rows: drained, tatTests: {}, reportDate: THU, mode: 'week' });
-  assert.equal(res.deltas.awaitingResults, -1, 'the queue drained by one');
-  assert.equal(res.deltas.completed, 1, 'and the event key counts the completion');
-  // The event keys for milestones it passed BEFORE the week stay at 0 — a state key
-  // going negative must never leak into an event key.
+  assert.equal(res.deltas.awaitingResults, 0, 'a drain is not an entrant — 0, never −1');
+  for (const k of QUEUE_KEYS) {
+    assert.equal(res.deltas[k], 0, `queue key ${k} has no surviving entrant here`);
+  }
+  // EVENT keys, hand-counted the same way — asof(07-09) − asof(07-04):
+  //   total      order 07-01 ≤ both ends            ⇒ 1 − 1 = 0
+  //   received   received 07-02 ≤ both ends         ⇒ 1 − 1 = 0
+  //   completed  resulted 07-06: in at 07-09, out at 07-04 ⇒ 1 − 0 = 1
+  assert.equal(res.deltas.completed, 1, 'and the event key still counts the completion');
   assert.equal(res.deltas.total, 0);
   assert.equal(res.deltas.received, 0);
+  // No key may go negative any more, on this row or any other.
+  for (const k of NUMBER_KEYS) assert.ok(res.deltas[k] >= 0, `key ${k} must not be negative`);
 });
 
-test('STATE keys go POSITIVE when the queue grew, and every key is a finite number', () => {
-  // B alone: collected Sunday, never dispatched → it enters awaitingDispatch inside
-  // the window and is still sitting there on Thursday. +1.
+test('QUEUE keys count entrants that SURVIVED; churn inside the window counts for nothing', () => {
+  // B alone: ordered AND collected on Sunday 07-05, never dispatched → at asOf 07-09 it
+  // is still in awaitingDispatch, and its entry day (the ORDER day, which is when a row
+  // joins the pre-dispatch queue) is 07-05 — exactly the window's first day. The gate is
+  // `entry ≥ since`, so this is the INCLUSIVE boundary: shift it to `>` and Sunday's own
+  // arrivals disappear from the week that is named after Sunday.
   const onlyB = computeWindowDeltas({
     rows: [WEEK_ROWS.find((r) => r.orderId === 'B')], tatTests: {}, reportDate: THU, mode: 'week',
   });
-  assert.equal(onlyB.deltas.awaitingDispatch, 1, 'B entered awaitingDispatch and stayed');
+  assert.equal(onlyB.deltas.awaitingDispatch, 1, 'B entered on the window\'s first day and stayed');
 
   const res = computeWindowDeltas({ rows: WEEK_ROWS, tatTests: {}, reportDate: THU, mode: 'week' });
-  // On the FULL set awaitingDispatch nets to 0 — and that is the correct answer, not
-  // a missing count: B entered the queue (+1) while A, which was already waiting
-  // since 07-02, was dispatched on 07-06 and left it (−1). A state key reports the
-  // NET depth change; the two dispatch EVENTS are what the `dispatched` chip counts.
-  assert.equal(res.deltas.awaitingDispatch, 0, 'one in, one out ⇒ net 0');
-  assert.equal(res.deltas.dispatched, 2, '…while the event key still counts both dispatches');
-  // Same churn story one stage later: A and C both entered and left the transit queue
-  // inside the window, so shippedNotReceived nets 0 with 2 receipts counted.
-  assert.equal(res.deltas.shippedNotReceived, 0);
+  // FULL SET, awaitingDispatch — who is in the queue at asOf 07-09, and did each enter
+  // on or after 07-05?
+  //   A  dispatched 07-06 ⇒ OUT of the queue
+  //   B  never dispatched ⇒ IN,  entry = order 07-05 ≥ 07-05  ⇒ COUNTS
+  //   C  dispatched 07-08 ⇒ OUT ;  D, E dispatched 07-01 ⇒ OUT
+  //   F  ordered 07-12, after the window's end ⇒ not counted at all
+  // ⇒ 1. This is where the rewrite is VISIBLE on the shared fixture: the old rule netted
+  // this to 0, because A — which had been waiting since 07-02 — was dispatched inside the
+  // window and its exit cancelled B's arrival. A pre-window row leaving no longer offsets
+  // an in-window row arriving; only B's own arrival is the week's intake.
+  assert.equal(res.deltas.awaitingDispatch, 1, 'B arrived and stayed; A\'s exit no longer cancels it');
+  assert.equal(res.deltas.dispatched, 2, '…and the event key still counts both dispatches');
+  // FULL SET, shippedNotReceived — still 0, but for an entirely NEW reason. The transit
+  // queue is EMPTY at 07-09 (A received 07-07, C received 07-08), so nobody can be a
+  // survivor: A entered on 07-06 and C on 07-08, both inside the window, and both left it
+  // inside the window too. They are entrants, not SURVIVING entrants. The old rule reached
+  // the same 0 by netting +2 arrivals against −2 departures; identical number, opposite
+  // derivation, which is exactly why it needs saying here.
+  assert.equal(res.deltas.shippedNotReceived, 0, 'both entrants exited before the window closed');
   assert.equal(res.deltas.received, 2);
+  // FULL SET, awaitingResults — A is received 07-07 with no result, so it is IN at 07-09
+  // and its entry day 07-07 is inside the window ⇒ 1. (D's pre-window arrival drained in
+  // the same week and, per the case above, contributes nothing either way.)
+  assert.equal(res.deltas.awaitingResults, 1, 'A arrived in the results queue and is still there');
+  // FULL SET, lateNoResult — 0. A is the only row awaiting a result: received Tue 07-07
+  // with tatDaysCsv 5, so Due = WORKDAY(07-07, 5) = Wed 07-08, Thu 07-09, Sun 07-12,
+  // Mon 07-13, Tue 07-14 under the Fri+Sat weekend. 07-14 is past the window's end, so A
+  // has not entered lateness at all yet.
+  assert.equal(res.deltas.lateNoResult, 0, 'A is not due until 07-14 — nothing has fallen late');
+
   for (const k of NUMBER_KEYS) {
     assert.equal(typeof res.deltas[k], 'number', `key ${k} is a number`);
     assert.ok(Number.isFinite(res.deltas[k]), `key ${k} is finite`);
   }
   // All ten keys are present — a missing key would render as a blank chip.
   assert.deepEqual(Object.keys(res.deltas).sort(), [...NUMBER_KEYS].sort());
-  // Event keys can never be negative on real data: they count dated milestones,
-  // which only ever accumulate.
-  for (const k of EVENT_KEYS) assert.ok(res.deltas[k] >= 0, `event key ${k} must not be negative`);
-  // And the state keys are exactly the remaining four — the split is exhaustive.
-  assert.deepEqual([...EVENT_KEYS, ...STATE_KEYS].sort(), [...NUMBER_KEYS].sort());
+  // NO key may be negative now. Event keys count dated milestones, which only ever
+  // accumulate; queue keys are a filtered COUNT of rows sitting in a state, never a
+  // difference of two counts. Negativity is unreachable for both classes.
+  for (const k of NUMBER_KEYS) assert.ok(res.deltas[k] >= 0, `key ${k} must not be negative`);
+  // And the queue keys are exactly the remaining four — the split is exhaustive, checked
+  // against the IMPORTED QUEUE_KEYS so asof.js owns the membership.
+  assert.deepEqual([...EVENT_KEYS, ...QUEUE_KEYS].sort(), [...NUMBER_KEYS].sort());
+});
+
+// The flagship case for the round-4 rule, and the one the user called out by name.
+//   X1, X2 — ordered 07-01, still undispatched when the window opens, then dispatched,
+//            received and resulted INSIDE the window. Two pre-window members leaving.
+//   Y      — ordered 07-06 and never dispatched. One in-window entrant staying.
+// awaitingDispatch depth: 2 at the anchor (Sat 07-04) → 1 at the end (Thu 07-09).
+const FALLING_QUEUE_ROWS = [
+  row({ orderId: 'X1', orderDate: '2026-07-01', collected: '2026-07-01 08:00:00', dispatched: '2026-07-06 09:00:00', received: '2026-07-06 10:00:00', resulted: '2026-07-07 11:00:00', rawStatus: 'Result Available' }),
+  row({ orderId: 'X2', orderDate: '2026-07-01', collected: '2026-07-01 08:00:00', dispatched: '2026-07-06 09:00:00', received: '2026-07-06 10:00:00', resulted: '2026-07-07 11:00:00', rawStatus: 'Result Available' }),
+  row({ orderId: 'Y', orderDate: '2026-07-06', collected: '2026-07-06 08:00:00' }),
+];
+
+test('FLAGSHIP: a queue whose TOTAL FELL still reports a POSITIVE delta', () => {
+  // The scenario the spec calls out, shown from the raw as-of depths rather than
+  // described. The big number on the card is the cumulative depth and it went DOWN;
+  // the chip is the week's intake and it is UP. Both are true at once, and any rule
+  // that forces them to share a sign is wrong about one of them.
+  const anchor = computeNumbersAsOf({ rows: FALLING_QUEUE_ROWS, tatTests: {}, asOfIso: '2026-07-04' }).numbers;
+  const end = computeNumbersAsOf({ rows: FALLING_QUEUE_ROWS, tatTests: {}, asOfIso: THU }).numbers;
+  assert.equal(anchor.awaitingDispatch, 2, 'X1+X2 are waiting when the window opens');
+  assert.equal(end.awaitingDispatch, 1, 'only Y is waiting when it closes');
+  assert.ok(end.awaitingDispatch < anchor.awaitingDispatch, 'the queue TOTAL fell across the week');
+
+  const res = computeWindowDeltas({ rows: FALLING_QUEUE_ROWS, tatTests: {}, reportDate: THU, mode: 'week' });
+  // Surviving entrants at 07-09 with since 07-05: X1/X2 are OUT of the queue (dispatched
+  // 07-06); Y is IN and entered on its order day 07-06 ≥ 07-05 ⇒ 1.
+  assert.equal(res.deltas.awaitingDispatch, 1, 'one in-window arrival survived ⇒ +1');
+  // The retired net-change rule produced end − anchor = 1 − 2 = −1 here, which the
+  // positive-only chip would then have hidden: a week in which a new order arrived and is
+  // still sitting unshipped would have rendered NOTHING on the card.
+  assert.notEqual(res.deltas.awaitingDispatch, end.awaitingDispatch - anchor.awaitingDispatch);
+  assert.ok(res.deltas.awaitingDispatch > 0, 'and it is renderable — chips are positive-only');
+
+  // The other three queues are empty at 07-09 (X1/X2 resulted 07-07, Y never dispatched).
+  assert.equal(res.deltas.shippedNotReceived, 0);
+  assert.equal(res.deltas.awaitingResults, 0);
+  assert.equal(res.deltas.lateNoResult, 0);
+  // Event keys, hand-counted as asof(07-09) − asof(07-04):
+  //   total      X1,X2 (07-01) at both ends + Y (07-06) at the end only ⇒ 3 − 2 = 1
+  //   collected  same dates as the orders                               ⇒ 3 − 2 = 1
+  //   dispatched X1,X2 on 07-06                                         ⇒ 2 − 0 = 2
+  //   received   X1,X2 on 07-06                                         ⇒ 2 − 0 = 2
+  //   completed  X1,X2 resulted 07-07                                   ⇒ 2 − 0 = 2
+  assert.deepEqual(
+    Object.fromEntries(EVENT_KEYS.map((k) => [k, res.deltas[k]])),
+    { total: 1, collected: 1, dispatched: 2, received: 2, completed: 2, rejected: 0 },
+  );
 });
 
 // =============================================================================
@@ -373,8 +490,14 @@ test('CROSS-SURFACE: stamped model.kpi.deltas === computeWindowDeltas output', (
 });
 
 test('CROSS-SURFACE: a Friday and a Saturday report describe the SAME just-ended week', () => {
-  // Fri/Sat fold back to the same Sunday, and no work is dated on the weekend in this
-  // fixture, so the two runs must produce identical chips — and identical to Thursday's.
+  // Fri/Sat fold back to the same Sunday, so the window's floor is identical; and the
+  // fixture has nothing dated on the weekend, so the three runs must produce identical
+  // chips — Thursday's included. Both key classes have to be checked for that, not just
+  // the event counts: moving the window's END from 07-09 to 07-10/07-11 re-evaluates the
+  // QUEUE membership at the later day too. It does not move here — B is still undispatched
+  // and A still unresulted on both weekend days, and A's due date (07-14, see section 3)
+  // is past all three ends, so nothing enters lateness either. deepEqual over the whole
+  // delta object covers all ten keys at once.
   const thu = computeWindowDeltas({ rows: WEEK_ROWS, tatTests: {}, reportDate: THU, mode: 'week' });
   const fri = computeWindowDeltas({ rows: WEEK_ROWS, tatTests: {}, reportDate: FRI, mode: 'week' });
   const sat = computeWindowDeltas({ rows: WEEK_ROWS, tatTests: {}, reportDate: SAT, mode: 'week' });
@@ -425,6 +548,13 @@ test('excludeNoTat: the flag changes the chips — a No Match row counts only wh
     assert.equal(kept.kpi.deltas[k] - dropped.kpi.deltas[k], 1,
       `${k}: the No Match row must count when kept and vanish when excluded`);
   }
+  // The flag has to scope the QUEUE pass too, not just the event subtraction — that pass
+  // is a separate gated call to computeNumbersAsOf and could have been given a different
+  // row set by accident. N is received 07-08 with no result, so at asOf 07-09 it sits in
+  // awaitingResults with entry day 07-08, inside the window: a surviving entrant. Kept
+  // ⇒ A (entry 07-07) + N = 2; dropped ⇒ A alone = 1.
+  assert.equal(kept.kpi.deltas.awaitingResults, 2, 'N is a surviving entrant when kept');
+  assert.equal(dropped.kpi.deltas.awaitingResults, 1, 'and vanishes from the queue pass when excluded');
   // WEEK_ROWS all resolve a TAT via tatDaysCsv, so the flag may touch nothing else.
   assert.equal(kept.kpi.deltas.completed, dropped.kpi.deltas.completed);
 });

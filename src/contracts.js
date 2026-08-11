@@ -58,21 +58,32 @@
  * @property {{total:number, collected:number, dispatched:number, received:number,
  *             completed:number, rejected:number, awaitingDispatch:number, shippedNotReceived:number,
  *             awaitingResults:number, lateNoResult:number}} deltas
- *   - THE ACTIVITY OF THE REPORT'S WINDOW (2026-08-05 rule, Talal). THE INVARIANT
- *     these values live under: every OTHER number in EngineOutput — and every big
- *     number on slides 2/3/4 — is a CUMULATIVE TOTAL and did not change. Only these
- *     small green ▲ chips did: they now count what HAPPENED inside the window
- *     [Sunday, reportDate] ('week', the default) or [reportDate, reportDate]
- *     ('daily'), from the rows' OWN date columns — model/delta-window.js
- *     computeWindowDeltas, deltas[key] = asof(end) − asof(the day before the start).
- *     SIGNED, not clamped: the six EVENT keys (total/collected/dispatched/received/
- *     completed/rejected) are in-window event COUNTS and are ≥ 0 in practice, while
- *     the four STATE keys (awaitingDispatch/shippedNotReceived/awaitingResults/
- *     lateNoResult) are queue depths whose window value is a NET change and is
- *     routinely negative — both surfaces render '−N' for those. A zero value renders
- *     no chip at all. SUPERSEDED: "INCREASE vs the previous report's snapshot" — the
- *     engine still produces that clamped legacy value and it survives ONLY as the
- *     degraded fallback when the stamper or the parsed rows are unavailable.
+ *   - THE ACTIVITY OF THE REPORT'S WINDOW (2026-08-05 rule, Talal; two-class refinement
+ *     2026-08-06). THE INVARIANT these values live under: every OTHER number in
+ *     EngineOutput — and every big number on slides 2/3/4 — is a CUMULATIVE TOTAL and
+ *     did not change. Only these small green chips did: they describe what HAPPENED
+ *     inside the window [Sunday, reportDate] ('week', the default) or
+ *     [reportDate, reportDate] ('daily'), from the rows' OWN date columns
+ *     (model/delta-window.js computeWindowDeltas). TWO KEY CLASSES, TWO MEANINGS:
+ *       • CUMULATIVE keys — total, collected, dispatched, received, completed,
+ *         rejected — are IN-WINDOW EVENT COUNTS: asof(end) − asof(the day before the
+ *         start) over monotone milestone counters. "3 orders dated this week" ⇒ 3.
+ *       • QUEUE keys — awaitingDispatch, shippedNotReceived, awaitingResults,
+ *         lateNoResult (engine/asof.js QUEUE_KEYS) — are SURVIVING ENTRANTS: rows that
+ *         ENTERED that state inside the window AND are STILL in it at the window's end,
+ *         counted by ONE gated as-of pass (computeNumbersAsOf's `sinceIso`), never by a
+ *         subtraction. Entry day = orderDate / dispatched / received / the DUE day
+ *         respectively. Being a subset of the end depth, a queue value is ALWAYS ≥ 0.
+ *         EXPECTED AND NOT A BUG: a queue's own big cumulative number can FALL over the
+ *         same window in which its chip is positive (many exits, some new intake). The
+ *         card is a depth, the chip is the week's intake still waiting — do NOT try to
+ *         reconcile the two, and do not "fix" one to match the other.
+ *     Values are stored UNCLAMPED; suppressing non-positive ones is each surface's
+ *     rendering choice. SUPERSEDED TWICE: "INCREASE vs the previous report's snapshot"
+ *     (the engine still produces that clamped legacy value, surviving ONLY as the
+ *     degraded fallback when the stamper or the parsed rows are unavailable), and the
+ *     2026-08-05 reading of the four queue keys as a SIGNED NET CHANGE (routinely
+ *     negative) — that arithmetic is gone.
  *     This IS the whole key set (engine/asof.js NUMBER_KEYS); `completed` speaks the
  *     COMPLETED rule above (result date OR rejected) and `rejected` rides along as
  *     its own value — a SUBSET of completed, so the two chips must never be summed.
@@ -109,6 +120,13 @@
  *     production). start/end are inclusive 'YYYY-MM-DD'; mode 'week' → start is the
  *     SUNDAY that opens reportDate's Sun–Thu work week (a Fri/Sat report date maps
  *     back into the week that just ended), mode 'daily' → start === end === reportDate.
+ *     THE WINDOW MEANS TWO DIFFERENT THINGS PER KEY CLASS, and a surface that states it
+ *     must state the one it is showing (see kpi.deltas above): for the six CUMULATIVE
+ *     keys it is the span the EVENTS were dated in; for the four QUEUE keys it is the
+ *     span the rows ENTERED their state in — those chips count SURVIVING ENTRANTS
+ *     (entered in-window, still in the state at `end`), are always ≥ 0, and may be
+ *     positive while the matching big cumulative number falls. That is expected; the
+ *     chip and the card answer different questions and are not to be reconciled.
  *     `approx` bubbles engine/asof.js's own caveats for the two endpoints; only
  *     `rejected` (with its `completed` twin) is surfaced to the operator, because a
  *     rejection carries no timestamp and such a row is dated by its result date or,

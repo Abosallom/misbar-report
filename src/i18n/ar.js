@@ -2,7 +2,7 @@
 
 /** All UI strings, grouped by screen/area. */
 export const STR = {
-  appTitle: 'مولد تقرير مسبار اليومي',
+  appTitle: 'مولد تقرير مسبار الأسبوعي',
   appTitleShort: 'مسبار',
   nav: {
     home: 'الرئيسية',
