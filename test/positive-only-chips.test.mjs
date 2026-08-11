@@ -18,6 +18,20 @@
 // slide could now only come from a bug, and printing one would state the opposite of the
 // truth beside a big cumulative number that may itself have fallen.
 //
+// ROUND 5 (2026-08-11) MOVED THE FUNNEL CHIP TWICE OVER, and both moves are pinned below.
+//   • COVERAGE — all FIVE stages chip now. Stages 1 and 5 (إنشاء طلب / إصدار نتيجة) used
+//     to stay blank because they map to the 'total' and 'completed' KPI cards, which chip
+//     already; the user asked for those two bars specifically, so the de-duplication set
+//     (build-spec's former KPI_DELTA_KEYS) is gone. The cards KEEP their chips, so a
+//     total/completed rise now prints the same '+N' TWICE on one slide — an accepted cost,
+//     not a regression, and several counts below exist only to say so out loud.
+//   • POSITION — the chip left the stack under the count and moved INLINE beside it
+//     (x 9.42, y rowY+0.015, 9pt), a small raised '+N' at the count's side. That is a
+//     geometry change a screenshot would catch and a text-only assertion would not, hence
+//     the explicit position case.
+// The sign rule is UNCHANGED by either: fmtDelta is still the single gate, and an
+// overridden stage/card value still suppresses its chip.
+//
 // THE INVARIANT this file must never disturb: the big numbers — the KPI card VALUES, the
 // funnel stage counts, the monthly and compliance tables — are CUMULATIVE TOTALS and are
 // untouched by any of this. Only the small green chips, the ▲ legend line and the cover
@@ -48,6 +62,14 @@ const DELTA_GREEN = '#2E7D32';
 const MINUS = '−'; // U+2212 MINUS SIGN — what fmtDelta used to emit for a drop
 const LEGEND_MARK = '▲';
 
+// The funnel chip's geometry (round 5), literals for the same reason DELTA_GREEN is one: a
+// position pin that imported the position it pins would pin nothing. COUNT_* describe the
+// count column, which round 5 did NOT touch — they are the fixed thing the chip is measured
+// against, and the pair is what tells "inline beside" apart from the old "stacked beneath".
+const FUNNEL_CHIP_X = 9.42;   // just outside the count column, on the count's own line
+const FUNNEL_CHIP_SIZE = 9;   // 64.3% of the 14pt count it annotates
+const COUNT_X = 8.629, COUNT_SIZE = 14;
+
 /** The exec funnel slide (KPI cards + journey), where every chip on the deck lives. */
 function execFunnel(model, variant = 'internal') {
   const slide = buildSpec(model, { variant }).find((s) => s.id === 'execFunnel');
@@ -59,12 +81,30 @@ function execFunnel(model, variant = 'internal') {
 const textsOf = (slide) => slide.elements.filter((e) => e.t === 'text').map((e) => String(e.text ?? ''));
 
 /**
- * The green delta chips on a slide, in emission order. The ▲ legend is drawn in the same
- * colour and is excluded by its marker — it is a caption ABOUT the chips, not a chip.
+ * The green delta chip ELEMENTS on a slide, in emission order — boxes and all, because the
+ * position cases need more than the strings. The ▲ legend is drawn in the same colour and is
+ * excluded by its marker — it is a caption ABOUT the chips, not a chip.
  */
-const chipsOf = (slide) => slide.elements
-  .filter((e) => e.t === 'text' && e.color === DELTA_GREEN && !String(e.text ?? '').startsWith(LEGEND_MARK))
-  .map((e) => String(e.text));
+const chipElsOf = (slide) => slide.elements
+  .filter((e) => e.t === 'text' && e.color === DELTA_GREEN && !String(e.text ?? '').startsWith(LEGEND_MARK));
+
+/** Their texts, same order: cards first (they are emitted first), then the funnel rows. */
+const chipsOf = (slide) => chipElsOf(slide).map((e) => String(e.text));
+
+/**
+ * The FUNNEL chips only, told apart from the cards' by x. Not circular: the KPI chip sits
+ * 0.06in inside its own card's left edge (build-spec KPI_REF_X 0.000…11.179 ⇒ 0.06…11.239),
+ * so 9.42 belongs to no card at any card count, and the value itself is pinned against the
+ * count column — not against itself — by the single-chip position case below.
+ */
+const funnelChipsOf = (slide) => chipElsOf(slide).filter((e) => e.x === FUNNEL_CHIP_X);
+
+/** The five stage COUNT elements in stage order — the only 14pt text in the count column. */
+function countElsOf(slide) {
+  const els = slide.elements.filter((e) => e.t === 'text' && e.size === COUNT_SIZE && e.x === COUNT_X);
+  assert.equal(els.length, 5, 'the funnel must emit exactly five stage counts');
+  return els;
+}
 
 /** The ▲ legend line, or null when no chip was visible this run. */
 function legendOf(slide) {
@@ -83,16 +123,23 @@ const withDeltas = (over, base = MOCK_REPORT_MODEL.kpi.deltas) => ({
   kpi: { ...MOCK_REPORT_MODEL.kpi, deltas: { ...base, ...over } },
 });
 
-// The fixture's ONE non-zero delta. Every "the negative produced nothing" claim below is
-// read as "the chip list is exactly this and nothing else", so if it ever changes the
-// cases stop meaning what they say — pinned here, once.
-const FIXTURE_CHIP = '+47';
+// WHAT THE FIXTURE'S ONE NON-ZERO DELTA (completed: +47) NOW DRAWS. Every "the negative
+// produced nothing" claim below is read as "the chip list is exactly this and nothing
+// else", so the fixture's own contribution has to be pinned here, once, or those cases stop
+// meaning what they say. It is TWO entries since round 5, not one: 'completed' owns both a
+// KPI card (فحوصات مكتملة) and funnel stage 5 (إصدار نتيجة), and the stage no longer defers
+// to the card. Card chips are emitted before the funnel rows, so the order is card-then-bar.
+const FIXTURE_CHIPS = ['+47', '+47'];
 
-test('the fixture still has exactly one positive chip, so the cases below can subtract it', () => {
+test('the fixture draws its one positive delta TWICE — card and bar — so the cases below can subtract both', () => {
   assert.equal(MOCK_REPORT_MODEL.kpi.deltas.completed, 47);
-  assert.deepEqual(chipsOf(execFunnel(MOCK_REPORT_MODEL)), [FIXTURE_CHIP]);
-  // completed is a KPI card key, so its chip is drawn once on the card and NOT repeated on
-  // the funnel's last stage (KPI_DELTA_KEYS de-duplication) — hence one entry, not two.
+  const slide = execFunnel(MOCK_REPORT_MODEL);
+  assert.deepEqual(chipsOf(slide), FIXTURE_CHIPS);
+  // …and they are one of each, not two of a kind: exactly one comes from the funnel column.
+  assert.equal(funnelChipsOf(slide).length, 1, 'stage 5 draws the funnel half of the pair');
+  // THE NUMBERS ARE UNTOUCHED by the duplication — the fixture's 437 still prints once on
+  // the card and once as the stage count, which is what the '+47' pair annotates.
+  assert.equal(countElsOf(slide).at(-1).text, String(MOCK_REPORT_MODEL.kpi.funnel.completed));
 });
 
 // ---- the three signs -------------------------------------------------------------
@@ -103,7 +150,7 @@ test('a NEGATIVE queue delta renders NOTHING — no chip, and no U+2212 anywhere
   // semantics −5 is unreachable from the engine at all; the point of forcing it here is
   // that even a corrupt or stale model cannot put a minus sign on a delivered slide.
   const slide = execFunnel(withDeltas({ awaitingResults: -5 }));
-  assert.deepEqual(chipsOf(slide), [FIXTURE_CHIP], 'the −5 produced no chip of its own');
+  assert.deepEqual(chipsOf(slide), FIXTURE_CHIPS, 'the −5 produced no chip of its own');
   for (const t of textsOf(slide)) {
     assert.ok(!t.includes(MINUS), `U+2212 reached a delivered slide: ${JSON.stringify(t)}`);
     assert.ok(!t.includes('-5') && !t.includes('−5'), `a negative leaked as text: ${JSON.stringify(t)}`);
@@ -111,7 +158,7 @@ test('a NEGATIVE queue delta renders NOTHING — no chip, and no U+2212 anywhere
 });
 
 test('a ZERO delta renders nothing either — unchanged behaviour, restated', () => {
-  assert.deepEqual(chipsOf(execFunnel(withDeltas({ awaitingResults: 0 }))), [FIXTURE_CHIP]);
+  assert.deepEqual(chipsOf(execFunnel(withDeltas({ awaitingResults: 0 }))), FIXTURE_CHIPS);
   // Zero and negative are INDISTINGUISHABLE on the deck now, which is the whole rule:
   // both mean "nothing arrived here worth a chip this window".
   assert.deepEqual(
@@ -124,7 +171,12 @@ test('a POSITIVE delta renders \'+N\' — the rule is positive-ONLY, not chips-o
   const slide = execFunnel(withDeltas({ awaitingResults: 5 }));
   const chips = chipsOf(slide);
   assert.ok(chips.includes('+5'), `expected a '+5' chip, got ${JSON.stringify(chips)}`);
-  assert.ok(chips.includes(FIXTURE_CHIP), 'and the fixture\'s own chip is still there');
+  // …exactly ONCE: awaitingResults is a card-only key (فحوصات تحت الإجراء maps to no funnel
+  // stage), so it cannot pick up a second chip the way completed does. The order is the
+  // emission order — the card row left-to-right by index (awaitingResults is card 3,
+  // completed card 4), then the funnel rows.
+  assert.deepEqual(chips, ['+5', ...FIXTURE_CHIPS], 'one card chip, then the fixture pair');
+  assert.equal(funnelChipsOf(slide).length, 1, 'the +5 added no bar chip, only a card one');
   // The '+' is always present — never a bare '5' — so a chip can never be misread as the
   // cumulative value it sits beside.
   for (const c of chips) assert.match(c, /^\+\d+$/, `chip ${JSON.stringify(c)} must be '+N'`);
@@ -135,24 +187,93 @@ test('all four QUEUE keys obey the rule on their own KPI cards', () => {
   // regression (a stray fmtDelta call, an override branch) would not be caught by testing
   // just one of them. Driven off the IMPORTED QUEUE_KEYS so the loop cannot fall out of
   // step with asof.js's own membership list.
+  // THE COUNTS SURVIVED ROUND 5 UNCHANGED, and that is a fact about the two key sets rather
+  // than luck: the funnel's five stage keys are total/collected/dispatched/received/
+  // completed, and NONE of the four queue keys is among them (a queue key is a DEPTH — how
+  // many rows sit in a state — and the journey bars count flow through stages). So widening
+  // the funnel to all five bars gave these four nowhere new to draw: one card chip each,
+  // exactly as before. The singleton list is the assertion — a stray second '+5' here would
+  // mean a queue key had somehow acquired a bar.
   for (const key of QUEUE_KEYS) {
     const neg = chipsOf(execFunnel(withDeltas({ [key]: -5 }, ZERO_DELTAS)));
     assert.deepEqual(neg, [], `${key}: a negative must render no chip at all`);
-    const pos = chipsOf(execFunnel(withDeltas({ [key]: 5 }, ZERO_DELTAS)));
-    assert.deepEqual(pos, ['+5'], `${key}: a positive must render exactly one '+5'`);
+    const posSlide = execFunnel(withDeltas({ [key]: 5 }, ZERO_DELTAS));
+    assert.deepEqual(chipsOf(posSlide), ['+5'], `${key}: a positive must render exactly one '+5'`);
+    assert.deepEqual(funnelChipsOf(posSlide), [], `${key}: a queue key has no funnel stage to chip`);
   }
 });
 
 test('the FUNNEL STAGE chips obey the same rule — a second, separate render path', () => {
-  // Stages 2/3/4 (collected/dispatched/received) draw their own chip beneath the stage
-  // count; stages 1 and 5 are suppressed because total/completed already have KPI cards.
-  // It is a different call site from the card chip, so it needs its own case.
+  // Stages 2/3/4 (collected/dispatched/received) map to no KPI card, so the whole slide's
+  // chip list IS the funnel's answer for them. It is a different call site from the card
+  // chip, so it needs its own case.
   for (const key of ['collected', 'dispatched', 'received']) {
     assert.deepEqual(chipsOf(execFunnel(withDeltas({ [key]: -3 }, ZERO_DELTAS))), [],
       `funnel stage ${key}: a negative must render no chip`);
     assert.deepEqual(chipsOf(execFunnel(withDeltas({ [key]: 3 }, ZERO_DELTAS))), ['+3'],
       `funnel stage ${key}: a positive must render '+3'`);
   }
+});
+
+test('STAGE 1 AND STAGE 5 CHIP TOO — the round-5 ask, duplicating their cards on purpose', () => {
+  // THE USER ASKED FOR THESE TWO BARS BY NAME (إنشاء طلب and إصدار نتيجة). They are the
+  // journey's endpoints and they are also the 'total' and 'completed' KPI cards, which is
+  // why they were the two suppressed rows before; a funnel whose first and last bars are
+  // the only bare ones reads as broken rather than as de-duplicated. So the same '+N' is
+  // now printed twice on this slide BY DESIGN, and this case is what stops a future
+  // "obvious" tidy-up from deleting one of the pair again.
+  const f = MOCK_REPORT_MODEL.kpi.funnel;
+  const ENDPOINTS = [
+    ['total', 0, '1. إنشاء طلب', f.created],
+    ['completed', 4, '5. إصدار نتيجة', f.completed],
+  ];
+  for (const [key, stageIdx, stage, count] of ENDPOINTS) {
+    const slide = execFunnel(withDeltas({ [key]: 7 }, ZERO_DELTAS));
+    assert.deepEqual(chipsOf(slide), ['+7', '+7'], `${key}: card chip AND bar chip, in that order`);
+    const funnel = funnelChipsOf(slide);
+    assert.equal(funnel.length, 1, `${key}: exactly one of the pair belongs to the funnel`);
+    // …and it is on the RIGHT bar. The chip's box top is 0.015in below its own count's while
+    // the next row's is a whole 0.650in pitch away, so a 0.10 band names the row with no
+    // ambiguity at all — see the position case below for why the band and not the offset.
+    const counts = countElsOf(slide);
+    assert.ok(Math.abs(funnel[0].y - counts[stageIdx].y) <= 0.10,
+      `${key}: the chip must sit on stage ${stageIdx + 1}'s line (${stage}), not another row's`);
+    // The stage's own COUNT is untouched by gaining a chip — THE INVARIANT, restated at the
+    // one row where this round actually changed anything.
+    assert.equal(counts[stageIdx].text, String(count), `${key}: the stage count must not move`);
+    assert.equal(textsOf(slide).filter((t) => t === stage).length, 1, `${key}: one ${stage} label`);
+  }
+  // The negative rule reaches the two new rows as well — a suppressed stage that starts
+  // chipping is exactly where a resurrected '−N' branch would hide.
+  for (const key of ['total', 'completed']) {
+    assert.deepEqual(chipsOf(execFunnel(withDeltas({ [key]: -7 }, ZERO_DELTAS))), [],
+      `${key}: a negative must render neither the card chip nor the new bar chip`);
+  }
+});
+
+test('the funnel chip sits INLINE BESIDE its count, not stacked beneath it', () => {
+  // THE GEOMETRY IS THE FEATURE this round, and it is invisible to every other case in this
+  // file: moving the chip back under the count would leave all the text assertions green.
+  // 'collected' is used because it is the one stage key with no KPI card, so the slide
+  // carries exactly ONE chip and it is unambiguously the funnel's — the x is established
+  // here against the count column, and only then reused by funnelChipsOf elsewhere.
+  const slide = execFunnel(withDeltas({ collected: 3 }, ZERO_DELTAS));
+  const chips = chipElsOf(slide);
+  assert.equal(chips.length, 1, 'a card-less stage key must produce exactly one chip');
+  const [chip] = chips;
+  assert.equal(chip.x, FUNNEL_CHIP_X, 'the funnel chip moved out of the count column');
+  assert.equal(chip.size, FUNNEL_CHIP_SIZE, 'and stayed small against the 14pt count');
+
+  const count = countElsOf(slide)[1]; // stage 2 — سحب العينة
+  assert.equal(count.text, String(MOCK_REPORT_MODEL.kpi.funnel.collected));
+  // BESIDE: to the count's outward side, clear of the column it used to share.
+  assert.ok(chip.x >= count.x + count.w * 0.5,
+    `chip x ${chip.x} must clear the centre of the count box (${count.x}..${count.x + count.w})`);
+  // AND ON THE SAME LINE: the old position was rowY+0.40, a full line below, so any band
+  // tighter than the 0.65in row pitch separates the two layouts. 0.10 is deliberately loose
+  // — the pin is "same line", not a re-litigation of the measured 0.015in raise.
+  assert.ok(Math.abs(chip.y - count.y) <= 0.10,
+    `chip y ${chip.y} must share the count's line (${count.y}), not stack under it`);
 });
 
 // ---- the legend gate -------------------------------------------------------------

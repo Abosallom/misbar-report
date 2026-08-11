@@ -22,7 +22,7 @@
 //   m.reportOptions.kpiCards[key] toggles the 7 exec KPI cards (row geometry repacks)
 //                                 + the OPT-IN 'turnaround' block on the monthly slide
 //   m.overrides[key]              per-run manual NUMBER overrides (suppresses that delta chip)
-import { COLORS as C, GEOM } from '../theme.js?v=v2026-08-10.1';
+import { COLORS as C, GEOM } from '../theme.js?v=v2026-08-11.1';
 
 // OPT-IN kpiCards KEYS. reportOptions.kpiCards normally reads "on unless === false"
 // (see buildExec's cardDefs filter). The keys in this set INVERT that: they render only
@@ -617,8 +617,12 @@ function kpiCard({ x, w, v, vc, lab, sub, ac, delta, emph }) {
   return els;
 }
 
-// The KPI cards own these metrics' delta chips; the funnel must not duplicate them.
-const KPI_DELTA_KEYS = new Set(['total', 'awaitingDispatch', 'awaitingResults', 'completed', 'rejected', 'lateNoResult', 'shippedNotReceived']);
+// KPI_DELTA_KEYS LIVED HERE — the set of metrics whose chip the KPI cards "owned", used
+// to suppress the same chip on the funnel's stages 1 and 5 (total / completed). DELETED in
+// round 5 (user decision, 2026-08-11): every stage now chips and the duplication with the
+// cards is accepted on purpose — see the chip block above buildExecFunnel's rows.forEach
+// for the reasoning. It had exactly two consumers, both in that function (the anyChip
+// legend gate and the stageDelta expression), and no export, so nothing else can miss it.
 
 // KPI row geometry (canonical 7-card layout): cards between x 0.500 and 12.818
 // (span 12.318in), gap 0.140. cardW = (12.318 − (N−1)×0.140)/N, capped at the
@@ -741,13 +745,17 @@ function buildExecFunnel(m) {
   const barY = [3.297, 3.947, 4.597, 5.247, 5.932];
   const trackX = 3.92, trackW = 5.0, barH = 0.3;
 
-  // A green "+N" chip is shown this run when a visible KPI card OR an intermediate
-  // funnel stage has a positive, non-overridden delta. Drives the legend (Fix 3).
+  // A green "+N" chip is shown this run when a visible KPI card OR ANY funnel stage has a
+  // positive, non-overridden delta. Drives the legend (Fix 3).
   // "Positive" needs no test of its own here: fmtDelta is positive-only, so `!== undefined`
   // IS the positivity test, and the legend can never announce a window whose chips all
   // turned out to be hidden zeros/drops.
+  // ALL FIVE ROWS COUNT since round 5 (2026-08-11): the funnel arm used to skip the rows in
+  // KPI_DELTA_KEYS because those stages could not chip, and it must mirror the stageDelta
+  // expression below exactly — the legend explains the chips, so a row that can now draw
+  // one must be able to summon the caption that names its window.
   const anyChip = visible.some((c) => !isOv(c.dk) && fmtDelta(d[c.dk]) !== undefined)
-    || rows.some((r) => !KPI_DELTA_KEYS.has(r.key) && !isOv(r.ov) && fmtDelta(d[r.key]) !== undefined);
+    || rows.some((r) => !isOv(r.ov) && fmtDelta(d[r.key]) !== undefined);
 
   // Cancelled note — displayed count is override-aware. Geometry/size are the 20-07
   // reference deck's: (10.542, 2.55, 2.271, 0.32) at 11pt (its shape survives there with
@@ -777,35 +785,55 @@ function buildExecFunnel(m) {
   // THE BARS CARRY NO TEXT (user decision 2026-08-04). The stage count has always sat
   // outside the track in its own column (x 8.629, w 1.0); the DELTA chip used to be drawn
   // INSIDE the bar at x 7.75, i.e. on top of the right-anchored coloured fill — deltaGreen
-  // (#2E7D32) on navy/blue/amber is unreadable, and only stages 2/3/4 ever render a chip
-  // (KPI_DELTA_KEYS suppresses 1 and 5), so the offence was intermittent as well.
-  // Both numbers now STACK in the count column: the count occupies the upper 0.30in of the
-  // row (valign bottom, so it keeps sitting on the bar's optical centre) and the chip goes
-  // directly beneath it at rowY+0.40, 9pt.
-  // THE 0.40 IS MEASURED, NOT CHOSEN, and it SURVIVES the 2026-08-10 resize UNCHANGED.
-  // A row's pitch is 0.65in (0.686 on the last step) and the two LINE BOXES nearly fill it:
-  // self-hosted Cairo gives the 14pt count a 0.365in line box, and the chip's scales with
-  // its size at ≈0.0258in/pt (the measured 9.5pt box was 0.245in), so the 9pt chip's is
-  // ≈0.235in. That is 0.600in of the 0.650in pitch — 0.050in of total slack to divide
-  // between the two gaps, up from the 0.040in the 9.5pt chip left.
-  // With valign bottom the count's line box ends 0.068in below its box (flex-end +
-  // half-leading), so it runs rowY+0.003 → rowY+0.368. The chip is valign middle in a
-  // 0.22in box at rowY+0.40, so its 0.235in line box centres on rowY+0.51 and runs
-  // rowY+0.393 → rowY+0.628 (it now starts ≈0.008in above its box, where the taller
-  // 9.5pt box started 0.015in above). The NEXT row's count starts at rowY+0.653.
-  // BOTH GAPS GREW AND BOTH STAY POSITIVE: count→chip 0.0195 → 0.025in, chip→next-count
-  // 0.0225 → 0.025in; the last step's 0.686 pitch makes its lower gap wider still. The
-  // 0.40 offset is therefore kept as-is — shrinking the chip buys clearance, it does not
-  // need to be spent on repositioning. A browser Range probe over the whole slide reported
-  // zero overlapping pairs at 9.5pt (the old 0.33 offset reported three, one per chip), and
-  // every gap here is strictly larger than the ones it passed with. Glyph ink is a good deal
-  // smaller than these line boxes, so the visual gap is wider than the numbers suggest.
-  // WHY 9 AND NOT 9.5: the user's round-4 rule is that a chip reads at 55-65% of the number
-  // it annotates. 9/14 = 64.3% (9.5 was 67.9%, over the bar); the KPI chip sits at 58.8%.
-  // The column's x-range (8.629→9.629) formally overlaps the track's right edge (…→8.92),
-  // but both strings are CENTRE-aligned in the 1.0in box, so their ink starts at ≈8.97 —
-  // clear of the fill, as the count already was before this change (probe: zero text ink
-  // anywhere inside the track rectangle).
+  // (#2E7D32) on navy/blue/amber is unreadable, so it moved out to the count column.
+  // THE STACK IS DEAD (round 5, 2026-08-11, from the user's own picture). From 2026-08-04
+  // to -08-10 the chip sat BENEATH the count at rowY+0.40, centred in the same 1.0in
+  // column, and a long measurement of the row pitch (0.65in) against the two line boxes
+  // justified that offset. None of that arithmetic applies any more: the picture reads
+  // bar → count at the bar's right end → a small '+N' BESIDE the count, slightly raised,
+  // like a superscript. The chip is therefore INLINE, and the vertical stacking budget is
+  // simply gone — the row pitch no longer has to carry two line boxes.
+  // THE COUNT DID NOT MOVE. It is still text(8.629, rowY, 1.0, 0.30, …, 14, centre, valign
+  // bottom); everything below derives the chip's box FROM it, so the delivered number keeps
+  // the exact position and weight it has had since the reference deck.
+  // EVERY NUMBER BELOW IS A BROWSER Range INK MEASUREMENT of the rendered slide at 96dpi,
+  // not an estimate — same probe method the stacked layout was tuned with.
+  // X — 9.42, LEFT-aligned in a 0.5in box. The count is CENTRE-aligned in 8.629→9.629
+  // (centre 9.129), so its ink is symmetric about 9.129: a 3-digit 14pt Cairo number
+  // measures 8.967→9.291, and a 4-digit one with its thousands separator reaches ≈9.35.
+  // A left-aligned chip at 9.42 therefore starts 0.129in clear of a 3-digit count and
+  // still ≈0.07in clear of a 4-digit one — the gap narrows as the count grows, which is
+  // the correct behaviour for an annotation that must stay attached to it. '+47' measures
+  // 9.42→9.628, so 0.5in of box holds '+9999' at 9pt bold with room to spare and the chip
+  // can never wrap or clip.
+  // Y — rowY+0.015, valign middle in a 0.20in box: the line box (≈0.235in at 9pt, from the
+  // measured ≈0.0258in/pt) centres on rowY+0.115, and the chip's ink measures rowY−0.006 →
+  // rowY+0.229. The count's own ink measures rowY+0.003 → rowY+0.367 (valign bottom ends
+  // its line box 0.068in below the box). The chip's ink centre is thus rowY+0.112 against
+  // the count's rowY+0.185 — 0.073in HIGHER, and the chip ends 0.138in above the count's
+  // baseline ink. That is the raised, superscript feel of the picture, achieved by sharing
+  // the row's own vertical band rather than by any baseline shift (neither renderer exposes
+  // one). Nothing is pushed into the next row: the chip ends 0.071in inside the 0.30in
+  // count box, so the 0.65in row pitch is untouched and the old stacking budget is moot.
+  // SIZE 9 unchanged: the user's round-4 rule is that a chip reads at 55-65% of the number
+  // it annotates. 9/14 = 64.3%; the KPI chip sits at 58.8%.
+  // THE FORMAL OVERLAP IS EXPECTED AND HARMLESS. The chip's box (9.42→9.92) lies inside the
+  // stage-label box (9.05→11.90), but that label is RIGHT-aligned RTL, so its ink hugs
+  // 11.90 and stops at 10.743 on the longest of the five ('4. إستلام العينة', 1.157in at
+  // 12pt) — 0.82in of clear air from the chip's box edge, 1.1in from its ink. This is the
+  // same precedent the column already relies on twice over: the count's box
+  // (8.629→9.629) formally overlaps BOTH the track's right edge (…→8.92) and that same
+  // label box. The probe over the whole slide reports the chip in ZERO overlapping ink
+  // pairs (the seven it does report are the KPI cards' own value/label pairs, which
+  // predate this change and are untouched by it). Boxes here are generous; ink is what
+  // has to stay apart.
+  // ALL FIVE STAGES CHIP NOW. The 2026-08-04 de-duplication (KPI_DELTA_KEYS: stages 1 and 5
+  // stayed blank because إنشاء طلب / إصدار نتيجة map to the 'total' and 'completed' KPI
+  // cards, which chip already) is OVERRIDDEN by the user's round-5 request for those two
+  // bars specifically. The cards keep their chips: showing the same '+N' twice on one slide
+  // is now an accepted cost of a funnel that reads consistently top to bottom, rather than
+  // one with two mysteriously bare rows. Only the override rule survives — a hand-typed
+  // stage value still suppresses its chip (see stageDelta).
   rows.forEach((r, i) => {
     const fillW = Math.round((r.val / (maxV || 1)) * trackW * 1000) / 1000;
     els.push(
@@ -816,15 +844,25 @@ function buildExecFunnel(m) {
       rect(trackX, barY[i], trackW, barH, C.bgLighter, { radius: 0.03 }),
       rect(trackX + trackW - fillW, barY[i], fillW, barH, r.color, { radius: 0.03 }),
     );
-    // Stage delta chip — de-duplicated: endpoint metrics (total/completed) are shown
-    // on their KPI cards, so the funnel only surfaces intermediate flow deltas; and an
-    // overridden stage value suppresses its chip. Positive-only, like every other chip
-    // (fmtDelta): stages 2/3/4 count in-window flow EVENTS, so the only ways to reach
-    // here with a non-positive number are a quiet window or backdated rows — neither is
-    // something to print '−N' about under a cumulative stage count.
-    const stageDelta = (KPI_DELTA_KEYS.has(r.key) || isOv(r.ov)) ? undefined : fmtDelta(d[r.key]);
+    // Stage delta chip — EVERY stage that has one (see the ALL FIVE STAGES note above);
+    // the only remaining suppression is the override, because a hand-typed stage value is
+    // not the result of the window's activity and no count of that activity belongs beside
+    // it. Positive-only, like every other chip (fmtDelta), and that rule got SAFER when the
+    // endpoints joined, not riskier: all five stage keys (total · collected · dispatched ·
+    // received · completed) are asof.js EVENT keys — counts of dated milestones — and NONE
+    // is one of the four QUEUE_KEYS whose surviving-entrants arithmetic was the reason
+    // negatives ever came up. So the only ways to reach here with a non-positive number are
+    // a quiet window or backdated rows, neither of which is something to print '−N' about
+    // beside a cumulative stage count.
+    // EMITTED AFTER THE desc/track/fill PUSHES, DELIBERATELY. test/compliance-completed.
+    // test.mjs walks the slide's text elements in order and asserts execTexts[iStage + 1]
+    // is the stage's count, i.e. stage label and count must stay CONSECUTIVE text elements.
+    // The desc already follows the count, so appending the chip behind it keeps that pair
+    // intact for every row — putting the chip between count and desc would too, but only
+    // by accident, and this ordering also matches the loop's paint order (text over rects).
+    const stageDelta = isOv(r.ov) ? undefined : fmtDelta(d[r.key]);
     if (stageDelta) {
-      els.push(text(8.629, rowY[i] + 0.40, 1.0, 0.22, stageDelta, 9, { bold: true, color: C.deltaGreen, align: 'center', valign: 'middle' }));
+      els.push(text(9.42, rowY[i] + 0.015, 0.5, 0.20, stageDelta, 9, { bold: true, color: C.deltaGreen, align: 'left', valign: 'middle' }));
     }
   });
   // -- OWNERSHIP BRACKETS — who owns which half of the journey (user picture, round 4).
@@ -910,12 +948,28 @@ function buildMonthly(m) {
   const iTot = mo.reduce((s, x) => s + x.incomplete, 0);
   const cPct = oTot > 0 ? Math.round((rTot / oTot) * 1000) / 10 : null; // round1(results/orders*100)
   const cTot = pctMonthly(cPct);
+  // COMPLETION-PERCENTAGE COLOUR (user round-5 rule, 2026-08-11): the نسبة الاكتمال row is
+  // the one line on this slide that carries a target rather than a count, so it is the one
+  // line that can be judged at a glance. Below 100 prints RED (C.red #DC2626) — the month
+  // still has orders without a terminal outcome; EXACTLY 100 prints GREEN (C.greenBright
+  // #00B050) — everything raised that month has been resulted or rejected. There is no
+  // amber middle band and no threshold to tune: the user asked for done vs not-done.
+  // A NULL month has no denominator, prints '-' via pctMonthly, and stays in the table's
+  // default body colour — colouring "no data" red would assert a shortfall nobody measured.
+  // pctColor returns undefined for that case so the spread below adds no `color` key at all.
+  // NOTE the STRING is untouched in every branch: pctMonthly remains the single formatter,
+  // so this change moves no digit on the slide.
+  const pctColor = (p) => (p == null ? undefined : p === 100 ? C.greenBright : C.red);
+  const pctCell = (p) => (p == null ? pctMonthly(p) : { text: pctMonthly(p), color: pctColor(p), bold: true });
   // logical (deck) order: [label, months…, total]; reverse -> visual L->R
   const header = rev(['المؤشر', ...monthLabels, { text: 'الإجمالي', fill: C.navyDark }]);
   const rowOrders = rev([{ text: L('monthlyRowOrders'), align: 'right' }, ...mo.map((x) => String(x.orders)), { text: String(oTot), fill: bg, bold: true }]);
   const rowResults = rev([{ text: L('monthlyRowResults'), align: 'right' }, ...mo.map((x) => String(x.results)), { text: String(rTot), fill: bg, bold: true }]);
   const rowIncomplete = rev([{ text: L('monthlyRowIncomplete'), align: 'right' }, ...mo.map((x) => String(x.incomplete)), { text: String(iTot), fill: bg, bold: true }]);
-  const rowCompletion = rev([{ text: L('monthlyRowCompletion'), align: 'right' }, ...mo.map((x) => pctMonthly(x.completionPct)), { text: cTot, fill: bg, bold: true }]);
+  // The الإجمالي cell keeps its existing { fill, bold } and merely GAINS the same colour
+  // rule, spread conditionally so a null total leaves the key off entirely — the same
+  // pattern the compliance totals row uses for its green completed cell.
+  const rowCompletion = rev([{ text: L('monthlyRowCompletion'), align: 'right' }, ...mo.map((x) => pctCell(x.completionPct)), { text: cTot, fill: bg, bold: true, ...(pctColor(cPct) ? { color: pctColor(cPct) } : {}) }]);
 
   // Column widths: label + N month cols + total over the fixed table width. The
   // canonical 7-month deck keeps its original per-column widths verbatim
