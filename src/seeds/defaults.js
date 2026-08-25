@@ -52,12 +52,23 @@ export const REPORT_OPTIONS_SEED = {
     rejected: true,
     lateNoResult: true,
     shippedNotReceived: true,
-    // OPT-IN (build-spec OPT_IN_CARDS): the monthly slide's turnaround LINE CHART +
-    // navy overall-average card. FALSE by default so the delivered monthly slide is the
-    // simple 20-07 reference shape (table + one bar chart). Unlike the seven exec-card
-    // keys above, this one renders only when explicitly true, so a missing key is OFF —
-    // existing installs that never held it therefore need no migration.
-    turnaround: false,
+    // ON BY DEFAULT since round 6 (2026-08-25): the monthly slide's turnaround LINE CHART
+    // + navy overall-average card, which is the shape of the user's own historic deck (the
+    // reference image he supplied). It shipped OPT-IN (false, 2026-07-23) and stays a
+    // normal checkbox in Settings → خيارات التقرير — this seed only fixes the FIRST-RUN
+    // state, it takes nothing away from the user. build-spec gates the whole block on this
+    // one flag, so an EXPLICIT true is what puts it on the delivered deck, and explicit is
+    // what both the seed and the migration below write (it therefore satisfies the gate
+    // whether or not build-spec still requires an explicit true — OPT_IN_CARDS).
+    //
+    // A SEED CHANGE ALONE DOES NOT REACH EXISTING INSTALLS: every saveSettings has
+    // persisted turnaround:false since the key shipped, and store.backfillReportOptions
+    // fills only a MISSING key — it never flips a stored boolean, by design. Flipping the
+    // stored value is the job of the one-time store.js migrateV8toV9 (schema v9), which
+    // forces it true ONCE; the checkbox then sticks, including turning the block back off.
+    // Third repeat of a house pattern, same shape and same reason each time: v4→v5
+    // (slides.definitions), v6→v7 (deltaMode), v7→v8 (labels.coverTitle).
+    turnaround: true,
   },
   labels: {},
   // Week-to-date is the DEFAULT comparison window (2026-08-04 user request: the chips

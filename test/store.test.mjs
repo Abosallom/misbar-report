@@ -531,10 +531,11 @@ test('first run seeds reportOptions from the seed (deep-copied)', () => {
   assert.notEqual(s.reportOptions.kpiCards, REPORT_OPTIONS_SEED.kpiCards);
   assert.equal(s.reportOptions.excludeNoTat, false);
   assert.equal(s.reportOptions.slides.execFunnel, true);
-  // 7 exec KPI cards + the opt-in 'turnaround' key (monthly slide line chart +
-  // overall-average card, default false — build-spec OPT_IN_CARDS).
+  // 7 exec KPI cards + the 'turnaround' key (monthly slide line chart + overall-average
+  // card). ON since v9 (round 6): the block is part of the delivered deck, and the seed
+  // writes it EXPLICITLY so build-spec's gate sees a true rather than a missing key.
   assert.equal(Object.keys(s.reportOptions.kpiCards).length, 8);
-  assert.equal(s.reportOptions.kpiCards.turnaround, false);
+  assert.equal(s.reportOptions.kpiCards.turnaround, true);
   assert.deepEqual(s.reportOptions.labels, {});
 });
 
@@ -1112,8 +1113,8 @@ const LOG_B = { openOn: '2026-06-20', closedOn: '2026-07-02' };
 test('first run seeds an EMPTY taskLog (the pre-ship exclusion mechanism)', () => {
   fresh();
   const s = store.loadSettings();
-  assert.equal(s.schemaVersion, 8, 'schema v8');
-  assert.equal(store.SCHEMA_VERSION, 8);
+  assert.equal(s.schemaVersion, 9, 'schema v9');
+  assert.equal(store.SCHEMA_VERSION, 9);
   assert.ok(s.taskLog && typeof s.taskLog === 'object' && !Array.isArray(s.taskLog));
   assert.deepEqual(s.taskLog, {}, 'empty on first run — no closed task has an open appearance yet');
 });
@@ -1133,7 +1134,7 @@ test('v5 stored doc migrates to the current schema and gains an empty taskLog, o
     }),
   );
   const s = store.loadSettings();
-  assert.equal(s.schemaVersion, 8, 'migrated');
+  assert.equal(s.schemaVersion, 9, 'migrated');
   assert.deepEqual(s.taskLog, {}, 'backfilled empty');
   assert.equal(s.tatLookup.CBC, 2, 'tatLookup preserved');
   assert.deepEqual(s.displayNames, { A: 'a' });
@@ -1144,7 +1145,7 @@ test('v5 stored doc migrates to the current schema and gains an empty taskLog, o
   // The chain passes through v6→v7, which forces the new week-to-date default once.
   assert.equal(s.reportOptions.deltaMode, 'week', 'v6→v7 forces the new default');
   // Persisted, not just returned.
-  assert.equal(JSON.parse(mock.getItem(SETTINGS_KEY)).schemaVersion, 8);
+  assert.equal(JSON.parse(mock.getItem(SETTINGS_KEY)).schemaVersion, 9);
 });
 
 test('v1..v5 stored docs chain all the way to the current schema and land on the week default', () => {
@@ -1156,7 +1157,7 @@ test('v1..v5 stored docs chain all the way to the current schema and land on the
       snapshot: { asOf: '2026-07-01', prevCompleted: 11 },
     }));
     const s = store.loadSettings();
-    assert.equal(s.schemaVersion, 8, `v${v} → v8`);
+    assert.equal(s.schemaVersion, 9, `v${v} → v9`);
     assert.deepEqual(s.taskLog, {}, `v${v} chain backfills taskLog`);
     assert.equal(s.tatLookup.CBC, 2, `v${v} keeps user data`);
     assert.equal(s.reportOptions.deltaMode, 'week', `v${v} chain lands on the week default`);
@@ -1186,7 +1187,7 @@ test("v6 → v7 forces a stored 'daily' to 'week' exactly once, then a manual 'd
     taskLog: { 'int|أ': { openOn: '2026-07-01', closedOn: null } },
   }));
   const s = store.loadSettings();
-  assert.equal(s.schemaVersion, 8, 'stamped with the current schema (v6→v7→v8)');
+  assert.equal(s.schemaVersion, 9, 'stamped with the current schema (v6→v7→v8→v9)');
   assert.equal(s.reportOptions.deltaMode, 'week', 'the new default reached the existing install');
   assert.equal(s.tatLookup.CBC, 2, 'user data untouched');
   assert.deepEqual(s.taskLog, { 'int|أ': { openOn: '2026-07-01', closedOn: null } }, 'taskLog untouched');
@@ -1207,7 +1208,7 @@ test("v6 → v7 also migrates the retired weekly values to 'week'", () => {
       reportOptions: { excludeNoTat: false, slides: {}, kpiCards: {}, labels: {}, deltaMode: legacy },
     }));
     const s = store.loadSettings();
-    assert.equal(s.schemaVersion, 8);
+    assert.equal(s.schemaVersion, 9);
     assert.equal(s.reportOptions.deltaMode, 'week', `${legacy} → week`);
   }
 });
@@ -1320,8 +1321,8 @@ test('export → import → export is identity for the taskLog', async () => {
 test('importSettings accepts v4 and v5 backups (version-gate fix)', () => {
   // PRE-EXISTING BUG, fixed with this feature: validateImport gated on {1,2,3,current},
   // so every schema bump silently orphaned the previous version's backups — v4 was
-  // already unimportable and v5 would have joined it. IMPORTABLE_VERSIONS = {1..7, current}.
-  for (const v of [1, 2, 3, 4, 5, 6, 7, 8]) {
+  // already unimportable and v5 would have joined it. IMPORTABLE_VERSIONS = {1..8, current}.
+  for (const v of [1, 2, 3, 4, 5, 6, 7, 8, 9]) {
     fresh();
     store.loadSettings();
     assert.doesNotThrow(
@@ -1329,7 +1330,7 @@ test('importSettings accepts v4 and v5 backups (version-gate fix)', () => {
       `v${v} backup must import`,
     );
     assert.equal(store.loadSettings().displayNames[`v${v}`], 'x', `v${v} content landed`);
-    assert.equal(store.loadSettings().schemaVersion, 8, 'and the doc is stamped current');
+    assert.equal(store.loadSettings().schemaVersion, 9, 'and the doc is stamped current');
   }
   assert.throws(
     () => store.importSettings(JSON.stringify({ schemaVersion: 0 })),
@@ -1397,7 +1398,7 @@ test('v7 → v8 deletes a coverTitle override that is only the old default, exac
     taskLog: { 'int|أ': { openOn: '2026-07-01', closedOn: null } },
   }));
   const s = store.loadSettings();
-  assert.equal(s.schemaVersion, 8, 'stamped v8');
+  assert.equal(s.schemaVersion, 9, 'stamped current (v7→v8→v9)');
   // DELETED, not overwritten with the new title — the key must be absent so the cover
   // falls through to DEFAULT_LABELS today AND after the next rename.
   assert.ok(!('coverTitle' in s.reportOptions.labels), 'the stale override is gone, not rewritten');
@@ -1407,7 +1408,7 @@ test('v7 → v8 deletes a coverTitle override that is only the old default, exac
   assert.equal(s.reportOptions.deltaMode, 'week', 'the v7 deltaMode choice untouched');
   // Persisted with the bump, so this runs ONCE.
   const stored = JSON.parse(mock.getItem(SETTINGS_KEY));
-  assert.equal(stored.schemaVersion, 8, 'persisted');
+  assert.equal(stored.schemaVersion, 9, 'persisted');
   assert.ok(!('coverTitle' in stored.reportOptions.labels), 'persisted without the override');
 
   // Typing the old title back in afterwards is a real choice and must SURVIVE every
@@ -1438,7 +1439,7 @@ test('v7 → v8 leaves any coverTitle that is not byte-for-byte the old default'
       },
     }));
     const s = store.loadSettings();
-    assert.equal(s.schemaVersion, 8);
+    assert.equal(s.schemaVersion, 9);
     assert.equal(s.reportOptions.labels.coverTitle, custom, `${JSON.stringify(custom)} survives`);
     assert.equal(
       JSON.parse(mock.getItem(SETTINGS_KEY)).reportOptions.labels.coverTitle, custom, 'and is persisted',
@@ -1463,7 +1464,7 @@ test('v7 → v8 tolerates an absent/malformed reportOptions or labels', () => {
     mock.setItem(SETTINGS_KEY, JSON.stringify(doc));
 
     const s = store.loadSettings();
-    assert.equal(s.schemaVersion, 8, `${name} → v8`);
+    assert.equal(s.schemaVersion, 9, `${name} → v9`);
     assert.ok(s.reportOptions && typeof s.reportOptions.labels === 'object' && s.reportOptions.labels !== null,
       `${name}: labels container backfilled`);
     // The migration only ever REMOVES — it never invents a title.
@@ -1474,7 +1475,7 @@ test('v7 → v8 tolerates an absent/malformed reportOptions or labels', () => {
   assert.equal(store.loadSettings().reportOptions.labels.kpiCompleted, 'فحوصات منجزة');
 });
 
-test('every migration entry point (v1..v7) lands on schemaVersion 8 and clears the stale title', () => {
+test('every migration entry point (v1..v7) lands on the current schema and clears the stale title', () => {
   // The whole chain must reach migrateV7toV8 — a wrapper that forgets the new step
   // would leave exactly the oldest installs on the daily cover title.
   for (const v of [1, 2, 3, 4, 5, 6, 7]) {
@@ -1486,7 +1487,7 @@ test('every migration entry point (v1..v7) lands on schemaVersion 8 and clears t
       reportOptions: { labels: { coverTitle: V7_COVER_TITLE } },
     }));
     const s = store.loadSettings();
-    assert.equal(s.schemaVersion, 8, `v${v} → v8`);
+    assert.equal(s.schemaVersion, 9, `v${v} → v9`);
     assert.ok(!('coverTitle' in s.reportOptions.labels), `v${v} chain reaches the v7→v8 step`);
     // Every earlier step still runs: v1's snapshot widening, the v4→v5 definitions
     // reset, the v5→v6 taskLog backfill and the v6→v7 week default.
@@ -1495,7 +1496,7 @@ test('every migration entry point (v1..v7) lands on schemaVersion 8 and clears t
     assert.equal(s.reportOptions.slides.definitions, false, `v${v} definitions still reset`);
     assert.deepEqual(s.taskLog, {}, `v${v} still backfills taskLog`);
     assert.equal(s.reportOptions.deltaMode, 'week', `v${v} still lands on the week default`);
-    assert.equal(JSON.parse(mock.getItem(SETTINGS_KEY)).schemaVersion, 8, `v${v} persisted`);
+    assert.equal(JSON.parse(mock.getItem(SETTINGS_KEY)).schemaVersion, 9, `v${v} persisted`);
   }
 });
 
@@ -1528,7 +1529,7 @@ test('importing a pre-rename backup does not resurrect the retired daily cover t
   assert.equal(s.reportOptions.labels.kpiCompleted, 'فحوصات منجزة', "the device's other override survives");
   assert.equal(s.reportOptions.excludeNoTat, true, 'the rest of the backup imported normally');
   assert.equal(s.tatLookup.CBC, 9, 'user data imported normally');
-  assert.equal(s.schemaVersion, 8, 'stamped current');
+  assert.equal(s.schemaVersion, 9, 'stamped current');
   assert.ok(
     !('coverTitle' in JSON.parse(mock.getItem(SETTINGS_KEY)).reportOptions.labels),
     'and persisted without it — nothing would clear it on a later load',
@@ -1577,4 +1578,202 @@ test('importing a pre-rename backup does not resurrect the retired daily cover t
       `${JSON.stringify(custom)} imports from a v6 backup`,
     );
   }
+});
+
+/* ------------------------------------------------------------------ *
+ * v8 → v9: the TURNAROUND block joins the delivered monthly slide.
+ *
+ * The navy overall-average card + الفعلي/المتوقع line chart shipped OPT-IN with
+ * kpiCards.turnaround seeded FALSE, so every install that has ever run the app
+ * persisted that false — "a default nobody chose". Round 6 makes the block part
+ * of the delivered deck (the user's own historic layout), and the ordinary
+ * backfill only fills ABSENT keys, so the new seed alone would reach nobody who
+ * already uses the app. migrateV8toV9 therefore FORCES it true ONCE. Third
+ * repeat of the pattern: migrateV4toV5 (definitions), migrateV6toV7 (deltaMode),
+ * migrateV7toV8 (coverTitle).
+ *
+ * REVEAL ONLY: the engine's turnaround numbers are untouched by this schema
+ * bump — the block was always computed, it was just not drawn.
+ * ------------------------------------------------------------------ */
+
+test('v8 → v9 forces a stored turnaround:false to true, exactly once, then a manual OFF sticks', () => {
+  const mock = fresh();
+  mock.setItem(SETTINGS_KEY, JSON.stringify({
+    schemaVersion: 8,
+    tatLookup: { 'CBC': 2 },
+    reportOptions: {
+      excludeNoTat: true, slides: { definitions: true }, deltaMode: 'daily', labels: { kpiCompleted: 'فحوصات منجزة' },
+      kpiCards: { total: false, completed: true, turnaround: false },
+    },
+    taskLog: { 'int|أ': { openOn: '2026-07-01', closedOn: null } },
+  }));
+  const s = store.loadSettings();
+  assert.equal(s.schemaVersion, 9, 'stamped v9');
+  assert.equal(s.reportOptions.kpiCards.turnaround, true, 'the new default reached the existing install');
+  // Everything else the user actually chose is untouched — this migration writes ONE key.
+  assert.equal(s.reportOptions.kpiCards.total, false, 'other card choices untouched');
+  assert.equal(s.reportOptions.kpiCards.completed, true);
+  assert.equal(s.reportOptions.excludeNoTat, true, 'excludeNoTat untouched');
+  assert.equal(s.reportOptions.slides.definitions, true, 'a v8 doc is past v4→v5: the slide choice is a real one');
+  assert.equal(s.reportOptions.deltaMode, 'daily', 'a v8 doc is past v6→v7: the daily choice is a real one');
+  assert.equal(s.reportOptions.labels.kpiCompleted, 'فحوصات منجزة', 'label overrides untouched');
+  assert.equal(s.tatLookup.CBC, 2, 'user data untouched');
+  assert.deepEqual(s.taskLog, { 'int|أ': { openOn: '2026-07-01', closedOn: null } }, 'taskLog untouched');
+  // Persisted with the bump, which is what makes the force run ONCE.
+  const stored = JSON.parse(mock.getItem(SETTINGS_KEY));
+  assert.equal(stored.schemaVersion, 9, 'persisted');
+  assert.equal(stored.reportOptions.kpiCards.turnaround, true, 'persisted turned on');
+
+  // Unticking the box afterwards is a real choice and must SURVIVE every later load: the
+  // stored doc is now at 9, so migrate() takes the same-version branch (softening +
+  // backfill only, which never flips a stored boolean) and never re-forces.
+  s.reportOptions.kpiCards.turnaround = false;
+  store.saveSettings(s);
+  assert.equal(store.loadSettings().reportOptions.kpiCards.turnaround, false, 'the manual OFF sticks');
+  assert.equal(store.loadSettings().reportOptions.kpiCards.turnaround, false, 'and stays off on a second load');
+  assert.equal(
+    JSON.parse(mock.getItem(SETTINGS_KEY)).reportOptions.kpiCards.turnaround, false,
+    'and is persisted off — no load rewrites it',
+  );
+});
+
+test('v8 → v9 tolerates an absent/malformed reportOptions or kpiCards', () => {
+  // migrateSnapshotShape guarantees both containers before the write, but a doc that
+  // reached storage hand-edited must not make the WRITE the thing that throws.
+  const CASES = [
+    ['no reportOptions at all', undefined],
+    ['reportOptions without kpiCards', { excludeNoTat: false, slides: {}, labels: {}, deltaMode: 'week' }],
+    ['kpiCards null', { kpiCards: null }],
+    ['kpiCards not an object', { kpiCards: 'nope' }],
+    ['kpiCards without the turnaround key', { kpiCards: { total: false } }],
+  ];
+  for (const [name, ro] of CASES) {
+    const mock = fresh();
+    const doc = { schemaVersion: 8, tatLookup: { X: 1 } };
+    if (ro !== undefined) doc.reportOptions = ro;
+    mock.setItem(SETTINGS_KEY, JSON.stringify(doc));
+
+    const s = store.loadSettings();
+    assert.equal(s.schemaVersion, 9, `${name} → v9`);
+    assert.equal(s.reportOptions.kpiCards.turnaround, true, `${name}: the block is on`);
+    assert.equal(s.tatLookup.X, 1, `${name}: user data untouched`);
+    assert.equal(
+      JSON.parse(mock.getItem(SETTINGS_KEY)).reportOptions.kpiCards.turnaround, true, `${name}: persisted`,
+    );
+  }
+  // The one card choice present in the last case is not collateral damage.
+  assert.equal(store.loadSettings().reportOptions.kpiCards.total, false);
+});
+
+test('every migration entry point (v1..v8) lands on schemaVersion 9 with the turnaround block ON', () => {
+  // The whole chain must reach migrateV8toV9 — a wrapper that forgets the new step would
+  // leave exactly the oldest installs without the block the user asked to see.
+  for (const v of [1, 2, 3, 4, 5, 6, 7, 8]) {
+    const mock = fresh();
+    mock.setItem(SETTINGS_KEY, JSON.stringify({
+      schemaVersion: v,
+      tatLookup: { 'CBC': 2 },
+      snapshot: { asOf: '2026-07-01', prevCompleted: 11 },
+      reportOptions: { kpiCards: { turnaround: false }, labels: { coverTitle: V7_COVER_TITLE } },
+    }));
+    const s = store.loadSettings();
+    assert.equal(s.schemaVersion, 9, `v${v} → v9`);
+    assert.equal(s.reportOptions.kpiCards.turnaround, true, `v${v} chain reaches the v8→v9 step`);
+    // Every earlier step still runs: v1's snapshot widening, the v4→v5 definitions reset,
+    // the v5→v6 taskLog backfill, the v6→v7 week default and the v7→v8 title clear.
+    assert.equal(s.tatLookup.CBC, 2, `v${v} keeps user data`);
+    assert.equal(s.snapshot.numbers.completed, 11, `v${v} snapshot widened`);
+    assert.deepEqual(s.taskLog, {}, `v${v} still backfills taskLog`);
+    assert.equal(JSON.parse(mock.getItem(SETTINGS_KEY)).schemaVersion, 9, `v${v} persisted`);
+    // v8 is PAST the three older forces, so they must NOT re-run on it; v1-v7 still get them.
+    if (v <= 7) {
+      assert.equal(s.reportOptions.slides.definitions, false, `v${v} definitions still reset`);
+      assert.equal(s.reportOptions.deltaMode, 'week', `v${v} still lands on the week default`);
+      assert.ok(!('coverTitle' in s.reportOptions.labels), `v${v} still clears the stale title`);
+    } else {
+      assert.equal(s.reportOptions.labels.coverTitle, V7_COVER_TITLE, 'a v8 doc keeps its own title');
+    }
+  }
+});
+
+test('importing a pre-v9 backup does not hide the turnaround block again', () => {
+  // The IMPORT twin of the load-path migration above, and the exact sibling of the
+  // deltaMode and coverTitle import fixups: migrate() only runs on a doc read from
+  // STORAGE, so a v1-v8 backup carrying the retired default would merge import-wins and
+  // get stamped SCHEMA_VERSION — the block would then stay hidden on every future load,
+  // with nothing left to reveal it. Cutoff is <= 8 here (v8 was the last opt-in schema),
+  // one higher than the cover-rename fixup's <= 7.
+  const mock = fresh();
+  // Device is a MIGRATED v8 install: the block is on, one other card deliberately off.
+  mock.setItem(SETTINGS_KEY, JSON.stringify({
+    schemaVersion: 8,
+    reportOptions: {
+      excludeNoTat: false, slides: {}, labels: {}, deltaMode: 'week',
+      kpiCards: { turnaround: false, total: false },
+    },
+  }));
+  assert.equal(store.loadSettings().reportOptions.kpiCards.turnaround, true, 'precondition: migrated');
+
+  store.importSettings(JSON.stringify({
+    schemaVersion: 8,
+    tatLookup: { 'CBC': 9 },
+    reportOptions: { excludeNoTat: true, slides: {}, labels: {}, kpiCards: { turnaround: false, completed: false } },
+  }));
+  const s = store.loadSettings();
+  assert.equal(s.reportOptions.kpiCards.turnaround, true, 'retired default dropped, migrated state stands');
+  assert.equal(s.reportOptions.kpiCards.completed, false, "the backup's OTHER card choices import normally");
+  assert.equal(s.reportOptions.kpiCards.total, false, "the device's own card choice survives");
+  assert.equal(s.reportOptions.excludeNoTat, true, 'the rest of the backup imported normally');
+  assert.equal(s.tatLookup.CBC, 9, 'user data imported normally');
+  assert.equal(s.schemaVersion, 9, 'stamped current');
+  assert.equal(
+    JSON.parse(mock.getItem(SETTINGS_KEY)).reportOptions.kpiCards.turnaround, true,
+    'and persisted ON — nothing would turn it on again on a later load',
+  );
+
+  // Every pre-v9 version, not just the newest: the oldest backups are the likeliest to
+  // carry the retired default.
+  for (const v of [1, 2, 3, 4, 5, 6, 7, 8]) {
+    fresh();
+    store.loadSettings();
+    store.importSettings(JSON.stringify({
+      schemaVersion: v,
+      reportOptions: { slides: {}, labels: {}, kpiCards: { turnaround: false } },
+    }));
+    assert.equal(
+      store.loadSettings().reportOptions.kpiCards.turnaround, true,
+      `v${v} backup does not hide the block`,
+    );
+  }
+
+  // A pre-v9 TRUE was a deliberate opt-in: it is not the retired default, so the fixup
+  // leaves it alone (and it agrees with the migrated state anyway).
+  fresh();
+  store.loadSettings();
+  store.importSettings(JSON.stringify({
+    schemaVersion: 7,
+    reportOptions: { slides: {}, labels: {}, kpiCards: { turnaround: true } },
+  }));
+  assert.equal(store.loadSettings().reportOptions.kpiCards.turnaround, true, 'a pre-v9 opt-in imports untouched');
+
+  // An OFF chosen AFTER v9 shipped is a real choice: it travels in a v9 backup and imports
+  // verbatim. This is the whole point of listing 'turnaround' in REPORT_OPTION_CARD_KEYS —
+  // while the key was unlisted, pickImportKeys dropped it and the choice never crossed
+  // devices at all.
+  fresh();
+  store.loadSettings();
+  store.importSettings(JSON.stringify({
+    schemaVersion: store.SCHEMA_VERSION,
+    reportOptions: { slides: {}, labels: {}, kpiCards: { turnaround: false } },
+  }));
+  assert.equal(
+    store.loadSettings().reportOptions.kpiCards.turnaround, false,
+    'post-v9 choice imports verbatim (and coerces like every other card flag)',
+  );
+  // …and it coerces, exactly like the other card flags.
+  store.importSettings(JSON.stringify({
+    schemaVersion: store.SCHEMA_VERSION,
+    reportOptions: { kpiCards: { turnaround: 1 } },
+  }));
+  assert.equal(store.loadSettings().reportOptions.kpiCards.turnaround, true, '1 coerces to true');
 });

@@ -25,12 +25,12 @@
 // Both changes make the golden workbook's _cachedDue/_cachedDelay/_cachedStatus
 // an OUT-OF-DATE external oracle for due-derived fields — deliberately.
 
-import { normTest, normFacility } from '../contracts.js?v=v2026-08-11.1';
+import { normTest, normFacility } from '../contracts.js?v=v2026-08-25.1';
 import {
   parseDateTime, toEpochDay, workday, dayDiff, calDaysBetween, monthKey,
-} from './workday.js?v=v2026-08-11.1';
-import { buildTatIndex, resolveTat, CHART_TEST_CATALOG } from './tat.js?v=v2026-08-11.1';
-import { dedupeRows } from './dedupe.js?v=v2026-08-11.1';
+} from './workday.js?v=v2026-08-25.1';
+import { buildTatIndex, resolveTat, CHART_TEST_CATALOG } from './tat.js?v=v2026-08-25.1';
+import { dedupeRows } from './dedupe.js?v=v2026-08-25.1';
 
 export const STATUS = Object.freeze({
   CANCELLED: 'Cancelled',
@@ -271,6 +271,11 @@ function buildTurnaround(nonCancelled) {
   // receivedMs/dueMs must be present: calDaysBetween would coerce null to epoch-0
   // and poison the means with ±10,000-day values (dirty rows: resulted with blank
   // Received, or unmatched test with blank CSV TAT). Golden set is unaffected (422).
+  // `!e.rejected` is a DELIBERATE SUPERSET of the natural fallout the header describes:
+  // rejected rows normally lack a result timestamp and would fall out via resultedMs
+  // anyway, but a rejected row that DOES carry one (the completed/rejected dating in
+  // asof.js proves the shape exists) must still never be measured — a rejection is not
+  // a turnaround, whatever timestamps it carries.
   const measured = nonCancelled.filter(
     (e) => e.resultedMs != null && !e.rejected && e.receivedMs != null && e.dueMs != null,
   );

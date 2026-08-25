@@ -29,7 +29,7 @@
 // explicitly with `opts.catDir = 'ltr'` on that chart element. There is
 // exactly one knob (CAT_DIR / opts.catDir) so the two layers cannot fight
 // silently.
-import { COLORS as C } from '../theme.js?v=v2026-08-11.1';
+import { COLORS as C } from '../theme.js?v=v2026-08-25.1';
 
 const PXIN = 96;
 /** Default category progression for this (Arabic) deck: index 0 on the right. */
@@ -186,6 +186,23 @@ function line(el) {
       else s += `<circle cx="${x}" cy="${y}" r="3.6" fill="${fill}" stroke="${ser.color}" stroke-width="1.5"/>`;
     });
   });
+  // data labels (round-6 user rule: 'a line chart with markers and data labels').
+  // Series 0 labels ABOVE its points, later series BELOW — the reference image's own
+  // arrangement (solid actual above, dashed expected below), and a deterministic rule
+  // that keeps the two series' labels apart even where the lines cross. The guard is
+  // `v == null` — NEVER a truthiness/`> 0` test and never `?? 0`: a gap month must have
+  // no label at all (0 would read 'same-day turnaround'), while a legitimate 0.0 value
+  // keeps its label. One decimal by design: the deck's only line chart is the turnaround
+  // one, whose values are report-style 1-decimal days — 2 must print '2.0', which the
+  // axis's fmtNum would strip. Painted in the series colour, matching the image.
+  if (el.opts?.dataLabels) {
+    el.series.forEach((ser, si) => {
+      ser.values.forEach((v, i) => {
+        if (v == null) return;
+        s += txt(xOf(i), yOf(v) + (si === 0 ? -8 : 14), Number(v).toFixed(1), 7.5, { fill: ser.color });
+      });
+    });
+  }
   if (el.opts?.legend === 'bottom') s += legend(el.series, W, H - legendH + 12);
   return svg(W, H, s);
 }

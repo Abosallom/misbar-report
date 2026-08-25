@@ -1,7 +1,7 @@
 // src/render/pptx-renderer.js
 // renderPptx(spec, {variant, PptxGenJS}) -> Blob (.pptx). Maps SlideSpec elements 1:1 to
 // PptxGenJS on a 13.333 x 7.5 in wide layout. internalOnly slides are dropped for 'nupco'.
-import { COLORS as C } from '../theme.js?v=v2026-08-11.1';
+import { COLORS as C } from '../theme.js?v=v2026-08-25.1';
 
 const hex = (c) => (c ? String(c).replace('#', '') : c);
 // Arabic + Arabic Supplement/Extended + presentation forms (same range html-renderer uses),
@@ -146,6 +146,16 @@ function addChart(slide, P, e) {
           lineDash: s.dash ? 'dash' : 'solid',
           lineDataSymbol: s.marker || 'circle',
           lineDataSymbolSize: 6,
+          // Data labels live on the GROUP in the combo form — common's copy does not
+          // reach the per-series groups. Position mirrors charts-svg line(): series 0
+          // above ('t'), later series below ('b'), the reference image's arrangement.
+          // '0.0' keeps the report's 1-decimal style ('2.0', never '2'); a null cell
+          // is a blank in the sheet (displayBlanksAs gap), so gap months label nothing.
+          showValue: !!e.opts?.dataLabels,
+          dataLabelFormatCode: '0.0',
+          dataLabelFontFace: 'Cairo', dataLabelFontSize: 7,
+          dataLabelColor: colors[i],
+          dataLabelPosition: i === 0 ? 't' : 'b',
         },
       }));
       slide.addChart(groups, common);
@@ -154,6 +164,10 @@ function addChart(slide, P, e) {
         ...common,
         chartColors: colors,
         lineSize: 2, lineDataSymbol: 'circle', lineDataSymbolSize: 6,
+        showValue: !!e.opts?.dataLabels,
+        dataLabelFormatCode: '0.0',
+        dataLabelFontFace: 'Cairo', dataLabelFontSize: 7,
+        dataLabelPosition: 't',
       });
     }
   } else if (e.kind === 'barH') {

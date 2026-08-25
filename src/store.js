@@ -15,19 +15,19 @@
 // throws on write; on failure we fall back to an in-memory doc and expose
 // isEphemeral() so the UI can warn the user their edits will not persist.
 
-import { SETTINGS_KEY } from './contracts.js?v=v2026-08-11.1';
-import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-08-11.1';
-import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-08-11.1';
+import { SETTINGS_KEY } from './contracts.js?v=v2026-08-25.1';
+import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-08-25.1';
+import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-08-25.1';
 import {
   HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED, GRAFANA_SEED, REPORT_OPTIONS_SEED,
   SNAPSHOT_HISTORY_SEED, AUTOMATION_SEED, TASK_LOG_SEED,
-} from './seeds/defaults.js?v=v2026-08-11.1';
-import { DELTA_MODES, canonicalDeltaMode } from './model/delta-baseline.js?v=v2026-08-11.1';
+} from './seeds/defaults.js?v=v2026-08-25.1';
+import { DELTA_MODES, canonicalDeltaMode } from './model/delta-baseline.js?v=v2026-08-25.1';
 import {
   sanitizeTaskLog, recordShownTasks, TASK_LOG_LIMIT, TASK_KEY_MAX,
-} from './model/task-lifecycle.js?v=v2026-08-11.1';
+} from './model/task-lifecycle.js?v=v2026-08-25.1';
 
-export const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 9;
 
 // taskLog key = 'ext'|'int' (3) + '|' (1) + up to TASK_KEY_MAX chars of task text.
 // A little headroom above that so a key is rejected only when it is genuinely
@@ -508,10 +508,83 @@ function migrateV2toV8(doc) {
   return migrateV7toV8(doc);
 }
 
-/** v1 → v8: chain every transform so the oldest docs land on the current schema. */
+/** v1 → v8: chain every transform so the oldest docs reach the v8 shape. */
 function migrateV1toV8(doc) {
   migrateV1toV7(doc);
   return migrateV7toV8(doc);
+}
+
+/**
+ * v8 → v9: put the TURNAROUND block on the delivered monthly slide.
+ *
+ * The block (navy overall-average card + الفعلي/المتوقع line chart) shipped opt-in with
+ * `kpiCards.turnaround` seeded FALSE, so every install created since then persisted that
+ * false — a DEFAULT nobody chose. Round 6 makes the block part of the delivered deck (the
+ * user's own historic layout), and backfillReportOptions only fills an ABSENT key: without
+ * this one-time force the new seed would reach nobody who has ever run the app, i.e.
+ * exactly the installs the request is about. Third instance of the pattern, after
+ * migrateV6toV7 (deltaMode) and migrateV7toV8 (coverTitle), original migrateV4toV5.
+ *
+ * It runs ONCE. Unticking the card in Settings afterwards sticks, because migrate() routes
+ * a doc through this step only while its stored schemaVersion is below 9 and saveSettings
+ * stamps SCHEMA_VERSION — no later load ever touches a stored value again.
+ *
+ * NOTHING ELSE MOVES: this reveals an already-computed block (engine buildTurnaround is
+ * untouched), so no number on any slide changes.
+ */
+function migrateV8toV9(doc) {
+  migrateSnapshotShape(doc); // same softening/backfill pass every other step runs
+  // Tolerant reads, shaped exactly like migrateV4toV5's: the pass above already guarantees
+  // both containers (a missing kpiCards is copied from the seed, which now carries
+  // turnaround:true anyway), but a hand-edited doc that reached storage must not make the
+  // WRITE the thing that throws.
+  const ro = isPlainObject(doc.reportOptions) ? doc.reportOptions : (doc.reportOptions = {});
+  const cards = isPlainObject(ro.kpiCards) ? ro.kpiCards : (ro.kpiCards = {});
+  cards.turnaround = true;
+  doc.schemaVersion = 9;
+  return doc;
+}
+
+/** v7 → v9: run the v7→v8 transform, then v8→v9. */
+function migrateV7toV9(doc) {
+  migrateV7toV8(doc);
+  return migrateV8toV9(doc);
+}
+
+/** v6 → v9: run the v6→v8 chain, then v8→v9. */
+function migrateV6toV9(doc) {
+  migrateV6toV8(doc);
+  return migrateV8toV9(doc);
+}
+
+/** v5 → v9: run the v5→v8 chain, then v8→v9. */
+function migrateV5toV9(doc) {
+  migrateV5toV8(doc);
+  return migrateV8toV9(doc);
+}
+
+/** v4 → v9: run the v4→v8 chain, then v8→v9. */
+function migrateV4toV9(doc) {
+  migrateV4toV8(doc);
+  return migrateV8toV9(doc);
+}
+
+/** v3 → v9: run the v3→v8 chain, then v8→v9. */
+function migrateV3toV9(doc) {
+  migrateV3toV8(doc);
+  return migrateV8toV9(doc);
+}
+
+/** v2 → v9: run the v2→v8 chain, then v8→v9. */
+function migrateV2toV9(doc) {
+  migrateV2toV8(doc);
+  return migrateV8toV9(doc);
+}
+
+/** v1 → v9: chain every transform so the oldest docs land on the current schema. */
+function migrateV1toV9(doc) {
+  migrateV1toV8(doc);
+  return migrateV8toV9(doc);
 }
 
 /** Version-check + migrate/reset. Unknown versions reset to seeds. */
@@ -521,13 +594,14 @@ function migrate(doc) {
     return persist(buildSeedDoc());
   }
   if (doc.schemaVersion === SCHEMA_VERSION) return migrateSnapshotShape(doc);
-  if (doc.schemaVersion === 7) return persist(migrateV7toV8(doc));
-  if (doc.schemaVersion === 6) return persist(migrateV6toV8(doc));
-  if (doc.schemaVersion === 5) return persist(migrateV5toV8(doc));
-  if (doc.schemaVersion === 4) return persist(migrateV4toV8(doc));
-  if (doc.schemaVersion === 3) return persist(migrateV3toV8(doc));
-  if (doc.schemaVersion === 2) return persist(migrateV2toV8(doc));
-  if (doc.schemaVersion === 1) return persist(migrateV1toV8(doc));
+  if (doc.schemaVersion === 8) return persist(migrateV8toV9(doc));
+  if (doc.schemaVersion === 7) return persist(migrateV7toV9(doc));
+  if (doc.schemaVersion === 6) return persist(migrateV6toV9(doc));
+  if (doc.schemaVersion === 5) return persist(migrateV5toV9(doc));
+  if (doc.schemaVersion === 4) return persist(migrateV4toV9(doc));
+  if (doc.schemaVersion === 3) return persist(migrateV3toV9(doc));
+  if (doc.schemaVersion === 2) return persist(migrateV2toV9(doc));
+  if (doc.schemaVersion === 1) return persist(migrateV1toV9(doc));
   // Future schema bumps add forward-migration cases above this line.
   console.warn(
     `[misbar/store] unsupported schemaVersion ${doc.schemaVersion} ` +
@@ -679,7 +753,7 @@ export function exportSettings() {
 // Schema versions an import accepts: every version migrate() can transform, plus
 // the current one. Extend this WITH the migration dispatcher — a version that can
 // be loaded from storage but not imported orphans that generation's backups.
-const IMPORTABLE_VERSIONS = new Set([1, 2, 3, 4, 5, 6, 7, SCHEMA_VERSION]);
+const IMPORTABLE_VERSIONS = new Set([1, 2, 3, 4, 5, 6, 7, 8, SCHEMA_VERSION]);
 
 function validateImport(doc) {
   if (!isPlainObject(doc)) {
@@ -920,6 +994,15 @@ const IMPORT_KEYS = ['schemaVersion', 'tatLookup', 'displayNames', 'scorecard', 
 const REPORT_OPTION_SLIDE_KEYS = ['execFunnel', 'monthly', 'compliance', 'action', 'challenges', 'definitions'];
 const REPORT_OPTION_CARD_KEYS = [
   'total', 'awaitingDispatch', 'awaitingResults', 'completed', 'rejected', 'lateNoResult', 'shippedNotReceived',
+  // 'turnaround' (v9): the monthly slide's line chart + overall-average card. It was
+  // MISSING from this list for as long as the key was opt-in — the same hand-written-list
+  // drift the IMPORTABLE_VERSIONS fix above documents — so an unticked box was silently
+  // dropped from every backup and never reached the restoring device. Now that the block
+  // ships ON and the box is an ordinary Settings control, the user's choice has to
+  // round-trip like every other card flag. Listing it is only safe because importSettings
+  // drops a PRE-v9 `false` before the merge (see preTurnaroundBackup there): otherwise
+  // restoring an old backup would quietly undo the v8→v9 force and hide the block again.
+  'turnaround',
 ];
 
 function pickImportKeys(doc) {
@@ -991,7 +1074,7 @@ function pickImportKeys(doc) {
   }
   if (isPlainObject(out.reportOptions)) {
     // Whitelist exactly {excludeNoTat, autoDownloadFiles, deltaMode, slides(6 keys),
-    // kpiCards(7 keys), labels}. Flags coerce to booleans; only string label values
+    // kpiCards(8 keys), labels}. Flags coerce to booleans; only string label values
     // survive; unknown slide/card subkeys are discarded.
     const ro = out.reportOptions;
     const picked = {};
@@ -1149,6 +1232,11 @@ export function importSettings(jsonText) {
   // so the cutoff is <= 7 here and <= 6 for deltaMode above — the two migrations shipped
   // one version apart and each fixup has to match its own.
   const preRenameBackup = typeof incoming.schemaVersion === 'number' && incoming.schemaVersion <= 7;
+  // Pre-TURNAROUND-DEFAULT backup: v8 is the LAST schema whose turnaround block was opt-in,
+  // so this cutoff is <= 8 — one higher than the cover-rename fixup's <= 7, which is one
+  // higher than deltaMode's <= 6. Each fixup is pinned to the version ITS OWN migration
+  // shipped in; a shared constant would silently widen the older two on the next bump.
+  const preTurnaroundBackup = typeof incoming.schemaVersion === 'number' && incoming.schemaVersion <= 8;
   incoming = pickImportKeys(incoming); // discard unknown keys — nothing but config may persist
   if (wasV1) {
     // A v1 backup's cancelledByMonth carries max-era (data-derived) months that
@@ -1184,6 +1272,24 @@ export function importSettings(jsonText) {
     // retyped in the labels editor AFTER v8 shipped travels in a v8 backup and imports
     // untouched, and any other string is a real edit that survives from any version.
     delete incoming.reportOptions.labels.coverTitle;
+  }
+  if (preTurnaroundBackup && incoming.reportOptions && incoming.reportOptions.kpiCards
+      && incoming.reportOptions.kpiCards.turnaround === false) {
+    // Third instance of the fixup pattern above (deltaMode, then coverTitle), for the
+    // v8→v9 turnaround default. A v1-v8 backup's `false` IS the retired default —
+    // migrateV8toV9's own premise, "a default nobody chose" — and importing it verbatim
+    // would permanently undo that migration: deepMergeImportWins lets the import win and
+    // saveSettings stamps SCHEMA_VERSION, so migrate() never routes the doc through v8→v9
+    // again and the block would stay hidden on every future load, with nothing left to
+    // reveal it. Drop the key and let the device's post-migration `true` stand.
+    //
+    // Scoped to FALSE only, by version: a pre-v9 `true` was a deliberate opt-in and imports
+    // untouched (it agrees with the migrated state anyway), and an OFF chosen AFTER v9
+    // shipped travels in a v9 backup and imports verbatim — that is exactly what listing
+    // 'turnaround' in REPORT_OPTION_CARD_KEYS buys. A pre-v9 false that WAS deliberate is
+    // indistinguishable from the shipped default, so it loses: identical trade-off, and
+    // identical remedy (untick the box once), as the coverTitle fixup above.
+    delete incoming.reportOptions.kpiCards.turnaround;
   }
 
   const current = clone(loadSettings());

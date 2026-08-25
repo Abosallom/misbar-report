@@ -20,17 +20,32 @@
 //   m.reportOptions.labels[key]   overrides DEFAULT_LABELS static text (byte-stable when absent)
 //   m.reportOptions.slides[key]   toggles the 5 middle slides (cover/thanks always render)
 //   m.reportOptions.kpiCards[key] toggles the 7 exec KPI cards (row geometry repacks)
-//                                 + the OPT-IN 'turnaround' block on the monthly slide
+//                                 + the 'turnaround' block on the monthly slide (an
+//                                   explicit-true key, seeded true since round 6 — see
+//                                   OPT_IN_CARDS below for why those two are not a
+//                                   contradiction)
 //   m.overrides[key]              per-run manual NUMBER overrides (suppresses that delta chip)
-import { COLORS as C, GEOM } from '../theme.js?v=v2026-08-11.1';
+import { COLORS as C, GEOM } from '../theme.js?v=v2026-08-25.1';
 
-// OPT-IN kpiCards KEYS. reportOptions.kpiCards normally reads "on unless === false"
+// EXPLICIT-TRUE kpiCards KEYS. reportOptions.kpiCards normally reads "on unless === false"
 // (see buildExec's cardDefs filter). The keys in this set INVERT that: they render only
 // when the flag is explicitly true, so a missing/undefined flag reads as OFF — exactly
 // the mechanism OPT_IN_SLIDES gives the definitions slide (see buildSpec below).
 // 'turnaround' gates the monthly slide's turnaround LINE CHART *and* its navy
-// overall-average card (user decision 2026-07-26: the default monthly slide matches the
-// 20-07 reference deck — chrome + the monthly table + ONE bar chart, nothing else).
+// overall-average card. THE BLOCK IS DEFAULT-ON SINCE ROUND 6 (user decision 2026-08-25,
+// against a reference image of his own historic deck: the monthly page he ships carries
+// that card and that line chart). It was default-OFF from 2026-07-26, when the monthly
+// slide was cut back to the 20-07 reference shape — chrome + the monthly table + ONE bar
+// chart, nothing else; round 6 reverses only the DEFAULT, not the shape of either layout.
+// THE MECHANICS HERE ARE UNCHANGED, and deliberately so — an absent key still reads OFF.
+// The new default is carried by the two writers of reportOptions, both owned elsewhere:
+// the kpiCards SEED now stores turnaround: true, and the store's v8→v9 migration flips
+// an existing install's saved false to true ONCE (a one-shot default change, not a lock —
+// it never runs again, so a later manual OFF sticks). After that migration the only model
+// that can still reach this file WITHOUT the key is a hand-crafted/hand-imported one, and
+// it renders the 20-07 shape, which is the safe reading of "no opinion recorded". The
+// settings checkbox keeps working in both directions: an explicit false turns the block
+// back OFF for anyone who wants the plain page.
 const OPT_IN_CARDS = new Set(['turnaround']);
 const cardOn = (m) => (key) => (OPT_IN_CARDS.has(key)
   ? m.reportOptions?.kpiCards?.[key] === true
@@ -980,14 +995,45 @@ function buildMonthly(m) {
     ? MONTH_COLW
     : Array(mo.length).fill(Math.round(((TABLE_W - LABEL_COLW - TOTAL_COLW) / mo.length) * 1000) / 1000);
 
-  // TURNAROUND BLOCK — OPT-IN (see OPT_IN_CARDS): the line chart + the navy
-  // overall-average card render only when reportOptions.kpiCards.turnaround === true.
-  // Default OFF, so the delivered monthly slide is the 20-07 reference shape.
-  const showTurnaround = cardOn(m)('turnaround');
+  // TURNAROUND BLOCK — the line chart + the navy overall-average card. Still gated on
+  // reportOptions.kpiCards.turnaround === true (an explicit-true key, see OPT_IN_CARDS),
+  // but that flag is now DEFAULT-ON: round 6 moved the seed to true and added the v8→v9
+  // migration that flips existing installs once, so the delivered monthly slide carries
+  // this block again (the user's reference image of his own deck). A model without the
+  // key — hand-crafted, or hand-imported from before the migration — still renders the
+  // 20-07 reference shape, which is why cardOn's explicit-true reading is kept verbatim as
+  // the FIRST half of the test below (the second half is the empty-data guard).
+  const t = m.kpi.turnaround;
+  // The card's two figures, resolved HERE rather than beside the card itself because the
+  // toggle below now depends on them: a finite manual override wins, else the engine's
+  // own overall mean (valueOf).
+  const ovActual = V('turnaround.actual', t.overallActual);
+  const ovExpected = V('turnaround.expected', t.overallExpected);
+  // …AND THE BLOCK NEEDS TWO NUMBERS TO EXIST. buildTurnaround publishes overallActual /
+  // overallExpected as NULL — deliberately, never 0 — when its measured set is empty:
+  // every order still pending, or every completed line rejected. A young reporting
+  // period's first upload is exactly that shape. Both card lines format with .toFixed(1),
+  // so a null there threw a TypeError that killed the WHOLE deck build — PPTX, PDF and the
+  // HTML preview all come through buildSpec. That line was unreachable while the block was
+  // opt-in and off by default; round 6's reveal moved it onto the DEFAULT path, so the
+  // toggle absorbs the case: no figures, no block. Three reasons this is the guard and not
+  // a '—' placeholder:
+  //   · it cannot disturb the every-number-unchanged invariant — it only fires when the
+  //     block has no numbers at all (finite means always print exactly as before);
+  //   · it is folded into showTurnaround, ABOVE the geometry, so the slide falls back to
+  //     the whole 20-07 reference layout (table + bar chart re-centred at y≈2.194) instead
+  //     of leaving a 2.4in hole in the lower band;
+  //   · the chart would have been empty in the same breath — perMonth is empty in exactly
+  //     the measuredCount === 0 case, so both series would be all-null over every category.
+  // BOTH must be finite, not either: "two figures only" is the user's card rule, so a lone
+  // figure is not this card. The overrides stay the escape hatch — setting both by hand
+  // restores the card (over a still-pointless chart), which is a deliberate manual act.
+  const showTurnaround = cardOn(m)('turnaround')
+    && Number.isFinite(ovActual) && Number.isFinite(ovExpected);
   // GEOMETRY, two layouts:
   //  · turnaround ON  — the historic split band: table+bar chart in the upper band
   //    (y≈1.07), line chart + card in the lower band (y 4.583 → 6.972). Byte-identical
-  //    to what shipped before the toggle existed, so opting in changes nothing else.
+  //    to what shipped before the toggle existed, so the flag changes nothing else.
   //  · turnaround OFF — the 20-07 REFERENCE DECK's own placement: table and chart share
   //    ONE top edge at y≈2.194/2.195 (reference graphicFrame offsets, EMU→in). They are
   //    NOT centred independently — centring each on its own height staggered their tops
@@ -1042,7 +1088,6 @@ function buildMonthly(m) {
     opts: { dataLabels: true, legend: 'bottom' },
   };
 
-  const t = m.kpi.turnaround;
   // Key both series by month over the SAME derived month list as the categories,
   // so a month absent from perMonth becomes a null gap in place (rather than
   // shifting the later months' points left and misaligning the line).
@@ -1054,12 +1099,26 @@ function buildMonthly(m) {
       { name: L('chartActual'), values: monthKeys.map((k) => t.perMonth.find((p) => p.month === k)?.actual ?? null), color: C.navyChart, marker: 'circle' },
       { name: L('chartExpected'), values: monthKeys.map((k) => t.perMonth.find((p) => p.month === k)?.expected ?? null), color: C.orangeSeries, dash: true, marker: 'diamond' },
     ],
-    opts: { legend: 'bottom', title: L('chartDaysAxis'), valMin: 0 },
+    // dataLabels since round 6 (user, verbatim: "Keep it a line chart with markers and
+    // data labels") — the point values are the reason this chart is on the page, and the
+    // card beside it now prints only the two overall averages, so the per-month numbers
+    // have nowhere else to be read. Same flag the monthly bar chart above already sets;
+    // the marker shapes (circle/diamond) were already here.
+    // NOT YET HONOURED BY EITHER RENDERER for kind 'line' — charts-svg.js line() draws
+    // gridlines, polylines and markers but has no value-label pass (only col()/barH() do),
+    // and pptx-renderer.js's line branch omits showValue from its `common` options (both
+    // its plain and its per-series combo form). So this reads as a no-op TODAY and turns
+    // the labels on the moment those two renderers grow the pass; both files are owned
+    // elsewhere. Kept here because the SPEC is the contract (contracts.js declares
+    // opts.dataLabels on the chart ELEMENT, not per kind) and the null months must stay
+    // GAPS in whatever label pass lands — a loop that reads `values[i] ?? 0`, the way
+    // barH() does for its bar lengths, would print '0' over an empty month and contradict
+    // the line's own gap.
+    opts: { dataLabels: true, legend: 'bottom', title: L('chartDaysAxis'), valMin: 0 },
   };
 
-  // Overall-average card values honor the turnaround.actual/expected overrides.
-  const ovActual = V('turnaround.actual', t.overallActual);
-  const ovExpected = V('turnaround.expected', t.overallExpected);
+  // The card's ovActual / ovExpected are resolved up beside showTurnaround, not here — the
+  // toggle itself reads them (they must be finite for the block to render at all).
 
   const els = [
     ...chrome(L('titleMonthly')),
@@ -1076,24 +1135,43 @@ function buildMonthly(m) {
   if (showTurnaround) {
     els.push(
       turnaroundChart,
-      // Overall-average card — RESTACKED so 3-digit live values never touch: title,
-      // actual, expected, variance and sample size each get their own band inside the
-      // card (4.583 → 6.972). Actual/expected dropped to 20pt to keep the stack clear.
+      // Overall-average card — TWO FIGURES, NOTHING ELSE (user round-6 rule, verbatim:
+      // "Two figures only … Do not add an order count, a percentage, or a third figure to
+      // the card"). The الفارق variance line (actual − expected, amber) and the
+      // (ن = N طلب) sample-size line are GONE with that rule — measuredCount is still
+      // computed and published by the engine and still explained on the definitions slide
+      // (defDTurnaround), it just never prints on this card again. Nothing else about the
+      // block moved: same rect, same two strings, same colours, same numbers.
+      // RESTACKED FOR TWO LINES. The old comment here justified a FOUR-line stack (title /
+      // actual / expected / variance / sample), which is the only reason the two values had
+      // been dropped to 20pt; with the stack halved they go back UP to 24pt — the user's
+      // reference image sets these numbers large — and re-centre in the freed lower half.
+      // GEOMETRY DERIVED FROM THE CARD'S OWN BOUNDS (card 4.583 → 6.972, h 2.389):
+      //   · the title keeps its box, 4.66 → 4.96, so its top inset is 4.66 − 4.583 = 0.077;
+      //   · MIRROR that inset at the bottom → the value band is 4.960 → 6.972 − 0.077 =
+      //     6.895, i.e. 1.935in of height for the two lines;
+      //   · box h 0.68 each: it must CONTAIN the 24pt Cairo line box (0.68 > 24 × 0.0258 =
+      //     0.619 by this file's constant, and > the 0.625 actually measured below) because
+      //     .sl-text is overflow:hidden — an under-tall box silently eats ink;
+      //   · leftover 1.935 − 2 × 0.68 = 0.575, spent as THREE EQUAL gaps of 0.192 → actual
+      //     at 4.960 + 0.192 = 5.152, expected at 5.152 + 0.68 + 0.192 = 6.024, bottom rest
+      //     6.895 − 6.704 = 0.191 (the 0.001 is 3-decimal rounding, not a lean).
+      // MEASURED, not estimated (Range probe, 1280×720, the app's self-hosted Cairo, both
+      // strings bold at the sizes below): the Cairo line box is 0.02604in/pt — 0.3385 at
+      // 13pt and 0.625 at 24pt, dead linear — so each value centres in its 0.68 box with
+      // 0.0275 of slack above and below, actual ink running 5.176 → 5.801 and expected
+      // 6.047 → 6.672 against a title whose ink ends at 4.974. That is 0.202 above the
+      // first value, 0.247 between the two and 0.300 down to the card's edge — versus the
+      // 20pt four-line stack this replaces, whose tightest pair (title ink 4.974 → actual
+      // ink 4.990, by the same constant) cleared by 0.015. The crowding the user's
+      // two-figure rule removes was real, and 24pt in the freed band is still roomier.
+      // WIDTH: worst realistic strings ('المتوقع: 123.4 يوم', 3-digit averages) measure
+      // 2.82in against the 3.417in box, ONE line — 24pt cannot wrap this card.
       rect(0.5, 4.583, 3.417, 2.389, C.navyChart, { radius: 0.1 }),
       text(0.5, 4.66, 3.417, 0.3, L('overallAvgTitle'), 13, { bold: true, color: CARD_TITLE, align: 'center', valign: 'middle', rtl: true }),
-      text(0.5, 5.0, 3.417, 0.5, `الفعلي: ${ovActual.toFixed(1)} يوم`, 20, { bold: true, color: C.white, align: 'center', valign: 'middle', rtl: true }),
-      text(0.5, 5.55, 3.417, 0.5, `المتوقع: ${ovExpected.toFixed(1)} يوم`, 20, { bold: true, color: C.peach, align: 'center', valign: 'middle', rtl: true }),
+      text(0.5, 5.152, 3.417, 0.68, `الفعلي: ${ovActual.toFixed(1)} يوم`, 24, { bold: true, color: C.white, align: 'center', valign: 'middle', rtl: true }),
+      text(0.5, 6.024, 3.417, 0.68, `المتوقع: ${ovExpected.toFixed(1)} يوم`, 24, { bold: true, color: C.peach, align: 'center', valign: 'middle', rtl: true }),
     );
-    // Variance vs target — actual − expected, sign always shown; only when both present.
-    if (Number.isFinite(ovActual) && Number.isFinite(ovExpected)) {
-      const diff = ovActual - ovExpected;
-      const diffStr = (diff >= 0 ? '+' : '-') + Math.abs(diff).toFixed(1);
-      els.push(text(0.5, 6.15, 3.417, 0.3, `الفارق: ${diffStr} يوم عن المستهدف`, 11, { bold: true, color: C.amber, align: 'center', valign: 'middle', rtl: true }));
-    }
-    // Sample size behind the averages — only when the engine reports measuredCount.
-    if (Number.isFinite(t.measuredCount)) {
-      els.push(text(0.5, 6.5, 3.417, 0.26, `(ن = ${t.measuredCount} طلب)`, 9, { color: CARD_TITLE, align: 'center', valign: 'middle', rtl: true }));
-    }
   }
   return { id: 'monthly', bg: C.white, elements: els };
 }
