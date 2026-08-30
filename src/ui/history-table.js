@@ -30,9 +30,9 @@
 // نسبة الاكتمال nonsense). The published entry is still shown when nothing can be
 // computed, marked `staleDef` so the footnote says the number is old-definition.
 // Stored history itself is NEVER rewritten here — this module only reads it.
-import { el } from './components.js?v=v2026-08-30.1';
-import { formatDateAr } from '../i18n/ar.js?v=v2026-08-30.1';
-import { COMPLETED_DEF_SINCE, LATE_DEF_SINCE } from '../model/delta-baseline.js?v=v2026-08-30.1';
+import { el } from './components.js?v=v2026-08-30.2';
+import { formatDateAr } from '../i18n/ar.js?v=v2026-08-30.2';
+import { COMPLETED_DEF_SINCE, LATE_DEF_SINCE } from '../model/delta-baseline.js?v=v2026-08-30.2';
 
 // Every relative specifier in this file — static AND the two guarded dynamic ones below —
 // carries its ?v= INLINE so scripts/stamp-version.mjs owns the whole literal (its SPEC_RE
@@ -549,8 +549,8 @@ export function buildHistoryPanel({ rows, tatTests, history, endIso, deltaMode, 
 
   (async () => {
     const [asofMod, wdMod] = await Promise.all([
-      tryImport('../engine/asof.js?v=v2026-08-30.1'),
-      tryImport('../engine/workday.js?v=v2026-08-30.1'),
+      tryImport('../engine/asof.js?v=v2026-08-30.2'),
+      tryImport('../engine/workday.js?v=v2026-08-30.2'),
     ]);
     const computeAsOf = asofMod && typeof asofMod.computeNumbersAsOf === 'function' ? asofMod.computeNumbersAsOf : null;
     const degraded = !computeAsOf;

@@ -50,7 +50,7 @@ export const LAB_CONTACTS = [
   { code: '400750', vendor: 'AL Borg Medical Laboratories Co.', to: ['A.saleh@alborgdx.com', 'a.bassiouni@alborglaboratories.com'] },
   { code: '400865', vendor: 'Alarab medical laboratory', to: ['contracts@alarabgroup.co'] },
   { code: '401644', vendor: 'AlGihaz Healthcare Limited S.A', to: ['Alhanoof.Alnafisah@algihaz.com'] },
-  { code: '401283', vendor: 'AlUlum Al Hayawiyyah Medical Compan', to: ['info@novo-genomics.com', 'A.BOKHARI@NOVO-GENOMICS.COM', 'H.HAQAWI@NOVO-GENOMICS.COM'], aliases: ['Novo Genomics'] },
+  { code: '401283', vendor: 'AlUlum Al Hayawiyyah Medical Compan', to: ['info@novo-genomics.com', 'B.ALMANSOUR@NOVO-GENOMICS.COM', 'A.BOKHARI@NOVO-GENOMICS.COM', 'H.HAQAWI@NOVO-GENOMICS.COM'], aliases: ['Novo Genomics'] },
   { code: '401478', vendor: 'Anwaa Medical Company', to: ['admin@anwa.bio', 'a.mamdouh@anwa.bio'], aliases: ['Anwa Medical Company'] },
   { code: '400022', vendor: 'Arabian Health Care Supply Company', to: ['AHCSC.Tender@ahcsc.com', 'A.Saeed@AHCSC.com'] },
   { code: '401054', vendor: 'Business center NGHA(king abdulaziz medical)', to: ['bd_claims@ngha.med.sa', 'Mohammedw@mngha.med.sa', 'alenezigh@MNGHA.MED.SA', 'MuaitherA@MNGHA.MED.SA', 'alresheedyno@MNGHA.MED.SA', 'Alrooqja@mngha.med.sa', 'bernardomi@MNGHA.MED.SA', 'GarciaS@MNGHA.MED.SA'], aliases: ['king Abdullaziz Medical city in Riyadh', 'King Abdulaziz Medical City', 'NGHA'] },
