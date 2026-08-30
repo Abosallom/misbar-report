@@ -5,15 +5,19 @@
 // basis, empty-state, and the sanitized triggerDownload helper. Built from the
 // SAME dataset a generate run uses (order rows + TAT lookup + an as-of instant),
 // so it works in live-snapshot mode and on the upload screen too.
-import { el, toast } from './components.js?v=v2026-08-25.1';
-import { todayISO } from '../i18n/ar.js?v=v2026-08-25.1';
-import { buildLateLabWorkbooks } from '../export/late-labs.js?v=v2026-08-25.1';
-import { parseDateTime } from '../engine/workday.js?v=v2026-08-25.1';
+import { el, toast } from './components.js?v=v2026-08-30.1';
+import { todayISO } from '../i18n/ar.js?v=v2026-08-30.1';
+import { buildLateLabWorkbooks } from '../export/late-labs.js?v=v2026-08-30.1';
+import { parseDateTime } from '../engine/workday.js?v=v2026-08-30.1';
 // The English email template the team pastes when notifying a lab — VERBATIM
 // wording, now owned by export/eml-draft.js so the clipboard text and the .eml
 // draft body can never drift apart. buildLabEmailDraft only PREPARES a draft
 // file: nothing here sends mail — the user opens it in Outlook and presses Send.
-import { buildLabEmailDraft, labEmailText } from '../export/eml-draft.js?v=v2026-08-25.1';
+import { buildLabEmailDraft, labEmailText } from '../export/eml-draft.js?v=v2026-08-30.1';
+// The vendor contact book from the ops "All Vendors" workbook: a lab's To:
+// addresses plus the standard Lean/NUPCO CC block. Pure data + a pure name
+// lookup — it contacts nobody; its output only fills in the draft's headers.
+import { lookupLabContacts } from '../seeds/lab-contacts.js?v=v2026-08-30.1';
 
 // Copy text to the clipboard with an execCommand fallback (keeps user activation
 // on browsers where navigator.clipboard is unavailable). Mirrors buildShareCard.
@@ -90,14 +94,28 @@ export async function buildLateLabsSection({
     triggerDownload(new Blob([w.xlsxBytes], { type: SHEET_MIME }), w.fileName);
   };
 
-  // Recipients are optional and fully guarded: a missing/!object map, a missing
-  // lab key, or a non-string value simply means the draft carries no To: line.
+  // To: — the Settings map WINS when it has an entry for this lab (a hand-typed
+  // override is always more current than the shipped workbook); otherwise the
+  // vendor contact book answers. Both are fully guarded: a missing/!object map, a
+  // missing lab key, a non-string value, or a lab the book cannot confidently
+  // match all simply mean the draft carries no To: line.
   const recipientsFor = (lab) => {
     const map = labRecipients;
-    if (!map || typeof map !== 'object') return null;
-    const v = map[lab];
-    if (Array.isArray(v)) return v;
-    return typeof v === 'string' && v.trim() ? v : null;
+    if (map && typeof map === 'object') {
+      const v = map[lab];
+      if (Array.isArray(v) && v.length) return v;
+      if (typeof v === 'string' && v.trim()) return v;
+    }
+    const hit = lookupLabContacts(lab);
+    return hit && hit.to.length ? hit.to : null;
+  };
+
+  // Cc: — the standard follow-up block, plus any per-vendor addition (Saudi
+  // Diagnostic Limited also CCs rsharbi@nupco.com). A lab the book cannot match
+  // gets no Cc line rather than a block addressed on a guessed identity.
+  const ccFor = (lab) => {
+    const hit = lookupLabContacts(lab);
+    return hit && hit.cc.length ? hit.cc : null;
   };
 
   // Download ONE lab's Outlook draft. This only writes a file to disk — no mail
@@ -109,6 +127,7 @@ export async function buildLateLabsSection({
         fileName: w.fileName,
         xlsxBytes: w.xlsxBytes,
         recipients: recipientsFor(w.lab),
+        cc: ccFor(w.lab),
         reportDate,
       });
       triggerDownload(d.blob, d.fileName);
@@ -146,7 +165,9 @@ export async function buildLateLabsSection({
       }),
       el('button', {
         class: 'btn btn--ghost', text: '✉ نسخ نص البريد',
-        onClick: async () => { if (await copyText(labEmailText(w.lab))) toast('تم نسخ نص البريد', 'ok'); },
+        // Body only: the subject belongs in the mail client's Subject field, not
+        // pasted into the message body. labEmailSubject() is the title.
+        onClick: async () => { if (await copyText(labEmailText())) toast('تم نسخ نص البريد', 'ok'); },
       }),
       el('button', {
         // U+2066…U+2069 (LRI…PDI): without the isolate the '.' — a neutral between an

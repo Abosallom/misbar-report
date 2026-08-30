@@ -14,7 +14,8 @@
 //
 // Output = RFC 5322 message, CRLF line endings throughout, multipart/mixed:
 //   headers  Date (only when reportDate resolves) · Subject · To (only when
-//            recipients are given) · X-Unsent · MIME-Version · Content-Type
+//            recipients are given) · Cc (only when cc addresses are given) ·
+//            X-Unsent · MIME-Version · Content-Type
 //   part 1   text/plain; charset="utf-8", base64 — the standard wording, verbatim
 //   part 2   the .xlsx, base64 in 76-char lines, Content-Disposition: attachment
 // Any non-ASCII in Subject / attachment file name is RFC 2047 encoded-word wrapped
@@ -22,6 +23,7 @@
 // Arabic; an unencoded 8-bit header byte would make the message malformed. In To:
 // the encoding is applied PER ADDRESS and only to a `Display Name <addr>` phrase —
 // an encoded-word is illegal inside an addr-spec or around a whole address list.
+// Cc is normalised by exactly the same path as To.
 
 /** Spreadsheet MIME type for the attachment part. */
 export const SHEET_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -49,9 +51,15 @@ export function labEmailSubject(lab) {
   return `${lab} | Late Test Results — Action Required`;
 }
 
-/** Subject + body, the exact text the copy-to-clipboard button puts on the clipboard. */
-export function labEmailText(lab) {
-  return `Subject: ${labEmailSubject(lab)}\n\n${LAB_EMAIL_BODY}`;
+/**
+ * The exact text the "نسخ نص البريد" button puts on the clipboard: the BODY only.
+ * The subject is the email's title, set in the mail client's own Subject field
+ * (and in the .eml's Subject header) — pasting a 'Subject:' line into the message
+ * body only put it in the wrong place, so it is deliberately not included here.
+ * Use labEmailSubject() when you want the title.
+ */
+export function labEmailText() {
+  return LAB_EMAIL_BODY;
 }
 
 /** File name of a lab's draft. */
@@ -206,15 +214,17 @@ export function formatMailDate(reportDate) {
  * @param {string} [args.fileName]   Attachment file name (defaults to `${lab} - TAT Late & Due.xlsx`).
  * @param {Uint8Array|ArrayBuffer|number[]} args.xlsxBytes  The workbook bytes.
  * @param {string|string[]} [args.recipients]  To: addresses; omitted entirely when empty.
+ * @param {string|string[]} [args.cc]          Cc: addresses; omitted entirely when empty.
  * @param {string|number} [args.reportDate]    'YYYY-MM-DD' or epoch-ms; omitted when absent.
  * @returns {{fileName:string, blob:Blob, text:string}} `.eml` name + blob (+ raw message).
  */
 export function buildLabEmailDraft({
-  lab, fileName, xlsxBytes, recipients, reportDate,
+  lab, fileName, xlsxBytes, recipients, cc, reportDate,
 } = {}) {
   const labName = oneLine(lab) || 'Lab';
   const attachName = oneLine(fileName) || `${labName} - TAT Late & Due.xlsx`;
   const to = normalizeRecipients(recipients);
+  const ccLine = normalizeRecipients(cc);
   const date = formatMailDate(reportDate);
   const param = encodeParamValue(attachName);
 
@@ -222,6 +232,7 @@ export function buildLabEmailDraft({
   if (date) headers.push(`Date: ${date}`);
   headers.push(`Subject: ${encodeHeaderValue(labEmailSubject(labName))}`);
   if (to) headers.push(`To: ${to}`); // already per-address encoded by normalizeRecipients
+  if (ccLine) headers.push(`Cc: ${ccLine}`);
   headers.push('X-Unsent: 1');
   headers.push('MIME-Version: 1.0');
   headers.push(`Content-Type: multipart/mixed; boundary="${BOUNDARY}"`);

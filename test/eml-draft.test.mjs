@@ -2,7 +2,7 @@
 // The per-lab Outlook DRAFT (.eml) builder. Asserts the message is a well-formed
 // RFC 5322 multipart/mixed document (header set + order, X-Unsent, boundary
 // arithmetic, CRLF everywhere), that the attachment round-trips byte-identically,
-// that To: appears only when recipients are given, that Arabic lab names are
+// that To:/Cc: appear only when addresses are given, that Arabic lab names are
 // RFC 2047 encoded, and — POLICY — that the module never reads the wall clock and
 // contains no sending machinery of any kind.
 import { test } from 'node:test';
@@ -87,7 +87,11 @@ test('headers are present, correctly ordered, and Content-Type carries the bound
 
 test('Subject is the verbatim team wording', () => {
   assert.equal(labEmailSubject(LAB), `${LAB} | Late Test Results — Action Required`);
-  assert.equal(labEmailText(LAB), `Subject: ${labEmailSubject(LAB)}\n\n${LAB_EMAIL_BODY}`);
+  // The clipboard text is the BODY ALONE. The subject is the email's title and
+  // belongs in the Subject field, so it must NOT be pasted into the body.
+  assert.equal(labEmailText(), LAB_EMAIL_BODY);
+  assert.ok(!labEmailText().includes('Subject:'));
+  assert.ok(!labEmailText().includes(labEmailSubject(LAB)));
   assert.ok(LAB_EMAIL_BODY.startsWith('Dear all,'));
   assert.ok(LAB_EMAIL_BODY.includes('Please find the attachment for more info about the orders.'));
 });
@@ -126,6 +130,28 @@ test('base64 attachment decodes byte-identical to the input bytes, wrapped at 76
   const decoded = new Uint8Array(Buffer.from(lines.join(''), 'base64'));
   assert.equal(decoded.length, BYTES.length);
   assert.deepEqual([...decoded], [...BYTES]);
+});
+
+test('Cc: is omitted when empty, and sits directly after To: when present', () => {
+  const cc = ['ops@lean.sa', 'follow@nupco.com'];
+  const withCc = draft({ recipients: 'lab@example.sa', cc });
+  assert.deepEqual(headerNames(withCc.text),
+    ['Date', 'Subject', 'To', 'Cc', 'X-Unsent', 'MIME-Version', 'Content-Type']);
+  assert.ok(headerBlock(withCc.text).includes('Cc: ops@lean.sa, follow@nupco.com'));
+  // A comma/semicolon string is accepted and de-duplicated like To:.
+  const str = draft({ recipients: 'lab@example.sa', cc: 'a@x.sa; b@x.sa, a@x.sa' });
+  assert.ok(headerBlock(str.text).includes('Cc: a@x.sa, b@x.sa'));
+  // Cc alone (no To:) still renders, and empty values drop the header entirely.
+  assert.ok(headerNames(draft({ cc }).text).includes('Cc'));
+  for (const empty of [undefined, null, '', '   ', [], [''], ',,;']) {
+    assert.ok(!headerNames(draft({ recipients: 'lab@example.sa', cc: empty }).text).includes('Cc'),
+      `Cc: must be absent for ${JSON.stringify(empty)}`);
+  }
+});
+
+test('a CRLF injected through cc cannot forge a header', () => {
+  const { text } = draft({ cc: 'ok@lab.sa\r\nBcc: attacker@example.com' });
+  assert.ok(!/^Bcc:/m.test(text));
 });
 
 test('To: is omitted when there are no recipients, present when there are', () => {

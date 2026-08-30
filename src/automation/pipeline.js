@@ -14,9 +14,9 @@
 //
 // PHI rule unchanged: order rows live in `state` only. Nothing here logs a row
 // or writes one to storage — only aggregate numbers reach store.updateSnapshot.
-import { STR, todayISO, buildFileName } from '../i18n/ar.js?v=v2026-08-25.1';
-import { VARIANTS, normTest } from '../contracts.js?v=v2026-08-25.1';
-import { getGenLibs } from '../vendor-loader.js?v=v2026-08-25.1';
+import { STR, todayISO, buildFileName } from '../i18n/ar.js?v=v2026-08-30.1';
+import { VARIANTS, normTest } from '../contracts.js?v=v2026-08-30.1';
+import { getGenLibs } from '../vendor-loader.js?v=v2026-08-30.1';
 
 /* ------------------------------------------------------------------ *
  * Shared micro-helpers (same idioms the screens use)
@@ -266,7 +266,7 @@ function installFastTimers() {
 // Build the SlideSpec per VARIANT — the variant changes slide-5 content
 // (task rows), so one shared spec would leak internal tasks into NUPCO files.
 async function buildVariantSpec(model, variant) {
-  const mod = await tryImport('../slidespec/build-spec.js?v=v2026-08-25.1');
+  const mod = await tryImport('../slidespec/build-spec.js?v=v2026-08-30.1');
   const fn = pickFn(mod, ['buildSpec', 'build', 'makeSpec', 'toSpec']);
   if (!fn) return null;
   let spec = fn(model, { variant });
@@ -292,7 +292,7 @@ async function toBlob(result, kind) {
 // renderPptx(spec, {variant, PptxGenJS}) -> Promise<Blob>
 async function makePptx(spec, variant, libs) {
   if (!spec) return null;
-  const mod = await tryImport('../render/pptx-renderer.js?v=v2026-08-25.1');
+  const mod = await tryImport('../render/pptx-renderer.js?v=v2026-08-30.1');
   const fn = pickFn(mod, ['renderPptx', 'buildPptx', 'toPptx', 'makePptx', 'render']);
   if (!fn) return null;
   const r = await fn(spec, { variant, PptxGenJS: libs.PptxGenJS });
@@ -304,9 +304,9 @@ async function makePptx(spec, variant, libs) {
 // the host and before capture starts — screen-generate clones them into live thumbnails.
 async function makePdf(spec, variant, libs, host, onProgress, onSlides) {
   if (!spec) return null;
-  const rMod = await tryImport('../render/html-renderer.js?v=v2026-08-25.1');
+  const rMod = await tryImport('../render/html-renderer.js?v=v2026-08-30.1');
   const renderSlides = pickFn(rMod, ['renderSlides', 'renderSpec', 'renderHtml', 'render']);
-  const pMod = await tryImport('../render/pdf-export.js?v=v2026-08-25.1');
+  const pMod = await tryImport('../render/pdf-export.js?v=v2026-08-30.1');
   const exportPdf = pickFn(pMod, ['exportPdf', 'renderPdf', 'toPdf', 'buildPdf', 'render']);
   if (!renderSlides || !exportPdf) return null;
   host.innerHTML = '';
@@ -490,20 +490,23 @@ const PULL_REUSE_MS = 15000;
 
 /** Default heavy dependencies — every one overridable through `deps` (tests inject fakes). */
 const DEFAULT_DEPS = Object.freeze({
-  loadGrafana: () => import('../ingest/grafana.js?v=v2026-08-25.1'),
-  loadEngine: () => tryImport('../engine/engine.js?v=v2026-08-25.1'),
-  loadReportModel: () => import('../model/report-model.js?v=v2026-08-25.1'),
-  loadDeltaBaseline: () => tryImport('../model/delta-baseline.js?v=v2026-08-25.1'),
+  loadGrafana: () => import('../ingest/grafana.js?v=v2026-08-30.1'),
+  loadEngine: () => tryImport('../engine/engine.js?v=v2026-08-30.1'),
+  loadReportModel: () => import('../model/report-model.js?v=v2026-08-30.1'),
+  loadDeltaBaseline: () => tryImport('../model/delta-baseline.js?v=v2026-08-30.1'),
   // The delta-chip stamper. Guarded like the rest: a build without it degrades to the
   // engine's own clamped deltas instead of failing this module at load time.
-  loadDeltaWindow: () => tryImport('../model/delta-window.js?v=v2026-08-25.1'),
-  loadTaskLifecycle: () => tryImport('../model/task-lifecycle.js?v=v2026-08-25.1'),
-  loadLateLabs: () => import('../export/late-labs.js?v=v2026-08-25.1'),
-  loadTatSuggest: () => tryImport('../ingest/tat-suggest.js?v=v2026-08-25.1'),
-  loadTatLoinc: () => tryImport('../seeds/tat-lookup.js?v=v2026-08-25.1'),
+  loadDeltaWindow: () => tryImport('../model/delta-window.js?v=v2026-08-30.1'),
+  loadTaskLifecycle: () => tryImport('../model/task-lifecycle.js?v=v2026-08-30.1'),
+  loadLateLabs: () => import('../export/late-labs.js?v=v2026-08-30.1'),
+  loadTatSuggest: () => tryImport('../ingest/tat-suggest.js?v=v2026-08-30.1'),
+  loadTatLoinc: () => tryImport('../seeds/tat-lookup.js?v=v2026-08-30.1'),
   // Track 5's module; absent until it ships → the emails step reports 'skip'.
-  loadEmlDraft: () => tryImport('../export/eml-draft.js?v=v2026-08-25.1'),
-  loadDownload: () => tryImport('../ui/late-labs-section.js?v=v2026-08-25.1'),
+  loadEmlDraft: () => tryImport('../export/eml-draft.js?v=v2026-08-30.1'),
+  // The vendor contact book (To: per lab + the standard CC block). Guarded: a
+  // build without it just means drafts fall back to the Settings map alone.
+  loadLabContacts: () => tryImport('../seeds/lab-contacts.js?v=v2026-08-30.1'),
+  loadDownload: () => tryImport('../ui/late-labs-section.js?v=v2026-08-30.1'),
   produceReportFiles,
   now: () => Date.now(),
 });
@@ -532,7 +535,8 @@ function resolveTracker(state, settings) {
  * Email recipients for a lab, read from the canonical settings block
  * `settings.automation.labRecipients` — the same map the Settings tab writes and
  * late-labs-section reads. The store only ever persists comma-separated strings
- * there, but an array is tolerated too. A missing lab key yields [] (no To: line).
+ * there, but an array is tolerated too. A missing lab key yields [] (the caller
+ * then falls back to the vendor contact book).
  */
 function resolveRecipients(settings, lab) {
   const map = ((settings && settings.automation) || {}).labRecipients || {};
@@ -540,6 +544,21 @@ function resolveRecipients(settings, lab) {
   if (Array.isArray(raw)) return raw.map(String).filter(Boolean);
   if (typeof raw === 'string') return raw.split(/[,;\s]+/).filter(Boolean);
   return [];
+}
+
+/**
+ * To:/Cc: for one lab, resolved exactly as the manual button in late-labs-section
+ * does it — a Settings entry overrides the book's To:, the book supplies the CC
+ * block, and a lab it cannot confidently match contributes neither header.
+ * `lookup` is lab-contacts' lookupLabContacts, or null when the module is absent.
+ */
+function resolveHeaders(settings, lab, lookup) {
+  const override = resolveRecipients(settings, lab);
+  const hit = typeof lookup === 'function' ? lookup(lab) : null;
+  return {
+    recipients: override.length ? override : ((hit && hit.to) || []),
+    cc: (hit && hit.cc) || [],
+  };
 }
 
 /** Test names in the data with no TAT entry (mirrors the upload screen's computeUnmatched). */
@@ -808,16 +827,19 @@ export async function runAutomation({
     const build = pickFn(mod, ['buildLabEmailDraft']);
     if (typeof build !== 'function') return { status: 'skip', message: MSG.noEmlModule };
     const settings = theStore.settings || {};
+    const lookup = pickFn(await D.loadLabContacts(), ['lookupLabContacts']);
     const reportDate = (theState.reportModel && theState.reportModel.reportDate)
       || theState.reportDate || todayISO();
     let failed = 0;
     for (const lf of labFiles) {
       try {
+        const { recipients, cc } = resolveHeaders(settings, lf.lab, lookup);
         let d = build({
           lab: lf.lab,
           fileName: lf.fileName,
           xlsxBytes: lf.bytes,
-          recipients: resolveRecipients(settings, lf.lab),
+          recipients,
+          cc,
           reportDate,
         });
         if (d && typeof d.then === 'function') d = await d;
