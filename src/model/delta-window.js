@@ -69,14 +69,14 @@
 // two copies could pick different baselines and the deck silently won). A pure
 // function of (rows, reportDate, mode) cannot disagree with itself.
 
-import { computeNumbersAsOf, NUMBER_KEYS, QUEUE_KEYS } from '../engine/asof.js?v=v2026-08-31.4';
+import { computeNumbersAsOf, NUMBER_KEYS, QUEUE_KEYS } from '../engine/asof.js?v=v2026-08-31.5';
 // The Sun-based calendar math has ONE owner — model/delta-baseline.js — and this module
 // imports it rather than re-deriving it. A second copy of "which Friday opens this week"
 // is exactly how the review banner, the deck legend and the history panel drift apart.
 // Re-exported below so a consumer can reach the math through either module.
 import {
   isoToDays, isoWeekday, weekStartDay, normalizeDeltaMode,
-} from './delta-baseline.js?v=v2026-08-31.4';
+} from './delta-baseline.js?v=v2026-08-31.5';
 
 export { isoToDays, isoWeekday, weekStartDay };
 

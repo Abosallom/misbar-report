@@ -1,13 +1,13 @@
 // main.js — boot, settings store, top app bar, and screen router (Track E).
-import { state } from './state.js?v=v2026-08-31.4';
-import { STR } from './i18n/ar.js?v=v2026-08-31.4';
-import { APP_VERSION } from './version.js?v=v2026-08-31.4';
-import { el, toast } from './ui/components.js?v=v2026-08-31.4';
-import { startUpdateWatch, reloadUrlFor } from './update-check.js?v=v2026-08-31.4';
-import { SETTINGS_KEY } from './contracts.js?v=v2026-08-31.4';
-import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-08-31.4';
-import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-08-31.4';
-import { HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED, GRAFANA_SEED } from './seeds/defaults.js?v=v2026-08-31.4';
+import { state } from './state.js?v=v2026-08-31.5';
+import { STR } from './i18n/ar.js?v=v2026-08-31.5';
+import { APP_VERSION } from './version.js?v=v2026-08-31.5';
+import { el, toast } from './ui/components.js?v=v2026-08-31.5';
+import { startUpdateWatch, reloadUrlFor } from './update-check.js?v=v2026-08-31.5';
+import { SETTINGS_KEY } from './contracts.js?v=v2026-08-31.5';
+import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-08-31.5';
+import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-08-31.5';
+import { HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED, GRAFANA_SEED } from './seeds/defaults.js?v=v2026-08-31.5';
 
 /* ------------------------------------------------------------------ *
  * Settings store — prefers Track C's src/store.js, falls back to a
@@ -163,7 +163,7 @@ async function resolveStore() {
   const local = createLocalStore(persistent);
   let backend = null;
   try {
-    const mod = await import('./store.js?v=v2026-08-31.4');
+    const mod = await import('./store.js?v=v2026-08-31.5');
     if (mod && typeof mod.loadSettings === 'function' && typeof mod.saveSettings === 'function') {
       const s = mod.loadSettings();
       if (s && s.tatLookup) backend = mod;
@@ -177,10 +177,10 @@ async function resolveStore() {
  * ------------------------------------------------------------------ */
 
 const SCREEN_MODULES = {
-  upload: './ui/screen-upload.js?v=v2026-08-31.4',
-  review: './ui/screen-review.js?v=v2026-08-31.4',
-  generate: './ui/screen-generate.js?v=v2026-08-31.4',
-  settings: './ui/screen-settings.js?v=v2026-08-31.4', // Track C
+  upload: './ui/screen-upload.js?v=v2026-08-31.5',
+  review: './ui/screen-review.js?v=v2026-08-31.5',
+  generate: './ui/screen-generate.js?v=v2026-08-31.5',
+  settings: './ui/screen-settings.js?v=v2026-08-31.5', // Track C
 };
 
 let appEl = null;
@@ -478,7 +478,7 @@ async function downloadAutoExtras(result) {
   if (!items.length) return 0;
   let mod = null;
   try {
-    mod = await import('./ui/late-labs-section.js?v=v2026-08-31.4');
+    mod = await import('./ui/late-labs-section.js?v=v2026-08-31.5');
   } catch (e) {
     console.warn('[auto] download helper unavailable — lab files/drafts not saved', e);
     return 0;
@@ -617,7 +617,7 @@ async function startAutomationRun(mode, store) {
 
   let mod = null;
   try {
-    mod = await import('./automation/pipeline.js?v=v2026-08-31.4');
+    mod = await import('./automation/pipeline.js?v=v2026-08-31.5');
   } catch (e) {
     console.warn('[auto] pipeline module unavailable — trigger ignored', e);
     release();
@@ -752,7 +752,7 @@ async function boot() {
   // ephemeral case then reaches buildShell/startApp's storage warning, which
   // tells the user the sign-in cannot be remembered on this browser.
   try {
-    lockMod = await import('./ui/lock.js?v=v2026-08-31.4');
+    lockMod = await import('./ui/lock.js?v=v2026-08-31.5');
   } catch { lockMod = null; /* lock module absent — open boot (dev) */ }
   if (lockMod && typeof lockMod.isUnlocked === 'function' && !lockMod.isUnlocked(store)) {
     const root = document.getElementById('app-shell') || document.body;
@@ -808,8 +808,8 @@ function startApp(store) {
   // TAT-lookup Excel merge hook consumed by the settings screen (Track C).
   state.onTatFileMerge = async (file) => {
     const [{ getXLSX }, { parseTatLookupXlsx }] = await Promise.all([
-      import('./vendor-loader.js?v=v2026-08-31.4'),
-      import('./ingest/xlsx.js?v=v2026-08-31.4'),
+      import('./vendor-loader.js?v=v2026-08-31.5'),
+      import('./ingest/xlsx.js?v=v2026-08-31.5'),
     ]);
     const XLSX = await getXLSX();
     const { tests } = parseTatLookupXlsx(await file.arrayBuffer(), XLSX);
@@ -829,7 +829,7 @@ function startApp(store) {
   // Connection test consumed by the settings screen's اختبار الاتصال button.
   state.onGrafanaTest = async () => {
     try {
-      const mod = await import('./ingest/grafana.js?v=v2026-08-31.4');
+      const mod = await import('./ingest/grafana.js?v=v2026-08-31.5');
       const g = store.loadSettings().grafana || {};
       const now = Date.now();
       const res = await mod.fetchKamcOrders(g, { fromMs: now - 7 * 86400000, toMs: now });

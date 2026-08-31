@@ -8,6 +8,8 @@
 // agents who ship the specimen abroad, and those orders are INTERNATIONAL. Only
 // seeds/sendout-master.js (the ops workbook) can make that call.
 //
+import { inferBlankFacilities } from '../engine/infer-facility.js?v=v2026-08-31.5';
+
 // PURE module: no DOM, no clock, no network, no vendor imports — the browser and
 // `node --test` share one deterministic path. The catalogue is INJECTED, never
 // imported: it is commercial tender data that ships encrypted (see
@@ -136,7 +138,17 @@ function indexMaster(master) {
  */
 export function analyseSendout(orders, master) {
   const byVendor = indexMaster(master);
-  const rows = Array.isArray(orders) ? orders : [];
+  const given = Array.isArray(orders) ? orders : [];
+
+  // A blank performing facility is filled from the other orders of the SAME TEST,
+  // using the SAME shared rule the engine applies (engine/infer-facility.js). One
+  // implementation, so the compliance table and these slides can never disagree
+  // about which lab an order belongs to. Ambiguous blanks are left blank and fall
+  // through to `unmapped` below.
+  const filled = inferBlankFacilities(given);
+  const rows = filled.size
+    ? given.map((r, i) => (filled.has(i) ? { ...r, facility: filled.get(i) } : r))
+    : given;
 
   // STEP 1 - cancelled orders are out of every count and every percentage.
   const kept = rows.filter((o) => String((o && o.rawStatus) || '').trim() !== CANCELLED_STATUS);
@@ -144,15 +156,13 @@ export function analyseSendout(orders, master) {
   const resolved = [];
   const unmapped = [];
   const unresolved = [];
-  const blank = [];
 
   for (const o of kept) {
     const key = norm(o && o.facility);
-    // A BLANK performing facility is not an unrecognised lab, it is a gap in the
-    // order record - held back for the inference below. An unrecognised NAME is
-    // never inferred: that would paper over a real hole in the master file
-    // instead of surfacing it.
-    if (!key) { blank.push(o); continue; }
+    // Still blank here means the inference above could NOT settle it (the test runs
+    // at more than one lab, or the row carries no test name). Genuinely
+    // unattributable, so it is reported, never guessed.
+    if (!key) { unmapped.push(o); continue; }
     const vkey = FACILITY_TO_VENDOR[key];
     const entry = vkey ? byVendor.get(vkey) : null;
     if (!entry) { unmapped.push(o); continue; }
@@ -173,32 +183,24 @@ export function analyseSendout(orders, master) {
     }
   }
 
-  // Orders with NO performing facility: take the lab from the other orders of
-  // the SAME TEST, and only when every one of them lands on a single lab. A test
-  // split across labs is not safe to infer from, so the order stays unmapped -
-  // one unattributed order is a smaller problem than one silently credited to
-  // the wrong lab. Every inference is reported, and never shown as an inference
-  // on a slide.
-  const byTest = new Map();
-  for (const r of resolved) {
-    const t = normTestName(r.order.testName);
-    if (!t) continue;
-    let s = byTest.get(t);
-    if (!s) { s = new Map(); byTest.set(t, s); }
-    const k = keyOf(r.lab, r.country, r.reflab);
-    s.set(k, { lab: r.lab, country: r.country, reflab: r.reflab, support: (s.get(k)?.support || 0) + 1 });
-  }
+  // Report what the shared rule filled in, so a hole in the order data is visible
+  // rather than silently papered over. These orders ARE on the slides — attributed
+  // to the lab every other order of their test names — but the reader is told.
   const inferred = [];
-  for (const o of blank) {
-    const t = normTestName(o && o.testName);
-    const cands = t ? byTest.get(t) : null;
-    if (cands && cands.size === 1) {
-      const { lab, country, reflab, support } = [...cands.values()][0];
-      resolved.push({ order: o, lab, country, reflab });
-      inferred.push({ order: o, lab, country, reflab, support });
-    } else {
-      unmapped.push(o);
-    }
+  for (const [i, facility] of filled) {
+    const o = rows[i];
+    if (!kept.includes(o)) continue;                 // cancelled: off every count
+    const hit = resolved.find((r) => r.order === o);
+    if (!hit) continue;                              // filled, but still unmapped
+    inferred.push({
+      order: given[i],
+      lab: hit.lab,
+      country: hit.country,
+      reflab: hit.reflab,
+      support: given.filter((r, j) => j !== i
+        && normTestName(r && r.testName) === normTestName(o && o.testName)
+        && String((r && r.facility) || '').trim() !== '').length,
+    });
   }
 
   const total = kept.length;

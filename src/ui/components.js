@@ -1,5 +1,5 @@
 // ui/components.js — shared DOM helpers used by Track E screens.
-import { STR } from '../i18n/ar.js?v=v2026-08-31.4';
+import { STR } from '../i18n/ar.js?v=v2026-08-31.5';
 
 /** Tiny hyperscript helper. */
 export function el(tag, props = {}, children = []) {

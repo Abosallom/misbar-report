@@ -25,12 +25,13 @@
 // Both changes make the golden workbook's _cachedDue/_cachedDelay/_cachedStatus
 // an OUT-OF-DATE external oracle for due-derived fields — deliberately.
 
-import { normTest, normFacility } from '../contracts.js?v=v2026-08-31.4';
+import { normTest, normFacility } from '../contracts.js?v=v2026-08-31.5';
 import {
   parseDateTime, toEpochDay, workday, dayDiff, calDaysBetween, monthKey,
-} from './workday.js?v=v2026-08-31.4';
-import { buildTatIndex, resolveTat, CHART_TEST_CATALOG } from './tat.js?v=v2026-08-31.4';
-import { dedupeRows } from './dedupe.js?v=v2026-08-31.4';
+} from './workday.js?v=v2026-08-31.5';
+import { buildTatIndex, resolveTat, CHART_TEST_CATALOG } from './tat.js?v=v2026-08-31.5';
+import { dedupeRows } from './dedupe.js?v=v2026-08-31.5';
+import { fillBlankFacilities } from './infer-facility.js?v=v2026-08-31.5';
 
 export const STATUS = Object.freeze({
   CANCELLED: 'Cancelled',
@@ -331,6 +332,10 @@ function buildByLab(nonCancelled) {
     return labs.get(name);
   };
   for (const e of nonCancelled) {
+    // Reachable only when the blank could NOT be resolved (engine/infer-facility.js
+    // already filled every unambiguous one): the test runs at more than one lab, or
+    // the row carries no test name either. Such a row is genuinely unattributable and
+    // must stay visible rather than be folded into somebody else's row.
     const L = get(e.facility ?? 'غير محدد');
     L.total++;
     // pipeline: no received date (and not rejected) — pre-receipt lines.
@@ -358,7 +363,10 @@ function buildByLab(nonCancelled) {
       late: L.late,
       latePct: L.awaitingResult > 0 ? round1((L.late / L.awaitingResult) * 100) : 0,
     }))
-    .sort((a, b) => b.total - a.total || String(a.lab ?? '').localeCompare(String(b.lab ?? '')));
+    // ALPHABETICAL by lab, matching the send-out slides (user request 2026-08-31) so
+    // the two tables in one deck can be read side by side without re-finding a lab.
+    // Previously total-DESC, which put the same labs in a different order on each.
+    .sort((a, b) => String(a.lab ?? '').localeCompare(String(b.lab ?? '')));
 }
 
 /**
@@ -425,7 +433,12 @@ export function compute(rows, tatLookup, opts = {}) {
   const chartTests = opts.chartTests || CHART_TEST_CATALOG;
   const cancelledByMonth = opts.cancelledByMonth || {};
 
-  const source = opts.dedupe === true ? dedupeRows(rows) : rows;
+  // A row whose 'Performing facility name' is EMPTY takes the facility of the other
+  // orders of the same test, when they all name one lab (engine/infer-facility.js).
+  // Without this the hole became its own phantom lab — 'غير محدد' — on the compliance
+  // table, while the real lab's row sat one short. An unrecognised NAME is never
+  // touched; only a genuinely blank field is filled.
+  const source = fillBlankFacilities(opts.dedupe === true ? dedupeRows(rows) : rows);
   // enrichedAll keeps EVERY row; unmatchedTests reporting reads from it so the
   // upload warning still lists no-TAT tests even when they are excluded below.
   const enrichedAll = source.map((r) => enrichRow(r, tatIndex, asOfMs, opts));
