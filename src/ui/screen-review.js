@@ -1,20 +1,20 @@
 // ui/screen-review.js — review/edit report content with a live slide preview (Track E).
-import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-08-31.2';
-import { el, editableTable, textareaField, toast } from './components.js?v=v2026-08-31.2';
-import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-08-31.2';
-import { autoDraft, splitTaskLists } from '../model/drafts.js?v=v2026-08-31.2';
-import { analyseSendout, hasMaster } from '../model/sendout.js?v=v2026-08-31.2';
-import { buildHistoryPanel } from './history-table.js?v=v2026-08-31.2';
+import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-08-31.3';
+import { el, editableTable, textareaField, toast } from './components.js?v=v2026-08-31.3';
+import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-08-31.3';
+import { autoDraft, splitTaskLists } from '../model/drafts.js?v=v2026-08-31.3';
+import { analyseSendout, hasMaster } from '../model/sendout.js?v=v2026-08-31.3';
+import { buildHistoryPanel } from './history-table.js?v=v2026-08-31.3';
 import {
   normalizeDeltaMode, isWeekDeltaMode, DEFAULT_DELTA_MODE,
-} from '../model/delta-baseline.js?v=v2026-08-31.2';
+} from '../model/delta-baseline.js?v=v2026-08-31.3';
 // Same module instance drafts.js already imports (identical specifier) — the grace
 // re-check below MUST use task-lifecycle's own identity/status vocabulary, never a
 // second local copy of it. Static, not guarded: drafts.js (imported above) already
 // depends on this module, so there is no new failure mode.
 import {
   CLOSED as CLOSED_STATUS, LIST_EXTERNAL, LIST_INTERNAL, taskKey,
-} from '../model/task-lifecycle.js?v=v2026-08-31.2';
+} from '../model/task-lifecycle.js?v=v2026-08-31.3';
 
 /* small local module helpers (kept local to avoid cross-screen coupling) */
 async function tryImport(path) { try { return await import(path); } catch { return null; } }
@@ -199,8 +199,8 @@ export const DELTA_MODE_PILLS = [
   },
   {
     mode: 'week',
-    label: 'أسبوعي — نشاط الأسبوع (الأحد–الخميس)',
-    title: 'الأحداث المؤرخة من أحد هذا الأسبوع حتى تاريخ التقرير — والأرقام الكبيرة تبقى تراكمية',
+    label: 'أسبوعي — نشاط الأسبوع (الجمعة–الخميس)',
+    title: 'الأحداث المؤرخة من جمعة هذا الأسبوع حتى تاريخ التقرير — والأرقام الكبيرة تبقى تراكمية',
   },
 ];
 
@@ -234,7 +234,7 @@ export function deltaWording(deltaMode, deltaWindow) {
   const startAr = ar(dw && dw.start);
   const endAr = ar(dw && dw.end);
   if (week) {
-    const span = startAr && endAr ? ` (الأحد ${startAr} – ${endAr})` : ' (الأحد–الخميس)';
+    const span = startAr && endAr ? ` (الجمعة ${startAr} – ${endAr})` : ' (الجمعة–الخميس)';
     return {
       heading: 'نشاط الأسبوع' + span,
       sub: 'الأحداث المؤرخة داخل هذه النافذة — الأرقام الكبيرة في الشرائح تبقى تراكمية',
@@ -460,7 +460,7 @@ export async function render(container, ctx) {
   // any failure, which simply omits the two slides.
   if (state.sendoutMaster === undefined) {
     const dataKey = ((store.settings || {}).grafana || {}).dataKey || '';
-    const mod = await tryImport('../ingest/sendout-master.js?v=v2026-08-31.2');
+    const mod = await tryImport('../ingest/sendout-master.js?v=v2026-08-31.3');
     state.sendoutMaster = (mod && mod.loadSendoutMaster)
       ? await mod.loadSendoutMaster(dataKey)
       : null;
@@ -490,7 +490,7 @@ export async function render(container, ctx) {
   // Guarded import, exactly as the retired picker was: a build without the module
   // degrades to the engine's own deltas instead of throwing. Re-run below on a
   // report-date change and on a mode switch; being PURE, every re-run agrees.
-  const dwMod = await tryImport('../model/delta-window.js?v=v2026-08-31.2');
+  const dwMod = await tryImport('../model/delta-window.js?v=v2026-08-31.3');
   const stampWindow = dwMod && dwMod.stampWindowDeltas;
   // The chips need the parsed CSV rows: with no upload in this session (mock preview)
   // stampWindowDeltas leaves the engine's deltas alone and stamps no window, and the
@@ -574,9 +574,9 @@ export async function render(container, ctx) {
     const token = ++renderToken;
     model.reportDate = state.reportDate;
     stampDeltas(); // re-window the chips for the current report date (pure → idempotent)
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-08-31.2');
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-08-31.3');
     const buildSpec = pickFn(specMod, ['buildSpec', 'build', 'makeSpec', 'toSpec']);
-    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-08-31.2');
+    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-08-31.3');
     const renderFn = pickFn(rendMod, ['renderSpec', 'renderSlides', 'renderHtml', 'render']);
 
     if (!buildSpec || !renderFn) {
@@ -966,7 +966,7 @@ export async function render(container, ctx) {
     el('summary', { class: 'card__title', style: 'cursor:pointer', text: STR.review.labelsCardTitle }),
   ]);
   (async () => {
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-08-31.2');
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-08-31.3');
     const LABEL_NAMES = specMod && specMod.LABEL_NAMES;
     const DEFAULT_LABELS = (specMod && specMod.DEFAULT_LABELS) || {};
     if (!LABEL_NAMES || typeof LABEL_NAMES !== 'object') {

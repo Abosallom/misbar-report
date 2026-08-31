@@ -25,8 +25,8 @@
 //                                   OPT_IN_CARDS below for why those two are not a
 //                                   contradiction)
 //   m.overrides[key]              per-run manual NUMBER overrides (suppresses that delta chip)
-import { COLORS as C, GEOM } from '../theme.js?v=v2026-08-31.2';
-import { AR_COUNTRY, AR_COUNTRY_SHORT, reflabShort } from '../model/sendout.js?v=v2026-08-31.2';
+import { COLORS as C, GEOM } from '../theme.js?v=v2026-08-31.3';
+import { AR_COUNTRY, AR_COUNTRY_SHORT, reflabShort } from '../model/sendout.js?v=v2026-08-31.3';
 
 // EXPLICIT-TRUE kpiCards KEYS. reportOptions.kpiCards normally reads "on unless === false"
 // (see buildExec's cardDefs filter). The keys in this set INVERT that: they render only
@@ -116,9 +116,9 @@ export const DEFAULT_LABELS = {
   // 2026-08-05 — THE LEGEND NOW NAMES A WINDOW, NOT A BASELINE. THE INVARIANT: the big
   // numbers on this slide (and on the monthly/compliance slides) REMAIN CUMULATIVE
   // TOTALS; only the chips changed meaning — they are the WEEK'S ACTIVITY, the events
-  // dated Sunday..report-day, counted from the CSV's own date columns
+  // dated Friday..report-day, counted from the CSV's own date columns
   // (model/delta-window.js). So the legend states the window's own dates:
-  //   week  → '▲ نشاط الأسبوع من الأحد {start} حتى {end}'
+  //   week  → '▲ نشاط الأسبوع من الجمعة {start} حتى {end}'
   //   daily → '▲ نشاط يوم {end}'
   // The FIVE baseline-era keys below are RETIRED but KEPT as registry orphans: a labels
   // override saved against one of them must not vanish out from under the operator, and
@@ -127,7 +127,7 @@ export const DEFAULT_LABELS = {
   // execDeltaLegend is NOT retired: it is the undated generic fallback used whenever a
   // model carries no deltaWindow (rows unavailable → the engine's own deltas).
   execDeltaLegend: '▲ التغيّر منذ التقرير السابق',
-  execDeltaLegendWeekWindow: '▲ نشاط الأسبوع من الأحد {start} حتى {end}',
+  execDeltaLegendWeekWindow: '▲ نشاط الأسبوع من الجمعة {start} حتى {end}',
   execDeltaLegendDayWindow: '▲ نشاط يوم {end}',
   execDeltaLegendDaily: '▲ التغيّر منذ آخر تقرير ({date})',
   execDeltaLegendWeek: '▲ التغيّر منذ بداية الأسبوع — مقارنة بتقرير ({date})',
@@ -379,7 +379,7 @@ export const LABEL_NAMES = {
   kpiShipped: 'بطاقة: فحوصات شُحنت ولم تُستلم',
   execCompletionRate: 'سطر نسبة الاكتمال الإجمالية (غير مستخدم حالياً)',
   execDeltaLegend: 'مفتاح النشاط — الصيغة الافتراضية (بدون نافذة)',
-  execDeltaLegendWeekWindow: 'مفتاح نشاط الأسبوع — من الأحد ({start}) حتى ({end})',
+  execDeltaLegendWeekWindow: 'مفتاح نشاط الأسبوع — من الجمعة ({start}) حتى ({end})',
   execDeltaLegendDayWindow: 'مفتاح نشاط اليوم — ({end})',
   execDeltaLegendDaily: 'مفتاح التغيّر اليومي — منذ آخر تقرير ({date}) (غير مستخدم حالياً)',
   execDeltaLegendWeek: 'مفتاح التغيّر الأسبوعي — منذ بداية الأسبوع ({date}) (غير مستخدم حالياً)',

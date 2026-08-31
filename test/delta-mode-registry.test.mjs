@@ -61,9 +61,9 @@ const RETIRED_LEGEND_KEYS = [
 ];
 
 // build-spec's fmtDate: 'yyyy-mm-dd' → 'dd / mm / yyyy'.
-const WEEK_START_ISO = '2026-07-05'; // Sunday
+const WEEK_START_ISO = '2026-07-03'; // Friday — the delta week opens Fri and closes Thu
 const WEEK_END_ISO = '2026-07-09';   // Thursday
-const START_TXT = '05 / 07 / 2026';
+const START_TXT = '03 / 07 / 2026';
 const END_TXT = '09 / 07 / 2026';
 
 // The exec-summary delta legend is the only '▲'-prefixed text on the funnel slide, and
@@ -127,7 +127,7 @@ test('every mode has its own window legend, with the window dates substituted', 
     if (mode === 'week') {
       assert.ok(template.includes('{start}'), 'the week legend must name where the window opens');
       expected = expected.replace('{start}', START_TXT);
-      assert.equal(w.start, WEEK_START_ISO, 'the week opens on Sunday');
+      assert.equal(w.start, WEEK_START_ISO, 'the week opens on Friday');
     }
     assert.equal(legendTextOf(w), expected, `mode '${mode}' must render ${key}`);
     // No placeholder may survive into a delivered slide.
@@ -157,7 +157,8 @@ test('the legend says ACTIVITY, never "change since the previous report"', () =>
   }
   // The week wording anchors on Sunday explicitly — the operator has to be able to
   // read the window off the slide without knowing the app's calendar rules.
-  assert.ok(DEFAULT_LABELS.execDeltaLegendWeekWindow.includes('الأحد'));
+  assert.ok(DEFAULT_LABELS.execDeltaLegendWeekWindow.includes('الجمعة'),
+    'the deck legend must name the day the window actually opens');
 });
 
 test('a malformed or absent window degrades to the undated generic line', () => {
