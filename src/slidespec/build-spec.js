@@ -25,8 +25,8 @@
 //                                   OPT_IN_CARDS below for why those two are not a
 //                                   contradiction)
 //   m.overrides[key]              per-run manual NUMBER overrides (suppresses that delta chip)
-import { COLORS as C, GEOM } from '../theme.js?v=v2026-08-31.3';
-import { AR_COUNTRY, AR_COUNTRY_SHORT, reflabShort } from '../model/sendout.js?v=v2026-08-31.3';
+import { COLORS as C, GEOM } from '../theme.js?v=v2026-08-31.4';
+import { AR_COUNTRY, AR_COUNTRY_SHORT, reflabShort } from '../model/sendout.js?v=v2026-08-31.4';
 
 // EXPLICIT-TRUE kpiCards KEYS. reportOptions.kpiCards normally reads "on unless === false"
 // (see buildExec's cardDefs filter). The keys in this set INVERT that: they render only
@@ -1903,6 +1903,12 @@ export function buildSpec(reportModel, { variant = 'internal' } = {}) {
   const middleDefs = [
     { key: 'execFunnel', build: () => [buildExecFunnel(m)] },
     { key: 'monthly', build: () => [buildMonthly(m)] },
+    // Send-out — two slides under ONE toggle: the local/international split and
+    // its by-country bars, then the lab x country table. They render only when
+    // the model actually carries send-out figures; a run whose order data never
+    // reached the analysis simply omits them rather than drawing empty axes.
+    { key: 'sendout', build: () => (m.sendout && m.sendout.total
+      ? [buildSendoutCountries(m), buildSendoutLabs(m)] : []) },
     { key: 'compliance', build: () => [buildCompliance(m)] },
     { key: 'action', build: () => buildAction(m, variant) },
     // Challenges & risks — SPLIT OFF the action slide 2026-08-04. It is a NORMAL (default
@@ -1911,12 +1917,6 @@ export function buildSpec(reportModel, { variant = 'internal' } = {}) {
     // before this key existed — they carry no flag and must keep rendering the content the
     // action slide used to hold, not silently drop it.
     { key: 'challenges', build: () => [buildChallenges(m)] },
-    // Send-out — two slides under ONE toggle: the local/international split and
-    // its by-country bars, then the lab x country table. They render only when
-    // the model actually carries send-out figures; a run whose order data never
-    // reached the analysis simply omits them rather than drawing empty axes.
-    { key: 'sendout', build: () => (m.sendout && m.sendout.total
-      ? [buildSendoutCountries(m), buildSendoutLabs(m)] : []) },
     // Definitions ('منهجية الأرقام') — default OFF (opt-in, see OPT_IN_SLIDES); when the
     // user switches it on in Settings it renders just before thanks and participates in
     // the sequential footer numbering like the other middle slides.
