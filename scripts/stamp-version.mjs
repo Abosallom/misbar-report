@@ -38,7 +38,7 @@
 //
 // Usage: node scripts/stamp-version.mjs
 
-import { readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { join, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -167,9 +167,23 @@ const indexOut = indexSrc.replace(/\?v=[^"'\s>&]*/g, () => {
 });
 if (indexOut !== indexSrc) writeFileSync(indexPath, indexOut);
 
+// ---- 3b. publish version.json ----------------------------------------------
+// The running app fetches this (cache:'no-store') to notice that a NEWER build
+// is deployed than the index.html its tab booted from. Written HERE, from the
+// same APP_VERSION every ?v= is stamped with, so the published version and the
+// stamped module graph can never disagree — a hand-maintained copy would drift
+// on the first deploy someone forgot to update it, and a drifted version.json
+// means either a banner that never clears or one that never appears.
+const versionJsonPath = join(ROOT, 'version.json');
+const versionJson = `${JSON.stringify({ version: VERSION }, null, 2)}\n`;
+const versionJsonChanged = !existsSync(versionJsonPath)
+  || readFileSync(versionJsonPath, 'utf8') !== versionJson;
+if (versionJsonChanged) writeFileSync(versionJsonPath, versionJson);
+
 // ---- 4. summary -------------------------------------------------------------
 console.log(`stamp-version: APP_VERSION = ${VERSION}`);
 console.log(`  src files changed : ${filesChanged}`);
 console.log(`  specifiers stamped: ${specStamped}`);
 console.log(`  index.html ?v=    : ${indexHits} rewritten`);
+console.log(`  version.json      : ${versionJsonChanged ? 'written' : 'unchanged'} (${VERSION})`);
 if (filesSkipped) console.log(`  skipped (STAMP_SKIP): ${filesSkipped} -> ${skippedList.join(', ')}`);

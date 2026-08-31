@@ -717,3 +717,53 @@ html[data-theme='dark'] .st-toast { color: #fff; }
 
 /* App-bar theme toggle — inherits .navbtn look; just add the icon sizing. */
 .navbtn--theme { font-size: 1.05rem; padding: 8px 10px; }
+
+/* Update banner — raised when a newer build is deployed than the one running.
+   Fixed to the bottom so it never displaces the app bar or the current screen.
+
+   z-index MUST clear the access gate (lock.js paints a fixed inset:0 overlay at
+   9999). The gate is the one screen a badly stale build may never get past, so
+   a banner hidden behind it would be useless exactly when it matters most —
+   and because the gate's overlay takes pointer events, a lower banner is not
+   merely invisible but unclickable. Keep this above 9999. */
+.update-banner {
+  position: fixed;
+  inset-inline: 12px;
+  bottom: 12px;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-inline: auto;
+  max-width: 520px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--blue-900, #1E3A8A);
+  color: #fff;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, .35);
+  font-size: .82rem;
+}
+.update-banner__text { font-weight: 700; }
+.update-banner__ver { opacity: .75; font-size: .72rem; }
+.update-banner__btn {
+  margin-inline-start: auto;
+  border: 0;
+  border-radius: 8px;
+  padding: 6px 12px;
+  background: #fff;
+  color: var(--blue-900, #1E3A8A);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.update-banner__close {
+  border: 0;
+  background: none;
+  color: #fff;
+  opacity: .7;
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+}
+.update-banner__close:hover { opacity: 1; }
