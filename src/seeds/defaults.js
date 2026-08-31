@@ -42,7 +42,8 @@ export const REPORT_OPTIONS_SEED = {
   // tasks-and-challenges slide (2026-08-04); it ships ON like the other content
   // slides, and build-spec also renders it when the key is absent entirely.
   slides: {
-    execFunnel: true, monthly: true, compliance: true, action: true, challenges: true, definitions: false,
+    execFunnel: true, monthly: true, compliance: true, action: true, challenges: true,
+    sendout: true, definitions: false,
   },
   kpiCards: {
     total: true,

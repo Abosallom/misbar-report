@@ -3,7 +3,7 @@
 
 /** Dynamic ESM import of SheetJS. Returns the XLSX namespace object. */
 export async function getXLSX() {
-  const mod = await import('../vendor/xlsx.mjs?v=v2026-08-31.1');
+  const mod = await import('../vendor/xlsx.mjs?v=v2026-08-31.2');
   // xlsx.mjs exposes named exports and (usually) a default namespace.
   return mod.default && mod.default.utils ? mod.default : mod;
 }

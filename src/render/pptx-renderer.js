@@ -1,7 +1,7 @@
 // src/render/pptx-renderer.js
 // renderPptx(spec, {variant, PptxGenJS}) -> Blob (.pptx). Maps SlideSpec elements 1:1 to
 // PptxGenJS on a 13.333 x 7.5 in wide layout. internalOnly slides are dropped for 'nupco'.
-import { COLORS as C } from '../theme.js?v=v2026-08-31.1';
+import { COLORS as C } from '../theme.js?v=v2026-08-31.2';
 
 const hex = (c) => (c ? String(c).replace('#', '') : c);
 // Arabic + Arabic Supplement/Extended + presentation forms (same range html-renderer uses),
@@ -66,7 +66,9 @@ function addTable(slide, e) {
           align: c.align || 'center',
           valign: 'middle',
           fontFace: 'Cairo',
-          fontSize: (isHead ? (e.headerSize || 10) : (e.bodySize || 10)),
+          // c.size lets ONE column sit at a different size (the send-out table
+          // sets the reference-lab column smaller) without a second table.
+          fontSize: c.size || (isHead ? (e.headerSize || 10) : (e.bodySize || 10)),
           rtlMode: isArabic(t),
         },
       };

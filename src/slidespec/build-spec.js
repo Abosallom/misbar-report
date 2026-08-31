@@ -25,7 +25,8 @@
 //                                   OPT_IN_CARDS below for why those two are not a
 //                                   contradiction)
 //   m.overrides[key]              per-run manual NUMBER overrides (suppresses that delta chip)
-import { COLORS as C, GEOM } from '../theme.js?v=v2026-08-31.1';
+import { COLORS as C, GEOM } from '../theme.js?v=v2026-08-31.2';
+import { AR_COUNTRY, AR_COUNTRY_SHORT, reflabShort } from '../model/sendout.js?v=v2026-08-31.2';
 
 // EXPLICIT-TRUE kpiCards KEYS. reportOptions.kpiCards normally reads "on unless === false"
 // (see buildExec's cardDefs filter). The keys in this set INVERT that: they render only
@@ -308,6 +309,23 @@ export const DEFAULT_LABELS = {
   catalogNote: '* وفق قائمة الفحوصات المعتمدة',
   // Definitions slide ('منهجية الأرقام') — title, column headers, and per-row
   // metric + one-line definition. Definitions mirror the engine's documented rules.
+  sendoutTitle: 'أين تُجرى الفحوصات: محلي مقابل دولي وحسب الدولة',
+  sendoutSubtitle: 'بحسب دولة المختبر المُنفِّذ من ملف الموردين الرئيسي · لا تشمل الطلبات الملغاة',
+  sendoutLocal: 'محلي — المملكة العربية السعودية',
+  sendoutIntl: 'دولي — خارج المملكة العربية السعودية',
+  sendoutShare: 'تمثل {pct}% من إجمالي الطلبات',
+  sendoutByCountry: 'توزيع الطلبات على الدول',
+  sendoutColourNote: 'اللون يطابق البطاقات أعلاه: الأزرق محلي · البرتقالي دولي · طول الشريط نسبةً إلى إجمالي الطلبات {total}',
+  sendoutLabsTitle: 'الطلبات حسب المختبر والدولة',
+  sendoutLabsSubtitle: 'صف لكل مختبر ودولة · المختبر العامل في أكثر من دولة له صف لكل دولة وتُعرض صفوفه متجاورة',
+  sendoutColLab: 'المختبر',
+  sendoutColCountry: 'الدولة',
+  sendoutColRefLab: 'المختبر المرجعي',
+  sendoutColOrders: 'الطلبات',
+  sendoutColShare: 'النسبة من الإجمالي',
+  sendoutTotalRow: 'إجمالي الطلبات',
+  sendoutBasis: 'الأرقام كما وردت من التحليل · أساس الحساب: جميع الطلبات غير الملغاة {total}',
+  sendoutOneCountry: 'كل مختبر يعمل في دولة واحدة في هذه الفترة، فلا توجد صفوف مُظللة.',
   defsTitle: 'منهجية الأرقام',
   defsColMetric: 'المؤشر',
   defsColDef: 'التعريف',
@@ -412,6 +430,23 @@ export const LABEL_NAMES = {
   execCancelledHistPre: 'ملاحظة الملغاة: بادئة الجزء التاريخي',
   execCancelledHistPost: 'ملاحظة الملغاة: لاحقة الجزء التاريخي',
   catalogNote: 'حاشية قائمة الفحوصات (مقياس الالتزام)',
+  sendoutTitle: 'عنوان شريحة أين تُجرى الفحوصات',
+  sendoutSubtitle: 'أين تُجرى الفحوصات: سطر التوضيح',
+  sendoutLocal: 'أين تُجرى الفحوصات: عنوان بطاقة المحلي',
+  sendoutIntl: 'أين تُجرى الفحوصات: عنوان بطاقة الدولي',
+  sendoutShare: 'أين تُجرى الفحوصات: سطر النسبة تحت البطاقة — {pct}',
+  sendoutByCountry: 'أين تُجرى الفحوصات: ترويسة توزيع الدول',
+  sendoutColourNote: 'أين تُجرى الفحوصات: حاشية الألوان — {total}',
+  sendoutLabsTitle: 'عنوان شريحة الطلبات حسب المختبر والدولة',
+  sendoutLabsSubtitle: 'الطلبات حسب المختبر: سطر التوضيح',
+  sendoutColLab: 'جدول المختبرات: ترويسة عمود المختبر',
+  sendoutColCountry: 'جدول المختبرات: ترويسة عمود الدولة',
+  sendoutColRefLab: 'جدول المختبرات: ترويسة عمود المختبر المرجعي',
+  sendoutColOrders: 'جدول المختبرات: ترويسة عمود الطلبات',
+  sendoutColShare: 'جدول المختبرات: ترويسة عمود النسبة',
+  sendoutTotalRow: 'جدول المختبرات: صف الإجمالي',
+  sendoutBasis: 'جدول المختبرات: حاشية أساس الحساب — {total}',
+  sendoutOneCountry: 'جدول المختبرات: حاشية عدم وجود مختبر متعدد الدول',
   defsTitle: 'عنوان شريحة منهجية الأرقام',
   defsColMetric: 'منهجية الأرقام: ترويسة عمود المؤشر',
   defsColDef: 'منهجية الأرقام: ترويسة عمود التعريف',
@@ -1673,6 +1708,163 @@ function buildDefinitions(m) {
   return { id: 'definitions', bg: C.white, elements: [...chrome(L('defsTitle')), table] };
 }
 
+
+// ============================================================================
+// Send-out — where the tests are actually PERFORMED (two slides)
+//
+// GEOMETRY IS THE APPROVED DECK's, converted from its EMU verbatim (EMU/914400):
+// cards 5.971 x 1.861 at y 1.028, bar track 6.804 wide at x 2.778, rows every
+// 0.694. Corner radii are the deck's explicit roundRect adjusts (card adj 3125
+// -> 0.058in, bars adj 10000 -> 0.031in), not PowerPoint's default.
+//
+// COLOUR CARRIES MEANING and must stay tied to the cards: Saudi Arabia in the
+// Local navy, every other country in the International amber. A country with no
+// orders this period is omitted entirely rather than drawn as a zero bar.
+// ============================================================================
+const SO = {
+  cardY: 1.028, cardW: 5.971, cardH: 1.861, cardR: 0.058,
+  localX: 6.833, intlX: 0.5, accentW: 0.069,
+  barX: 2.778, barW: 6.804, barH: 0.306, barR: 0.031,
+  row0: 3.861, rowStep: 0.694, barDY: 0.042,
+};
+// Bars are right-anchored so they grow leftwards (RTL): the track's right edge.
+const SO_BAR_RIGHT = SO.barX + SO.barW;
+
+const fmtInt = (n) => Number(n).toLocaleString('en-US');
+const fill = (tpl, vars) => String(tpl).replace(/\{(\w+)\}/g, (mm, k) => (vars[k] != null ? vars[k] : mm));
+
+/** One KPI card: count, label, and the share caption underneath. */
+function sendoutCard(x, accentX, accentColor, count, label, caption) {
+  const tx = x + 0.167;
+  return [
+    rect(x, SO.cardY, SO.cardW, SO.cardH, C.white, { radius: SO.cardR, line: { color: C.border, w: 0.75 } }),
+    rect(accentX, SO.cardY, SO.accentW, SO.cardH, accentColor, { radius: 0.0115 }),
+    text(tx, 1.222, 5.611, 0.722, fmtInt(count), 34, { bold: true, color: accentColor, align: 'right', valign: 'middle' }),
+    text(tx, 2.0, 5.611, 0.417, label, 11.5, { bold: true, color: C.slate900, align: 'right', valign: 'middle', rtl: true }),
+    text(tx, 2.444, 5.611, 0.306, caption, 9.5, { color: C.slate500, align: 'right', valign: 'middle', rtl: true }),
+  ];
+}
+
+function buildSendoutCountries(m) {
+  const L = labelOf(m);
+  const so = m.sendout || { total: 0, local: 0, international: 0, byCountry: [] };
+  const T = so.total || 0;
+  const pc = (n) => (T ? (Math.round((1000 * n) / T) / 10).toFixed(1) : '0.0');
+
+  const bars = [];
+  (so.byCountry || []).forEach((c, i) => {
+    const y = SO.row0 + i * SO.rowStep;
+    const isLocal = c.country === 'Saudi Arabia';
+    const colour = isLocal ? C.navy : C.amber;
+    const w = T ? (SO.barW * c.orders) / T : 0;
+    bars.push(
+      text(9.722, y, 3.083, 0.389, AR_COUNTRY[c.country] || c.country, 12,
+        { bold: true, color: C.slate900, align: 'right', valign: 'middle', rtl: true }),
+      rect(SO.barX, y + SO.barDY, SO.barW, SO.barH, C.bgLighter, { radius: SO.barR }),
+      rect(SO_BAR_RIGHT - w, y + SO.barDY, Math.max(w, 0.01), SO.barH, colour, { radius: SO.barR }),
+      text(0.5, y, 2.139, 0.389, `${pc(c.orders)}%  |  ${fmtInt(c.orders)}`, 14,
+        { bold: true, color: colour, align: 'left', valign: 'middle' }),
+    );
+  });
+
+  return {
+    id: 'sendoutCountries',
+    bg: C.white,
+    elements: [
+      ...chrome(L('sendoutTitle')),
+      text(6.054, 0.722, 6.75, 0.181, L('sendoutSubtitle'), 9,
+        { color: C.slate500, align: 'right', valign: 'middle', rtl: true }),
+      // Local card sits on the RIGHT — the first card read in an RTL deck.
+      ...sendoutCard(SO.localX, 12.733, C.navy, so.local, L('sendoutLocal'),
+        fill(L('sendoutShare'), { pct: pc(so.local) })),
+      ...sendoutCard(SO.intlX, 6.403, C.amber, so.international, L('sendoutIntl'),
+        fill(L('sendoutShare'), { pct: pc(so.international) })),
+      rect(0.5, 3.222, 12.297, 0.012, C.border),
+      text(0.5, 3.389, 12.297, 0.278, L('sendoutByCountry'), 12,
+        { bold: true, color: C.navy, align: 'right', valign: 'middle', rtl: true }),
+      ...bars,
+      text(0.5, 6.75, 12.297, 0.222, fill(L('sendoutColourNote'), { total: fmtInt(T) }), 9,
+        { color: C.slate500, align: 'right', valign: 'middle', rtl: true }),
+    ],
+  };
+}
+
+function buildSendoutLabs(m) {
+  const L = labelOf(m);
+  const so = m.sendout || { total: 0, byLab: [] };
+  const T = so.total || 0;
+  const pc = (n) => (T ? (Math.round((1000 * n) / T) / 10).toFixed(1) : '0.0');
+  const rowsIn = so.byLab || [];
+
+  // A lab operating in two countries gets a light SHARED shade across its rows,
+  // so the pair reads as one lab rather than two unrelated entries.
+  const spread = new Set();
+  const seen = new Map();
+  for (const r of rowsIn) {
+    const prev = seen.get(r.lab);
+    if (prev != null && prev !== r.country) spread.add(r.lab);
+    seen.set(r.lab, r.country);
+  }
+
+  // Reading order is right-to-left: lab, country, reference lab, orders, share.
+  // rev() flips it into the column order the renderer lays out left-to-right.
+  const header = rev([L('sendoutColLab'), L('sendoutColCountry'), L('sendoutColRefLab'),
+    L('sendoutColOrders'), L('sendoutColShare')]);
+  const body = rowsIn.map((r) => {
+    const shade = spread.has(r.lab) ? C.bgLighter : undefined;
+    return rev([
+      { text: r.lab, align: 'center', fill: shade },
+      { text: AR_COUNTRY[r.country] || r.country, align: 'center', fill: shade },
+      { text: r.reflab, align: 'center', color: C.slate500, size: 9, fill: shade },
+      { text: fmtInt(r.orders), align: 'center', bold: true, color: C.navy, fill: shade },
+      { text: `${pc(r.orders)}%`, align: 'center', fill: shade },
+    ]);
+  });
+  const totalRow = rev([
+    { text: L('sendoutTotalRow'), align: 'center', bold: true, color: C.white, fill: C.taskNavy },
+    { text: '', fill: C.taskNavy },
+    { text: '', fill: C.taskNavy },
+    { text: fmtInt(T), align: 'center', bold: true, color: C.white, fill: C.taskNavy },
+    { text: '100.0%', align: 'center', bold: true, color: C.white, fill: C.taskNavy },
+  ]);
+
+  // The footnote names whichever lab actually spans more than one country.
+  let note = L('sendoutOneCountry');
+  const multi = [...spread].sort()[0];
+  if (multi) {
+    const parts = rowsIn.filter((r) => r.lab === multi).map((r) =>
+      `${AR_COUNTRY_SHORT[r.country] || AR_COUNTRY[r.country] || r.country} ${fmtInt(r.orders)} طلبًا عبر ${reflabShort(r.reflab)}`);
+    note = `مختبر ${multi} يعمل في ${parts.length === 2 ? 'دولتين' : 'أكثر من دولة'}، `
+      + `فيظهر بصفّين متجاورين مُظللين — ${parts.join('، و')}`;
+  }
+
+  const rowH = 0.361;
+  const tableH = rowH * (body.length + 2);
+  const noteY = Math.min(1.167 + tableH + 0.106, 6.4);
+
+  return {
+    id: 'sendoutLabs',
+    bg: C.white,
+    elements: [
+      ...chrome(L('sendoutLabsTitle')),
+      text(6.054, 0.722, 6.75, 0.181, L('sendoutLabsSubtitle'), 9,
+        { color: C.slate500, align: 'right', valign: 'middle', rtl: true }),
+      {
+        t: 'table', x: 0.833, y: 1.167, w: 11.667, rtl: true, rowH,
+        headerSize: 10, bodySize: 10,
+        header: { fill: C.navy, color: C.white, bold: true },
+        colW: rev([4.306, 1.806, 3.472, 0.972, 1.111]),
+        rows: [header, ...body, totalRow],
+      },
+      rect(0.833, noteY, 11.667, 0.012, C.border),
+      text(0.833, noteY + 0.167, 11.667, 0.25, note, 10,
+        { color: C.slate900, align: 'right', valign: 'middle', rtl: true }),
+      text(0.833, 6.635, 11.667, 0.222, fill(L('sendoutBasis'), { total: fmtInt(T) }), 9,
+        { color: C.slate500, align: 'right', valign: 'middle', rtl: true }),
+    ],
+  };
+}
+
 // ============================================================================
 // Slide 7 — Thanks
 // ============================================================================
@@ -1719,6 +1911,12 @@ export function buildSpec(reportModel, { variant = 'internal' } = {}) {
     // before this key existed — they carry no flag and must keep rendering the content the
     // action slide used to hold, not silently drop it.
     { key: 'challenges', build: () => [buildChallenges(m)] },
+    // Send-out — two slides under ONE toggle: the local/international split and
+    // its by-country bars, then the lab x country table. They render only when
+    // the model actually carries send-out figures; a run whose order data never
+    // reached the analysis simply omits them rather than drawing empty axes.
+    { key: 'sendout', build: () => (m.sendout && m.sendout.total
+      ? [buildSendoutCountries(m), buildSendoutLabs(m)] : []) },
     // Definitions ('منهجية الأرقام') — default OFF (opt-in, see OPT_IN_SLIDES); when the
     // user switches it on in Settings it renders just before thanks and participates in
     // the sequential footer numbering like the other middle slides.

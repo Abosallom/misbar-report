@@ -3,8 +3,8 @@
 // (1280x720 px = inches * 96). Skips internalOnly slides when variant === 'nupco'.
 // html2canvas-safe: absolute positioning, solid fills, borders, border-radius only.
 // No box-shadow, no CSS gap, no transforms. Charts are delegated to charts-svg.js (inline SVG).
-import { GEOM } from '../theme.js?v=v2026-08-31.1';
-import { renderChartSVG } from './charts-svg.js?v=v2026-08-31.1';
+import { GEOM } from '../theme.js?v=v2026-08-31.2';
+import { renderChartSVG } from './charts-svg.js?v=v2026-08-31.2';
 
 const PX = GEOM.pxPerIn;          // 96
 const PT2PX = 96 / 72;            // points -> px
@@ -107,7 +107,8 @@ function renderTable(e) {
       if (fill) cell.style.background = fill;
       cell.style.color = color;
       cell.style.fontWeight = bold ? '700' : '400';
-      cell.style.fontSize = `${isHead ? headerSize : bodySize}px`;
+      // c.size mirrors pptx-renderer: a single column may set its own size.
+      cell.style.fontSize = `${c.size ? c.size * PT2PX : (isHead ? headerSize : bodySize)}px`;
       cell.style.textAlign = c.align || 'center';
       // PER-CELL text direction only. The table's own `direction` stays LTR (pinned in
       // styles/slide.css) because e.rtl on a table means "cells were already reversed

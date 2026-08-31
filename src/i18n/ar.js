@@ -101,6 +101,8 @@ export const STR = {
     previewMissing: 'وحدات المعاينة غير متوفرة بعد (قيد الإنشاء).',
     generate: 'توليد التقارير (4 ملفات)',
     // Slide-toggle chip row (bound to reportOptions.slides.*).
+    sendoutGapsTitle: 'طلبات لم تُنسب إلى دولة',
+    sendoutGapsHint: 'هذه الطلبات غير معروضة في شريحتَي محلي/دولي — لا يوجد لها مختبر مُنفِّذ مطابق في ملف الموردين الرئيسي. أبلغ عنها ليُحدَّث الملف؛ لن تُنسب إلى دولة بالتخمين.',
     slideTogglesTitle: 'الشرائح:',
     slideToggles: {
       execFunnel: 'الملخص',
@@ -108,6 +110,7 @@ export const STR = {
       compliance: 'الالتزام',
       action: 'المهام',
       challenges: 'التحديات والمخاطر',
+      sendout: 'محلي/دولي',
     },
     // Editable KPI overrides (per-run, never saved to settings).
     kpiEditTitle: 'المؤشرات (قابلة للتحرير)',

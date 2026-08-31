@@ -8,14 +8,14 @@
 // mirror of the automation panel), live source (Grafana + cached-tracker), and
 // backup (export/import).
 
-import { SNAPSHOT_SEED, REPORT_OPTIONS_SEED, AUTOMATION_SEED } from '../seeds/defaults.js?v=v2026-08-31.1';
-import { normalizeDeltaMode } from '../model/delta-baseline.js?v=v2026-08-31.1';
+import { SNAPSHOT_SEED, REPORT_OPTIONS_SEED, AUTOMATION_SEED } from '../seeds/defaults.js?v=v2026-08-31.2';
+import { normalizeDeltaMode } from '../model/delta-baseline.js?v=v2026-08-31.2';
 // NAMESPACE import on purpose: the access tab reads lock.currentUser(), which is a
 // newer export. A named import would throw at link time on any build of lock.js that
 // predates it (and take the whole settings screen down); a namespace import lets the
 // tab degrade to 'unknown user' instead. lock.js is DOM-free at module scope, so this
 // stays importable in bare Node (test/module-smoke).
-import * as lock from './lock.js?v=v2026-08-31.1';
+import * as lock from './lock.js?v=v2026-08-31.2';
 
 const TABS = [
   { id: 'tat', label: 'مدة الفحوصات' },
@@ -59,6 +59,7 @@ const REPORT_SLIDE_FIELDS = [
   { key: 'compliance', label: 'مقياس الالتزام' },
   { key: 'action', label: 'المهام' },
   { key: 'challenges', label: 'التحديات والمخاطر' },
+  { key: 'sendout', label: 'أين تُجرى الفحوصات — محلي مقابل دولي' },
   { key: 'definitions', label: 'منهجية الأرقام' },
 ];
 const REPORT_CARD_FIELDS = [
