@@ -57,37 +57,49 @@ const row = (o) => ({
   ...o,
 });
 
-// A calendar anchor used throughout. 2026-07-05 is a SUNDAY; the Saudi work week
-// runs Sun 07-05 → Thu 07-09, and Fri 07-10 / Sat 07-11 are the weekend.
-//   Sun 07-05, Mon 07-06, Tue 07-07, Wed 07-08, Thu 07-09, Fri 07-10, Sat 07-11
+// A calendar anchor used throughout. The DELTA week runs Fri → Thu, so the week
+// containing 2026-07-05 opens on Fri 2026-07-03 and closes on Thu 2026-07-09.
+//   Fri 07-03, Sat 07-04, Sun 07-05, Mon 07-06, Tue 07-07, Wed 07-08, Thu 07-09
+// Fri 07-10 then OPENS the next week; Sat 07-11 is its second day.
+const WEEK_FRI = '2026-07-03';
 const SUN = '2026-07-05';
 const THU = '2026-07-09';
 const FRI = '2026-07-10';
 const SAT = '2026-07-11';
 
 // =============================================================================
-// 1. THE WINDOW — where Sunday starts and how the weekend folds back
+// 1. THE WINDOW — where Friday opens it and how consecutive weeks tile
 // =============================================================================
 
-test('window: week mode spans [Sunday-of-week, reportDate]; a Sunday maps to itself', () => {
-  assert.deepEqual(windowFor(SUN, 'week'), { start: SUN, end: SUN, mode: 'week' });
-  assert.deepEqual(windowFor('2026-07-06', 'week'), { start: SUN, end: '2026-07-06', mode: 'week' });
-  assert.deepEqual(windowFor(THU, 'week'), { start: SUN, end: THU, mode: 'week' });
-  // Every day of the work week resolves to the SAME Sunday — that is what makes a
-  // Thursday report "the whole week" rather than "since whenever we last ran".
-  for (const d of [SUN, '2026-07-06', '2026-07-07', '2026-07-08', THU]) {
-    assert.equal(windowFor(d, 'week').start, SUN, `${d} must open at ${SUN}`);
+test('window: week mode spans [Friday-of-week, reportDate]; a Friday maps to itself', () => {
+  assert.deepEqual(windowFor(WEEK_FRI, 'week'), { start: WEEK_FRI, end: WEEK_FRI, mode: 'week' });
+  assert.deepEqual(windowFor(SUN, 'week'), { start: WEEK_FRI, end: SUN, mode: 'week' });
+  assert.deepEqual(windowFor(THU, 'week'), { start: WEEK_FRI, end: THU, mode: 'week' });
+  // Every day resolves to the SAME Friday — that is what makes a Thursday report
+  // "the whole week" (a full seven days) rather than "since whenever we last ran".
+  for (const d of [WEEK_FRI, '2026-07-04', SUN, '2026-07-06', '2026-07-07', '2026-07-08', THU]) {
+    assert.equal(windowFor(d, 'week').start, WEEK_FRI, `${d} must open at ${WEEK_FRI}`);
   }
 });
 
-test('window: a FRIDAY or SATURDAY report folds back into the week that JUST ENDED', () => {
-  // The weekend is Fri+Sat, so a report generated on one of them is reporting on the
-  // Sun–Thu week behind it, not opening a new one. Without this the chips on a
-  // Saturday run would read '+0' for a week of real work.
-  assert.deepEqual(windowFor(FRI, 'week'), { start: SUN, end: FRI, mode: 'week' });
-  assert.deepEqual(windowFor(SAT, 'week'), { start: SUN, end: SAT, mode: 'week' });
-  // …and the NEXT Sunday opens a fresh window, so the fold-back is bounded.
-  assert.equal(windowFor('2026-07-12', 'week').start, '2026-07-12');
+test('window: a FRIDAY OPENS the next week, and consecutive weeks TILE with no gap', () => {
+  // THE BUG THIS PINS (Aziz, 2026-08-31): with a Sunday start, Thursday-to-Thursday
+  // reporting never counted the Friday and Saturday in between — they belonged to a
+  // window nobody looked at. A Friday start makes Fri..Thu a full seven days, so
+  // back-to-back Thursday readings cover 14 contiguous days with no gap or overlap.
+  assert.deepEqual(windowFor(FRI, 'week'), { start: FRI, end: FRI, mode: 'week' });
+  assert.deepEqual(windowFor(SAT, 'week'), { start: FRI, end: SAT, mode: 'week' });
+
+  const thisThu = windowFor(THU, 'week');          // Fri 07-03 .. Thu 07-09
+  const nextThu = windowFor('2026-07-16', 'week'); // Fri 07-10 .. Thu 07-16
+  assert.equal(thisThu.start, WEEK_FRI);
+  assert.equal(nextThu.start, FRI);
+  // the second window opens the very next day after the first one closes
+  const dayAfter = new Date(new Date(thisThu.end + 'T00:00:00Z').getTime() + 86400000)
+    .toISOString().slice(0, 10);
+  assert.equal(nextThu.start, dayAfter, 'no day may fall between two consecutive weeks');
+  assert.equal(nextThu.start, '2026-07-10');
+  assert.ok(FRI >= thisThu.end, 'the Friday that used to be skipped now opens a week');
 });
 
 test('window: daily mode is the report date on both ends', () => {
@@ -99,7 +111,7 @@ test('window: the DEFAULT mode is week, and an unknown mode never silently goes 
   assert.equal(DEFAULT_DELTA_MODE, 'week');
   for (const m of [undefined, null, '', 'weekly-sun', 'weekly-thu', 'nonsense', 42]) {
     assert.equal(windowFor(THU, m).mode, 'week', `mode ${JSON.stringify(m)} must resolve to week`);
-    assert.equal(windowFor(THU, m).start, SUN);
+    assert.equal(windowFor(THU, m).start, WEEK_FRI);
   }
 });
 
@@ -132,9 +144,9 @@ const WEEK_ROWS = [
 
 test('EVENT keys are the in-window event COUNT, matching a hand count of the dates', () => {
   const res = computeWindowDeltas({ rows: WEEK_ROWS, tatTests: {}, reportDate: THU, mode: 'week' });
-  assert.deepEqual(res.window, { start: SUN, end: THU });
+  assert.deepEqual(res.window, { start: WEEK_FRI, end: THU });
 
-  // Hand count over Sun 07-05 .. Thu 07-09 — read straight off the rows above:
+  // Hand count over Fri 07-03 .. Thu 07-09 — read straight off the rows above:
   //   total      (order dated in-window): B, C                    = 2
   //   collected  (collected in-window):   B, C                    = 2
   //   dispatched (dispatched in-window):  A (07-06), C (07-08)    = 2
@@ -147,6 +159,25 @@ test('EVENT keys are the in-window event COUNT, matching a hand count of the dat
   })) {
     assert.equal(res.deltas[k], want, `event key ${k}`);
   }
+});
+
+test('REGRESSION: events dated on the FRIDAY or SATURDAY are counted, not skipped', () => {
+  // The exact defect Aziz hit: under a Sunday-opening week these two rows landed in
+  // the gap between one Thursday reading and the next, so their results were never
+  // reflected in any chip — the completed count simply jumped between readings with
+  // no delta to explain it. They must now land inside the Thursday window.
+  const weekendRows = [
+    row({ orderId: 'G', orderDate: '2026-07-03', collected: '2026-07-03 08:00:00', dispatched: '2026-07-03 09:00:00', received: '2026-07-03 10:00:00', resulted: '2026-07-03 12:00:00', rawStatus: 'Result Available' }),
+    row({ orderId: 'H', orderDate: '2026-07-04', collected: '2026-07-04 08:00:00', dispatched: '2026-07-04 09:00:00', received: '2026-07-04 10:00:00', resulted: '2026-07-04 12:00:00', rawStatus: 'Result Available' }),
+  ];
+  const res = computeWindowDeltas({ rows: weekendRows, tatTests: {}, reportDate: THU, mode: 'week' });
+  assert.equal(res.window.start, WEEK_FRI);
+  assert.equal(res.deltas.completed, 2, 'both weekend results must appear in the Thursday chip');
+  assert.equal(res.deltas.total, 2);
+  assert.equal(res.deltas.received, 2);
+  // And they are counted ONCE: the following Thursday's window must not repeat them.
+  const next = computeWindowDeltas({ rows: weekendRows, tatTests: {}, reportDate: '2026-07-16', mode: 'week' });
+  assert.equal(next.deltas.completed, 0, 'a later week must not re-count them');
 });
 
 test('event counts are counts of EVENTS, not of rows — one row can fire several keys', () => {
@@ -387,8 +418,8 @@ test('stamp: writes model.kpi.deltas and model.deltaWindow, and retires model.de
   const model = mkModel();
   model.deltaBaseline = { mode: 'week', baselineDate: '2026-06-28', numbers: {} }; // the retired stamp
   const stamped = stampWindowDeltas(model, { rows: WEEK_ROWS, tatTests: {} });
-  assert.deepEqual(stamped, { start: SUN, end: THU, mode: 'week' });
-  assert.deepEqual(model.deltaWindow, { start: SUN, end: THU, mode: 'week' });
+  assert.deepEqual(stamped, { start: WEEK_FRI, end: THU, mode: 'week' });
+  assert.deepEqual(model.deltaWindow, { start: WEEK_FRI, end: THU, mode: 'week' });
   // The engine's placeholder 999s are gone — the window values replaced them.
   assert.equal(model.kpi.deltas.total, 2);
   // A stale baseline stamp left on the same model is a trap for the next reader.
@@ -489,22 +520,24 @@ test('CROSS-SURFACE: stamped model.kpi.deltas === computeWindowDeltas output', (
   }
 });
 
-test('CROSS-SURFACE: a Friday and a Saturday report describe the SAME just-ended week', () => {
-  // Fri/Sat fold back to the same Sunday, so the window's floor is identical; and the
-  // fixture has nothing dated on the weekend, so the three runs must produce identical
-  // chips — Thursday's included. Both key classes have to be checked for that, not just
-  // the event counts: moving the window's END from 07-09 to 07-10/07-11 re-evaluates the
-  // QUEUE membership at the later day too. It does not move here — B is still undispatched
-  // and A still unresulted on both weekend days, and A's due date (07-14, see section 3)
-  // is past all three ends, so nothing enters lateness either. deepEqual over the whole
-  // delta object covers all ten keys at once.
+test('CROSS-SURFACE: a Friday reading OPENS a new week and does not inherit Thursday\'s', () => {
+  // Under the old Sunday start, Fri/Sat folded back and repeated Thursday's chips.
+  // They now open the NEXT week: the floor moves to the Friday itself, so the week
+  // just reported on is not counted a second time. The fixture has nothing dated on
+  // 07-10/07-11, so the new week legitimately starts empty on the event keys.
   const thu = computeWindowDeltas({ rows: WEEK_ROWS, tatTests: {}, reportDate: THU, mode: 'week' });
   const fri = computeWindowDeltas({ rows: WEEK_ROWS, tatTests: {}, reportDate: FRI, mode: 'week' });
   const sat = computeWindowDeltas({ rows: WEEK_ROWS, tatTests: {}, reportDate: SAT, mode: 'week' });
-  assert.equal(fri.window.start, SUN);
-  assert.equal(sat.window.start, SUN);
-  assert.deepEqual(fri.deltas, thu.deltas);
-  assert.deepEqual(sat.deltas, thu.deltas);
+  assert.equal(thu.window.start, WEEK_FRI);
+  assert.equal(fri.window.start, FRI, 'a Friday opens its own week');
+  assert.equal(sat.window.start, FRI, 'Saturday is day two of that same week');
+  // Fri and Sat sit in one window, so they agree with each other …
+  assert.deepEqual(sat.deltas, fri.deltas);
+  // … and the week's events are NOT re-counted into it.
+  assert.notDeepEqual(fri.deltas, thu.deltas, 'the new week must not repeat the old one');
+  for (const k of ['total', 'collected', 'dispatched', 'received', 'completed', 'rejected']) {
+    assert.equal(fri.deltas[k], 0, `${k}: nothing is dated inside the new week yet`);
+  }
 });
 
 // =============================================================================

@@ -8,14 +8,14 @@
 // mirror of the automation panel), live source (Grafana + cached-tracker), and
 // backup (export/import).
 
-import { SNAPSHOT_SEED, REPORT_OPTIONS_SEED, AUTOMATION_SEED } from '../seeds/defaults.js?v=v2026-08-31.2';
-import { normalizeDeltaMode } from '../model/delta-baseline.js?v=v2026-08-31.2';
+import { SNAPSHOT_SEED, REPORT_OPTIONS_SEED, AUTOMATION_SEED } from '../seeds/defaults.js?v=v2026-08-31.3';
+import { normalizeDeltaMode } from '../model/delta-baseline.js?v=v2026-08-31.3';
 // NAMESPACE import on purpose: the access tab reads lock.currentUser(), which is a
 // newer export. A named import would throw at link time on any build of lock.js that
 // predates it (and take the whole settings screen down); a namespace import lets the
 // tab degrade to 'unknown user' instead. lock.js is DOM-free at module scope, so this
 // stays importable in bare Node (test/module-smoke).
-import * as lock from './lock.js?v=v2026-08-31.2';
+import * as lock from './lock.js?v=v2026-08-31.3';
 
 const TABS = [
   { id: 'tat', label: 'مدة الفحوصات' },
@@ -92,7 +92,7 @@ const REPORT_CARD_FIELDS = [
  * TOTALS — only the chips are the window's activity. */
 export const DELTA_MODE_OPTIONS = [
   { value: 'daily', label: 'يومي — نشاط اليوم' },
-  { value: 'week', label: 'أسبوعي — نشاط الأسبوع (الأحد–الخميس)' },
+  { value: 'week', label: 'أسبوعي — نشاط الأسبوع (الجمعة–الخميس)' },
 ];
 
 // Automation switches (Settings.automation). This tab MIRRORS the automation
@@ -981,7 +981,7 @@ export function render(container, ctx) {
         }),
         h('p', {
           class: 'st-help',
-          text: 'أسبوعي (الافتراضي): النافذة من أحد هذا الأسبوع حتى تاريخ التقرير (أسبوع العمل الأحد–الخميس)، فيعرض تقرير الخميس نشاط الأسبوع كاملاً. تقارير الجمعة والسبت تتبع الأسبوع المنتهي للتو. يومي: النافذة هي يوم التقرير وحده.',
+          text: 'أسبوعي (الافتراضي): النافذة من جمعة هذا الأسبوع حتى تاريخ التقرير، فيغطي تقرير الخميس سبعة أيام كاملة (الجمعة إلى الخميس) دون أي فجوة بين تقرير وآخر. يومي: النافذة هي يوم التقرير وحده.',
         }),
         h('p', {
           class: 'st-help',

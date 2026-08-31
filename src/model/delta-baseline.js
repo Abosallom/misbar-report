@@ -28,14 +28,14 @@
 //     normalizeDeltaMode / isWeekDeltaMode) — SAME two values, SAME storage key, and
 //     store.js imports the enum, so these exports must stay stable. Their SEMANTICS
 //     changed, though: the mode used to pick which stored report to compare against;
-//     it now picks the SIZE OF THE ACTIVITY WINDOW ('week' = Sunday..report-day,
+//     it now picks the SIZE OF THE ACTIVITY WINDOW ('week' = Friday..report-day,
 //     'daily' = the report day alone). See contracts.js reportOptions.deltaMode.
-//   • the Sun-based calendar math (isoToDays / isoWeekday / weekStartDay) — now
+//   • the calendar math (isoToDays / isoWeekday / weekStartDay) — now
 //     EXPORTED. delta-window.js imports it instead of keeping a second copy, so there
-//     is exactly ONE definition of "which Sunday opens this week" behind the banner,
+//     is exactly ONE definition of "which Friday opens this week" behind the banner,
 //     the deck legend and the history panel.
 // The Saudi work week is Sun–Thu. Fri/Sat report dates need no special case anywhere:
-// weekStartDay() maps them back to the Sunday of the week that just ended, which is the
+// weekStartDay() maps every day back to the Friday that opens its week, which is the
 // week their numbers belong to.
 // The weekday-anchored 'weekly-sun' / 'weekly-thu' modes of an earlier round are
 // RETIRED: they, and the older bare 'weekly', are aliases of 'week' now (see
@@ -123,7 +123,7 @@ export function normalizeDeltaMode(mode) {
 }
 
 /**
- * True when a stored/user mode means the WEEK-WIDE activity window (Sunday..report-day)
+ * True when a stored/user mode means the WEEK-WIDE activity window (Friday..report-day)
  * rather than the single report day. Consumers MUST use this rather than a
  * startsWith('weekly') test: the canonical value is 'week', which FAILS that prefix
  * check, so every surface hanging off it (the review banner heading, the week-window
@@ -181,18 +181,37 @@ export function isoWeekday(iso) {
 }
 
 /**
- * Whole-UTC-day count of the SUNDAY that opens the Sun–Thu work week containing
- * `iso` — i.e. the day count of the date itself minus its weekday index (Sunday = 0).
- * Reuses the two primitives above so there is exactly one definition of "what day is
- * this" in the module.
- * A Sunday maps to ITSELF. Friday and Saturday map back to the Sunday of the week that
- * just ended, which is the week their numbers belong to — that is why Fri/Sat report
- * dates need no special case anywhere in the window math.
+ * The weekday a delta week OPENS on: 5 = Friday.
+ *
+ * WHY FRIDAY AND NOT SUNDAY (Aziz, 2026-08-31). The delta week used to open on
+ * Sunday, which silently DROPPED every event dated Friday or Saturday from the
+ * numbers anyone actually saw. A Thursday reading covered Sun..Thu; the next
+ * Thursday covered the following Sun..Thu; nothing in between ever reported the
+ * Friday and Saturday in the gap. Observed live: a Thursday reading of 988
+ * completed, then 1,001 on the Sunday with NO chip explaining the 13 — they had
+ * landed on the Friday and Saturday that no window contained.
+ *
+ * Opening on Friday makes the weeks TILE the calendar with no gap and no overlap:
+ * Fri..Thu is a full seven days, so a Thursday reading now accounts for every day
+ * since the previous Thursday. This is about which DAYS a chip counts and has
+ * nothing to do with the Sun–Thu working week that engine/workday.js uses for due
+ * dates — that math does not import this module and is deliberately untouched.
+ */
+export const WEEK_START_WEEKDAY = 5;
+
+/**
+ * Whole-UTC-day count of the FRIDAY that opens the Fri–Thu delta week containing
+ * `iso`. Reuses the two primitives above so there is exactly one definition of
+ * "what day is this" in the module.
+ *
+ * A Friday maps to ITSELF; every other day maps BACK to the most recent Friday, so
+ * Thursday — six days on — closes the week. No day needs a special case.
  * @param {string} iso - 'yyyy-mm-dd'
- * @returns {number} whole-UTC-day count of that week's Sunday
+ * @returns {number} whole-UTC-day count of that week's Friday
  */
 export function weekStartDay(iso) {
-  return isoToDays(iso) - isoWeekday(iso);
+  const offset = (((isoWeekday(iso) - WEEK_START_WEEKDAY) % 7) + 7) % 7;
+  return isoToDays(iso) - offset;
 }
 
 /** Keep only finite numeric leaves — mirrors how snapshot.numbers is sanitized. */

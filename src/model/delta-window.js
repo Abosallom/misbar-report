@@ -7,7 +7,7 @@
 //   the monthly table, the compliance table — REMAIN CUMULATIVE TOTALS, untouched,
 //   exactly as the deck has always shipped them. ONLY the small green delta chips
 //   (▲ +N) change meaning: they become the WEEK'S ACTIVITY, i.e. the events dated
-//   Sunday..report-day, counted from the CSV's OWN date columns.
+//   Friday..report-day, counted from the CSV's OWN date columns.
 //   (Due-derived values — onTime / late / turnaround-expected — move only because of
 //   the weekend + late rule changes of this same round, NEVER because of the chips.)
 //
@@ -43,14 +43,24 @@
 // "before" pass is PLAIN (never gated): its queue depths are simply unread.
 //
 // THE WINDOW.
-//   mode 'week' (the DEFAULT) → [Sunday-of-week(reportDate), reportDate].
-//        The Saudi work week is Sun–Thu. weekStartDay() maps a Friday or Saturday
-//        report date back to the Sunday of the week that JUST ENDED, so a weekend
-//        report folds into the week its numbers belong to — no special case anywhere.
+//   mode 'week' (the DEFAULT) → [Friday-of-week(reportDate), reportDate].
 //   mode 'daily' → [reportDate, reportDate]: one single day.
 // The subtraction is anchored at the day BEFORE the window start, because as-of is
-// INCLUSIVE ("everything dated on or before this day"): to keep Sunday's own events
-// inside the window we must measure from Saturday's close.
+// INCLUSIVE ("everything dated on or before this day"): to keep the opening Friday's
+// own events inside the window we must measure from Thursday's close.
+//
+// WHY THE WEEK OPENS ON FRIDAY (Aziz, 2026-08-31). It used to open on Sunday, and
+// that silently DROPPED every event dated Friday or Saturday from the numbers anyone
+// actually read. Reporting happens on Thursdays: a Thursday window ran Sun..Thu, the
+// next Thursday ran the following Sun..Thu, and the Friday+Saturday in between fell
+// into NO window that was ever looked at. Observed live — 988 completed on the
+// Thursday, 1,001 by the Sunday, and no chip accounting for the 13, because they
+// landed in that blind spot.
+//   Opening on Friday makes consecutive weeks TILE the calendar: Fri..Thu is a full
+// seven days, so back-to-back Thursday readings cover 14 contiguous days with no gap
+// and no double count. This concerns only WHICH DAYS A CHIP COUNTS. The Sun–Thu
+// working week that engine/workday.js uses for due dates is a different thing
+// entirely and is deliberately untouched — that module does not import this math.
 //
 // IDEMPOTENCY. stampWindowDeltas() recomputes kpi.deltas from scratch and overwrites;
 // it never reads its own previous output, never accumulates. screen-generate re-runs
@@ -59,14 +69,14 @@
 // two copies could pick different baselines and the deck silently won). A pure
 // function of (rows, reportDate, mode) cannot disagree with itself.
 
-import { computeNumbersAsOf, NUMBER_KEYS, QUEUE_KEYS } from '../engine/asof.js?v=v2026-08-31.2';
+import { computeNumbersAsOf, NUMBER_KEYS, QUEUE_KEYS } from '../engine/asof.js?v=v2026-08-31.3';
 // The Sun-based calendar math has ONE owner — model/delta-baseline.js — and this module
-// imports it rather than re-deriving it. A second copy of "which Sunday opens this week"
+// imports it rather than re-deriving it. A second copy of "which Friday opens this week"
 // is exactly how the review banner, the deck legend and the history panel drift apart.
 // Re-exported below so a consumer can reach the math through either module.
 import {
   isoToDays, isoWeekday, weekStartDay, normalizeDeltaMode,
-} from './delta-baseline.js?v=v2026-08-31.2';
+} from './delta-baseline.js?v=v2026-08-31.3';
 
 export { isoToDays, isoWeekday, weekStartDay };
 
@@ -106,8 +116,9 @@ export function windowFor(reportDate, mode) {
     throw new Error('delta-window: reportDate (YYYY-MM-DD) is required');
   }
   const m = normalizeDeltaMode(mode);
-  // 'week' → back to this week's Sunday (a Sunday maps to itself; Fri/Sat map back into
-  // the week that just ended). 'daily' → the report date is both ends.
+  // 'week' → back to this week's Friday (a Friday maps to itself; every other day
+  // maps back to the most recent one, so Thursday closes a full seven-day week).
+  // 'daily' → the report date is both ends.
   const start = m === 'week' ? isoFromDays(weekStartDay(reportDate)) : reportDate;
   return { start, end: reportDate, mode: m };
 }
@@ -140,7 +151,7 @@ export function windowFor(reportDate, mode) {
 export function computeWindowDeltas({ rows, tatTests, reportDate, mode, opts = {} } = {}) {
   const w = windowFor(reportDate, mode);
   // As-of is INCLUSIVE, so the "before" anchor is the day BEFORE the window opens —
-  // otherwise Sunday's own events would be subtracted right back out of the week.
+  // otherwise the opening Friday's own events would be subtracted back out of the week.
   const beforeIso = isoFromDays(isoToDays(w.start) - 1);
   const rowsArr = Array.isArray(rows) ? rows : [];
 

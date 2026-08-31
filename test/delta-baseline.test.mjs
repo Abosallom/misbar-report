@@ -31,7 +31,7 @@ import assert from 'node:assert/strict';
 
 import {
   recordSnapshot, normalizeDeltaMode, canonicalDeltaMode, isWeekDeltaMode,
-  isoToDays, isoWeekday, weekStartDay,
+  isoToDays, isoWeekday, weekStartDay, WEEK_START_WEEKDAY,
   DELTA_MODES, DEFAULT_DELTA_MODE, HISTORY_LIMIT,
 } from '../src/model/delta-baseline.js';
 
@@ -127,40 +127,65 @@ test('isWeekDeltaMode is true for week and every alias, false for daily', () => 
 
 // ---- strictly-before across a month boundary --------------------------------
 
-// ---- the Sunday week math, now SHARED with model/delta-window.js -------------
-test('weekStartDay maps every day of a Sun-Thu week to the SAME Sunday', () => {
+// ---- the Fri–Thu week math, SHARED with model/delta-window.js ----------------
+test('weekStartDay maps every day of a Fri-Thu week to the SAME Friday', () => {
   // This is the calendar primitive the activity window is built on: delta-window's
   // windowFor() calls it to decide where the week opens. It has ONE owner (this
   // module) precisely so the review banner, the deck legend and the history panel
   // cannot drift apart.
-  const SUN = '2026-07-05';
-  for (const d of [SUN, '2026-07-06', '2026-07-07', '2026-07-08', '2026-07-09']) {
-    assert.equal(weekStartDay(d), isoToDays(SUN), `${d} opens at ${SUN}`);
+  const FRI = '2026-07-10';
+  for (const d of [FRI, '2026-07-11', '2026-07-12', '2026-07-13', '2026-07-14',
+    '2026-07-15', '2026-07-16']) {
+    assert.equal(weekStartDay(d), isoToDays(FRI), `${d} opens at ${FRI}`);
   }
-  // Friday and Saturday are the WEEKEND (Fri+Sat, 2026-08-05 rule), so they belong
-  // to the week that just ended, not to the next one.
-  assert.equal(weekStartDay('2026-07-10'), isoToDays(SUN), 'Friday folds back');
-  assert.equal(weekStartDay('2026-07-11'), isoToDays(SUN), 'Saturday folds back');
-  // …and the next Sunday opens a fresh week, so the fold-back is bounded.
-  assert.equal(weekStartDay('2026-07-12'), isoToDays('2026-07-12'));
+  // Thursday is the LAST day of the week — six days on, so Fri..Thu is a full seven.
+  assert.equal(isoWeekday('2026-07-16'), 4, 'the closing day is a Thursday');
+  // …and the next Friday opens a fresh week, so consecutive weeks TILE the calendar.
+  assert.equal(weekStartDay('2026-07-17'), isoToDays('2026-07-17'));
+});
+
+test('consecutive weeks tile the calendar — no day is in two weeks or in none', () => {
+  // THE BUG THIS PINS (Aziz, 2026-08-31): under the old Sunday start, a Thursday
+  // reading covered Sun..Thu and the NEXT Thursday covered the following Sun..Thu,
+  // so every Friday and Saturday fell into a window nobody ever looked at. Walking
+  // 8 weeks of consecutive days, each must belong to exactly one week, and each
+  // week must hold exactly 7 days.
+  const seen = new Map();
+  const start = isoToDays('2026-06-01');
+  for (let i = 0; i < 56; i++) {
+    const iso = new Date((start + i) * 86400000).toISOString().slice(0, 10);
+    const wk = weekStartDay(iso);
+    seen.set(wk, (seen.get(wk) || 0) + 1);
+    // a day is never placed before its own week opens, nor more than 6 days after
+    const offset = isoToDays(iso) - wk;
+    assert.ok(offset >= 0 && offset <= 6, `${iso} sits ${offset} days into its week`);
+  }
+  for (const [wk, n] of seen) {
+    if (n === 7) continue; // full weeks; the two partial weeks at the ends are fine
+    assert.ok(n < 7, `week ${wk} holds ${n} days — weeks must never exceed 7`);
+  }
 });
 
 test('isoWeekday is Sunday-based, and the week math is timezone-independent', () => {
+  // isoWeekday keeps the conventional 0=Sunday numbering; only which weekday OPENS
+  // a delta week changed (to Friday, WEEK_START_WEEKDAY).
   assert.equal(isoWeekday('2026-07-05'), 0, 'Sunday is 0');
   assert.equal(isoWeekday('2026-07-09'), 4, 'Thursday is 4');
   assert.equal(isoWeekday('2026-07-10'), 5, 'Friday is 5');
   assert.equal(isoWeekday('2026-07-11'), 6, 'Saturday is 6');
+  assert.equal(WEEK_START_WEEKDAY, 5, 'the delta week opens on Friday');
   // A local-midnight Date() shifts the day for negative UTC offsets, which would
-  // move the week boundary by one and put a Sunday report in the previous week.
+  // move the week boundary by one and put a Friday report in the previous week.
   // The math runs on the UTC epoch; assert that under five zones spanning
   // UTC-11 .. UTC+14 (the app runs at +03 but must not depend on it).
   const original = process.env.TZ;
   try {
     for (const tz of ['UTC', 'Asia/Riyadh', 'Pacific/Kiritimati', 'Pacific/Midway', 'America/Los_Angeles']) {
       process.env.TZ = tz;
-      assert.equal(weekStartDay('2026-07-26'), isoToDays('2026-07-26'), `TZ=${tz} Sunday maps to itself`);
-      assert.equal(weekStartDay('2026-07-27'), isoToDays('2026-07-26'), `TZ=${tz} Monday`);
-      assert.equal(isoWeekday('2026-07-26'), 0, `TZ=${tz} weekday`);
+      assert.equal(weekStartDay('2026-07-24'), isoToDays('2026-07-24'), `TZ=${tz} Friday maps to itself`);
+      assert.equal(weekStartDay('2026-07-25'), isoToDays('2026-07-24'), `TZ=${tz} Saturday`);
+      assert.equal(weekStartDay('2026-07-30'), isoToDays('2026-07-24'), `TZ=${tz} Thursday closes it`);
+      assert.equal(isoWeekday('2026-07-24'), 5, `TZ=${tz} weekday`);
     }
   } finally {
     if (original === undefined) delete process.env.TZ; else process.env.TZ = original;
