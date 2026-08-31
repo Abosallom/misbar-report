@@ -25,8 +25,8 @@
 //                                   OPT_IN_CARDS below for why those two are not a
 //                                   contradiction)
 //   m.overrides[key]              per-run manual NUMBER overrides (suppresses that delta chip)
-import { COLORS as C, GEOM } from '../theme.js?v=v2026-08-31.4';
-import { AR_COUNTRY, AR_COUNTRY_SHORT, reflabShort } from '../model/sendout.js?v=v2026-08-31.4';
+import { COLORS as C, GEOM } from '../theme.js?v=v2026-08-31.5';
+import { AR_COUNTRY, AR_COUNTRY_SHORT, reflabShort } from '../model/sendout.js?v=v2026-08-31.5';
 
 // EXPLICIT-TRUE kpiCards KEYS. reportOptions.kpiCards normally reads "on unless === false"
 // (see buildExec's cardDefs filter). The keys in this set INVERT that: they render only

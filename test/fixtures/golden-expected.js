@@ -128,12 +128,16 @@ export const GOLDEN_EXPECTED = {
   //   onTime:       Advanced 29→31, Fal 75→98, KAMC 42, Eurofins 20, Saudi 4, Anwa 0
   //   resultedLate: Advanced 158→156, Fal 48→25, KAMC 35, Eurofins 4, Saudi 7, Anwa 0
   //   late:         Advanced 60→64, Fal 2, KAMC 3→4, Eurofins 0, Saudi 2→3, Anwa 0
+    // ORDER RE-BASELINED 2026-08-31: byLab is now sorted ALPHABETICALLY by lab, to
+    // match the send-out slides in the same deck (was total-DESC). Every per-lab
+    // figure below is byte-identical to the previous baseline — only the sequence
+    // of the rows changed, which is what this array pins.
     { lab: 'Advanced Laboratory Services .Co', total: 301, pipeline: 11, awaitingResult: 89, completed: 201, onTime: 31, resulted: 187, resultedLate: 156, rejected: 14, late: 64, latePct: 71.9 },
+    { lab: 'Anwa Medical Company', total: 7, pipeline: 0, awaitingResult: 7, completed: 0, onTime: 0, resulted: 0, resultedLate: 0, rejected: 0, late: 0, latePct: 0 },
+    { lab: 'Eurofins clinical', total: 27, pipeline: 3, awaitingResult: 0, completed: 24, onTime: 20, resulted: 24, resultedLate: 4, rejected: 0, late: 0, latePct: 0 },
     { lab: 'Fal Specialized Medical Lab', total: 151, pipeline: 6, awaitingResult: 21, completed: 124, onTime: 98, resulted: 123, resultedLate: 25, rejected: 1, late: 2, latePct: 9.5 },
     { lab: 'king Abdullaziz Medical city in Riyadh', total: 113, pipeline: 1, awaitingResult: 35, completed: 77, onTime: 42, resulted: 77, resultedLate: 35, rejected: 0, late: 4, latePct: 11.4 },
-    { lab: 'Eurofins clinical', total: 27, pipeline: 3, awaitingResult: 0, completed: 24, onTime: 20, resulted: 24, resultedLate: 4, rejected: 0, late: 0, latePct: 0 },
     { lab: 'Saudi Diagnostics Limited Company', total: 19, pipeline: 1, awaitingResult: 7, completed: 11, onTime: 4, resulted: 11, resultedLate: 7, rejected: 0, late: 3, latePct: 42.9 },
-    { lab: 'Anwa Medical Company', total: 7, pipeline: 0, awaitingResult: 7, completed: 0, onTime: 0, resulted: 0, resultedLate: 0, rejected: 0, late: 0, latePct: 0 },
   ],
   // onTime 170→195, resultedLate 252→227 (rule 1); late 67→73, latePct 42.1→45.9
   // (rule 2). Everything else identical.
