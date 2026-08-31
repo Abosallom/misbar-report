@@ -15,17 +15,17 @@
 // throws on write; on failure we fall back to an in-memory doc and expose
 // isEphemeral() so the UI can warn the user their edits will not persist.
 
-import { SETTINGS_KEY } from './contracts.js?v=v2026-08-31.1';
-import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-08-31.1';
-import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-08-31.1';
+import { SETTINGS_KEY } from './contracts.js?v=v2026-08-31.2';
+import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-08-31.2';
+import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-08-31.2';
 import {
   HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED, GRAFANA_SEED, REPORT_OPTIONS_SEED,
   SNAPSHOT_HISTORY_SEED, AUTOMATION_SEED, TASK_LOG_SEED,
-} from './seeds/defaults.js?v=v2026-08-31.1';
-import { DELTA_MODES, canonicalDeltaMode } from './model/delta-baseline.js?v=v2026-08-31.1';
+} from './seeds/defaults.js?v=v2026-08-31.2';
+import { DELTA_MODES, canonicalDeltaMode } from './model/delta-baseline.js?v=v2026-08-31.2';
 import {
   sanitizeTaskLog, recordShownTasks, TASK_LOG_LIMIT, TASK_KEY_MAX,
-} from './model/task-lifecycle.js?v=v2026-08-31.1';
+} from './model/task-lifecycle.js?v=v2026-08-31.2';
 
 export const SCHEMA_VERSION = 9;
 

@@ -1,19 +1,20 @@
 // ui/screen-review.js — review/edit report content with a live slide preview (Track E).
-import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-08-31.1';
-import { el, editableTable, textareaField, toast } from './components.js?v=v2026-08-31.1';
-import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-08-31.1';
-import { autoDraft, splitTaskLists } from '../model/drafts.js?v=v2026-08-31.1';
-import { buildHistoryPanel } from './history-table.js?v=v2026-08-31.1';
+import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-08-31.2';
+import { el, editableTable, textareaField, toast } from './components.js?v=v2026-08-31.2';
+import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-08-31.2';
+import { autoDraft, splitTaskLists } from '../model/drafts.js?v=v2026-08-31.2';
+import { analyseSendout, hasMaster } from '../model/sendout.js?v=v2026-08-31.2';
+import { buildHistoryPanel } from './history-table.js?v=v2026-08-31.2';
 import {
   normalizeDeltaMode, isWeekDeltaMode, DEFAULT_DELTA_MODE,
-} from '../model/delta-baseline.js?v=v2026-08-31.1';
+} from '../model/delta-baseline.js?v=v2026-08-31.2';
 // Same module instance drafts.js already imports (identical specifier) — the grace
 // re-check below MUST use task-lifecycle's own identity/status vocabulary, never a
 // second local copy of it. Static, not guarded: drafts.js (imported above) already
 // depends on this module, so there is no new failure mode.
 import {
   CLOSED as CLOSED_STATUS, LIST_EXTERNAL, LIST_INTERNAL, taskKey,
-} from '../model/task-lifecycle.js?v=v2026-08-31.1';
+} from '../model/task-lifecycle.js?v=v2026-08-31.2';
 
 /* small local module helpers (kept local to avoid cross-screen coupling) */
 async function tryImport(path) { try { return await import(path); } catch { return null; } }
@@ -131,6 +132,7 @@ const SLIDE_TOGGLES = [
   { key: 'compliance', label: STR.review.slideToggles.compliance },
   { key: 'action', label: STR.review.slideToggles.action },
   { key: 'challenges', label: STR.review.slideToggles.challenges },
+  { key: 'sendout', label: STR.review.slideToggles.sendout },
 ];
 
 const OV_INPUT_STYLE = 'flex:1;min-width:0;border:1px solid var(--border-dark);border-radius:6px;padding:6px 8px;min-height:36px;background:var(--white);color:var(--text);font-weight:700;text-align:right';
@@ -259,6 +261,21 @@ const pagerDotStyle = (on) => 'min-width:30px;height:30px;flex:0 0 auto;border-r
  * Task splitting/panels go through model/drafts.js autoDraft — the CANONICAL
  * rule (internal = فئة التقرير 'لين'). A local regex here once diverged and
  * rendered the internal variant's task table empty with real tracker data. */
+/** Send-out figures for the current session's orders, or null. Never throws: a
+ *  failure here must not take down the whole review screen, and no catalogue
+ *  means no slides rather than every lab reported as unmapped. */
+function sendoutFor(state) {
+  const orders = (state.parsed && state.parsed.orders) || null;
+  const master = state.sendoutMaster || null;
+  if (!Array.isArray(orders) || !orders.length || !hasMaster(master)) return null;
+  try {
+    return analyseSendout(orders, master);
+  } catch (e) {
+    console.warn('[review] send-out analysis failed; slides omitted', e);
+    return null;
+  }
+}
+
 function buildDraftReportModel(state, store) {
   const kpi = state.engineOutput || buildMockEngineOutput(store.settings);
   const tracker = state.parsed.tracker || buildMockTracker();
@@ -287,6 +304,10 @@ function buildDraftReportModel(state, store) {
   return {
     reportDate,
     kpi,
+    // Send-out attribution runs off the raw order rows, not the engine output.
+    // Guarded: no parsed orders (mock/tracker-only session) -> no send-out block,
+    // and build-spec omits both slides instead of drawing empty ones.
+    sendout: sendoutFor(state),
     panels: {
       supportRequired: d.supportRequired || [],
       completedTasks: d.completedTasks || [],
@@ -388,10 +409,62 @@ function reconcileGraceRows(model, state, store, prevDate) {
   return changed;
 }
 
+
+/* Send-out orders that could NOT be attributed to a country. These are kept OFF
+ * the slides deliberately — a wrong country is worse than a missing row — so the
+ * only way the gap ever gets fixed is if the reviewer is told about it HERE,
+ * before generating. Silence would let a master-file hole persist for months.
+ * Returns null when everything attributed cleanly, which is the normal case. */
+function sendoutGapsCard(model) {
+  const so = model && model.sendout;
+  if (!so) return null;
+  const gaps = [...(so.unmapped || []), ...(so.unresolved || [])];
+  if (!gaps.length) return null;
+
+  const byLab = new Map();
+  for (const o of gaps) {
+    const lab = (o && o.facility) || 'بدون مختبر مُنفِّذ';
+    let e = byLab.get(lab);
+    if (!e) { e = { n: 0, tests: new Map() }; byLab.set(lab, e); }
+    e.n += 1;
+    const t = (o && o.testName) || '—';
+    e.tests.set(t, (e.tests.get(t) || 0) + 1);
+  }
+
+  const rows = [...byLab.entries()]
+    .sort((a, b) => b[1].n - a[1].n)
+    .map(([lab, e]) => el('li', { style: 'margin-bottom:4px' }, [
+      el('span', { style: 'font-weight:700', dir: 'auto', text: lab }),
+      el('span', { class: 'small muted', text: ` — ${e.n} طلبًا` }),
+      el('div', { class: 'small muted', dir: 'auto', style: 'margin-inline-start:10px' },
+        [[...e.tests.entries()].map(([t, n]) => `${t} (${n})`).join('، ')]),
+    ]));
+
+  return el('div', {
+    class: 'card',
+    style: 'border:1px solid var(--amber);background:var(--warn-bg,#FEF3C7);color:var(--warn-text,#92400E)',
+  }, [
+    el('div', { class: 'card__title', text: STR.review.sendoutGapsTitle }),
+    el('p', { class: 'small', style: 'margin:0 0 6px', text: STR.review.sendoutGapsHint }),
+    el('ul', { style: 'margin:0;padding-inline-start:18px' }, rows),
+  ]);
+}
+
 export async function render(container, ctx) {
   const { state, store, navigate } = ctx;
 
   if (!state.reportDate) state.reportDate = todayISO();
+  // The send-out catalogue ships encrypted; decrypt it ONCE per session with the
+  // key the access seal unsealed at sign-in. Cached on state so re-renders (and
+  // the model re-draft after a new upload) do not re-fetch. Resolves to null on
+  // any failure, which simply omits the two slides.
+  if (state.sendoutMaster === undefined) {
+    const dataKey = ((store.settings || {}).grafana || {}).dataKey || '';
+    const mod = await tryImport('../ingest/sendout-master.js?v=v2026-08-31.2');
+    state.sendoutMaster = (mod && mod.loadSendoutMaster)
+      ? await mod.loadSendoutMaster(dataKey)
+      : null;
+  }
   if (!state.reportModel) state.reportModel = buildDraftReportModel(state, store);
   const model = state.reportModel;
   { // settings may have been edited since the model was drafted — re-source them
@@ -417,7 +490,7 @@ export async function render(container, ctx) {
   // Guarded import, exactly as the retired picker was: a build without the module
   // degrades to the engine's own deltas instead of throwing. Re-run below on a
   // report-date change and on a mode switch; being PURE, every re-run agrees.
-  const dwMod = await tryImport('../model/delta-window.js?v=v2026-08-31.1');
+  const dwMod = await tryImport('../model/delta-window.js?v=v2026-08-31.2');
   const stampWindow = dwMod && dwMod.stampWindowDeltas;
   // The chips need the parsed CSV rows: with no upload in this session (mock preview)
   // stampWindowDeltas leaves the engine's deltas alone and stamps no window, and the
@@ -501,9 +574,9 @@ export async function render(container, ctx) {
     const token = ++renderToken;
     model.reportDate = state.reportDate;
     stampDeltas(); // re-window the chips for the current report date (pure → idempotent)
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-08-31.1');
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-08-31.2');
     const buildSpec = pickFn(specMod, ['buildSpec', 'build', 'makeSpec', 'toSpec']);
-    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-08-31.1');
+    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-08-31.2');
     const renderFn = pickFn(rendMod, ['renderSpec', 'renderSlides', 'renderHtml', 'render']);
 
     if (!buildSpec || !renderFn) {
@@ -893,7 +966,7 @@ export async function render(container, ctx) {
     el('summary', { class: 'card__title', style: 'cursor:pointer', text: STR.review.labelsCardTitle }),
   ]);
   (async () => {
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-08-31.1');
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-08-31.2');
     const LABEL_NAMES = specMod && specMod.LABEL_NAMES;
     const DEFAULT_LABELS = (specMod && specMod.DEFAULT_LABELS) || {};
     if (!LABEL_NAMES || typeof LABEL_NAMES !== 'object') {
@@ -1159,8 +1232,12 @@ export async function render(container, ctx) {
   ]);
 
   // Source order: controls first (RTL => right), preview second (left/main).
+  // Unattributed send-out orders are surfaced here, above the controls, because
+  // this is the last screen before the deck is generated.
+  const gaps = sendoutGapsCard(model);
   container.appendChild(el('div', { class: 'screen' }, [
     head,
+    ...(gaps ? [gaps] : []),
     el('div', { class: 'review-layout' }, [controls, preview]),
   ]));
 

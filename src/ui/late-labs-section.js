@@ -5,19 +5,19 @@
 // basis, empty-state, and the sanitized triggerDownload helper. Built from the
 // SAME dataset a generate run uses (order rows + TAT lookup + an as-of instant),
 // so it works in live-snapshot mode and on the upload screen too.
-import { el, toast } from './components.js?v=v2026-08-31.1';
-import { todayISO } from '../i18n/ar.js?v=v2026-08-31.1';
-import { buildLateLabWorkbooks } from '../export/late-labs.js?v=v2026-08-31.1';
-import { parseDateTime } from '../engine/workday.js?v=v2026-08-31.1';
+import { el, toast } from './components.js?v=v2026-08-31.2';
+import { todayISO } from '../i18n/ar.js?v=v2026-08-31.2';
+import { buildLateLabWorkbooks } from '../export/late-labs.js?v=v2026-08-31.2';
+import { parseDateTime } from '../engine/workday.js?v=v2026-08-31.2';
 // The English email template the team pastes when notifying a lab — VERBATIM
 // wording, now owned by export/eml-draft.js so the clipboard text and the .eml
 // draft body can never drift apart. buildLabEmailDraft only PREPARES a draft
 // file: nothing here sends mail — the user opens it in Outlook and presses Send.
-import { buildLabEmailDraft, labEmailText } from '../export/eml-draft.js?v=v2026-08-31.1';
+import { buildLabEmailDraft, labEmailText } from '../export/eml-draft.js?v=v2026-08-31.2';
 // The vendor contact book from the ops "All Vendors" workbook: a lab's To:
 // addresses plus the standard Lean/NUPCO CC block. Pure data + a pure name
 // lookup — it contacts nobody; its output only fills in the draft's headers.
-import { lookupLabContacts } from '../seeds/lab-contacts.js?v=v2026-08-31.1';
+import { lookupLabContacts } from '../seeds/lab-contacts.js?v=v2026-08-31.2';
 
 // Copy text to the clipboard with an execCommand fallback (keeps user activation
 // on browsers where navigator.clipboard is unavailable). Mirrors buildShareCard.
