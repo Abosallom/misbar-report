@@ -8,7 +8,7 @@
 // agents who ship the specimen abroad, and those orders are INTERNATIONAL. Only
 // seeds/sendout-master.js (the ops workbook) can make that call.
 //
-import { inferBlankFacilities } from '../engine/infer-facility.js?v=v2026-08-31.5';
+import { inferBlankFacilities } from '../engine/infer-facility.js?v=v2026-09-08.1';
 
 // PURE module: no DOM, no clock, no network, no vendor imports — the browser and
 // `node --test` share one deterministic path. The catalogue is INJECTED, never
@@ -72,6 +72,16 @@ export function norm(s) {
  */
 export const FACILITY_TO_VENDOR = {
   'advanced laboratory services .co': 'advanced laboratory services compan',
+  // NOT the same company as the line above, however alike the two names read —
+  // a DIFFERENT vendor, contracted in a different country. Keep them apart.
+  // The master spells this one without the 'o' of 'laboratory' and without the
+  // branch suffix the order carries. Confirmed by KAMC 2026-09-08, on top of a
+  // character-for-character match between the order's test name and one of this
+  // vendor's two contracted tests. That test is what decides the country: the
+  // vendor works in more than one, so the multi-country branch below resolves it
+  // per test — which country, and at which reference lab, stays in the ENCRYPTED
+  // catalogue and is deliberately not written down in this public repo.
+  'advanced cell laboratory sulaimanih br': 'advanced cell labratory',
   'fal specialized medical lab': 'fal specialized medical est.',
   'king abdullaziz medical city in riyadh': 'business center ngha',
   'noor diagnostics and innovation': 'noor diagnostics and discovery',
@@ -91,6 +101,8 @@ export const FACILITY_TO_VENDOR = {
 /** How each lab is captioned. Proper names stay in their original Latin form. */
 export const FACILITY_DISPLAY = {
   'advanced laboratory services .co': 'Advanced Laboratory Services',
+  // The branch suffix is an address, not an identity — the slide names the lab.
+  'advanced cell laboratory sulaimanih br': 'Advanced Cell Laboratory',
   'fal specialized medical lab': 'Fal Specialized Medical Lab',
   'king abdullaziz medical city in riyadh': 'King Abdulaziz Medical City - MNGHA',
   'noor diagnostics and innovation': 'Noor Diagnostics',

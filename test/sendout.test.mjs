@@ -254,3 +254,36 @@ test('reflabShort abbreviates a long SHOUTED name and leaves others alone', () =
   assert.equal(reflabShort(''), '');
   assert.equal(reflabShort(null), '');
 });
+
+// ---------------------------------------------------------------------------
+// ALIAS-TABLE HYGIENE. Both tables are hand-maintained: an order's performing
+// facility is matched to a catalogue vendor through FACILITY_TO_VENDOR, and
+// captioned through FACILITY_DISPLAY. A key present in one and missing from the
+// other is silent — the slide just prints the raw CSV spelling — so the pairing
+// is pinned here rather than left to review.
+//
+// NB these cases run AFTER the fixture aliases above were injected into both
+// tables, which is fine: the injection adds a display name for every key it adds,
+// so it can never be the thing that fails the parity check.
+test('every mapped facility also has a display name', () => {
+  for (const key of Object.keys(FACILITY_TO_VENDOR)) {
+    assert.ok(FACILITY_DISPLAY[key], `no display caption for mapped facility '${key}'`);
+    assert.notEqual(FACILITY_DISPLAY[key].trim(), '', `empty display caption for '${key}'`);
+  }
+});
+
+test('the two "advanced …" labs stay DISTINCT vendors', () => {
+  // A live near-miss, and the reason this case exists: two unrelated companies
+  // whose names read alike, contracted in different countries, both appearing in
+  // the same upload. Collapsing them would move real orders to the wrong country
+  // and nothing downstream would notice. (2026-09-08: the branch-suffixed one was
+  // added after a week's report came up one order short of its own total — it had
+  // no mapping at all, so it counted in the total and in neither country.)
+  const services = FACILITY_TO_VENDOR['advanced laboratory services .co'];
+  const cell = FACILITY_TO_VENDOR['advanced cell laboratory sulaimanih br'];
+  assert.ok(services, 'the services lab must stay mapped');
+  assert.ok(cell, 'the cell lab must stay mapped — an unmapped lab silently leaves the country split');
+  assert.notEqual(cell, services, 'these are different companies and must resolve to different vendors');
+  assert.notEqual(FACILITY_DISPLAY['advanced cell laboratory sulaimanih br'],
+    FACILITY_DISPLAY['advanced laboratory services .co']);
+});
