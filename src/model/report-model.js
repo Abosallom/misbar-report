@@ -1,7 +1,7 @@
 // model/report-model.js — assemble the single ReportModel consumed by build-spec.
 // Auto-drafts from the tracker are shallow-merged with the reviewer's edits.
-import { autoDraft } from './drafts.js?v=v2026-09-08.1';
-import { analyseSendout, hasMaster } from './sendout.js?v=v2026-09-08.1';
+import { autoDraft } from './drafts.js?v=v2026-09-10.1';
+import { analyseSendout, hasMaster } from './sendout.js?v=v2026-09-10.1';
 
 /**
  * buildReportModel({engineOutput, tracker, settings, reportDate, orders, sendoutMaster, edits}) -> ReportModel

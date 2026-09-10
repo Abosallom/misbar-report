@@ -25,8 +25,8 @@
 //                                   OPT_IN_CARDS below for why those two are not a
 //                                   contradiction)
 //   m.overrides[key]              per-run manual NUMBER overrides (suppresses that delta chip)
-import { COLORS as C, GEOM } from '../theme.js?v=v2026-09-08.1';
-import { AR_COUNTRY, AR_COUNTRY_SHORT, reflabShort } from '../model/sendout.js?v=v2026-09-08.1';
+import { COLORS as C, GEOM } from '../theme.js?v=v2026-09-10.1';
+import { AR_COUNTRY, AR_COUNTRY_SHORT, reflabShort } from '../model/sendout.js?v=v2026-09-10.1';
 
 // EXPLICIT-TRUE kpiCards KEYS. reportOptions.kpiCards normally reads "on unless === false"
 // (see buildExec's cardDefs filter). The keys in this set INVERT that: they render only
@@ -1725,10 +1725,38 @@ const SO = {
   cardY: 1.028, cardW: 5.971, cardH: 1.861, cardR: 0.058,
   localX: 6.833, intlX: 0.5, accentW: 0.069,
   barX: 2.778, barW: 6.804, barH: 0.306, barR: 0.031,
-  row0: 3.861, rowStep: 0.694, barDY: 0.042,
+  row0: 3.861, rowStep: 0.694, rowH: 0.389, barDY: 0.042,
 };
 // Bars are right-anchored so they grow leftwards (RTL): the track's right edge.
 const SO_BAR_RIGHT = SO.barX + SO.barW;
+
+// The country rows must FINISH above the colour footnote at y 6.75. The reference
+// ladder (row0 + n x rowStep) only clears it for FOUR countries: a fifth row runs
+// 6.637 -> 7.026 and prints its name and figure straight through the footnote, and
+// a sixth would fall off the 7.5in slide entirely. Live data reached five the day
+// Advanced Cell Laboratory was mapped (2026-09-08), which is how that was found.
+const SO_ROWS_BOTTOM = 6.65;
+const SO_ROW_GAP = 0.04;
+
+/**
+ * The row ladder for n countries: the reference deck's own spacing for as long as
+ * it fits, then an even split of the band above the footnote. Same shape as the
+ * monthly table's column widths - the canonical case stays pixel-identical and only
+ * a count the reference deck never had is computed.
+ * `f` scales everything INSIDE a row (bar height, its offset, both type sizes), so a
+ * squeezed row is a smaller copy of the same design rather than a clipped one: the
+ * text boxes are overflow:hidden in the preview, so type that outgrows its row loses
+ * its ink instead of spilling.
+ * @param {number} n how many country rows this run has
+ * @returns {{step:number, rowH:number, f:number}}
+ */
+function sendoutRowGeom(n) {
+  const N = Math.max(Number(n) || 0, 1);
+  if (N <= 4) return { step: SO.rowStep, rowH: SO.rowH, f: 1 };
+  const step = (SO_ROWS_BOTTOM - SO.row0) / N;
+  const rowH = Math.min(SO.rowH, step - SO_ROW_GAP);
+  return { step, rowH, f: rowH / SO.rowH };
+}
 
 const fmtInt = (n) => Number(n).toLocaleString('en-US');
 const fill = (tpl, vars) => String(tpl).replace(/\{(\w+)\}/g, (mm, k) => (vars[k] != null ? vars[k] : mm));
@@ -1752,17 +1780,29 @@ function buildSendoutCountries(m) {
   const pc = (n) => (T ? (Math.round((1000 * n) / T) / 10).toFixed(1) : '0.0');
 
   const bars = [];
-  (so.byCountry || []).forEach((c, i) => {
-    const y = SO.row0 + i * SO.rowStep;
+  const countries = so.byCountry || [];
+  const g = sendoutRowGeom(countries.length);
+  countries.forEach((c, i) => {
+    const y = SO.row0 + i * g.step;
     const isLocal = c.country === 'Saudi Arabia';
     const colour = isLocal ? C.navy : C.amber;
     const w = T ? (SO.barW * c.orders) / T : 0;
+    const barH = SO.barH * g.f;
+    const barDY = SO.barDY * g.f;
+    // MINIMUM VISIBLE BAR. One order out of ~1,500 computes a bar 0.005in wide, and
+    // the old 0.01in floor was no better: half a screen pixel, then rounded away by
+    // the pill's own 0.031in corner radius, so the row drew an EMPTY track (South
+    // Korea, reported 2026-09-10). The floor is 2x that radius - the narrowest a
+    // rounded bar can be and still render as a bar in both the preview and PowerPoint.
+    // It is a VISIBILITY floor, never a value: the exact share and count are printed
+    // in bold at the other end of the same row, so nothing here is read off the length.
+    const drawnW = Math.max(w, SO.barR * 2);
     bars.push(
-      text(9.722, y, 3.083, 0.389, AR_COUNTRY[c.country] || c.country, 12,
+      text(9.722, y, 3.083, g.rowH, AR_COUNTRY[c.country] || c.country, 12 * g.f,
         { bold: true, color: C.slate900, align: 'right', valign: 'middle', rtl: true }),
-      rect(SO.barX, y + SO.barDY, SO.barW, SO.barH, C.bgLighter, { radius: SO.barR }),
-      rect(SO_BAR_RIGHT - w, y + SO.barDY, Math.max(w, 0.01), SO.barH, colour, { radius: SO.barR }),
-      text(0.5, y, 2.139, 0.389, `${pc(c.orders)}%  |  ${fmtInt(c.orders)}`, 14,
+      rect(SO.barX, y + barDY, SO.barW, barH, C.bgLighter, { radius: SO.barR }),
+      rect(SO_BAR_RIGHT - drawnW, y + barDY, drawnW, barH, colour, { radius: SO.barR }),
+      text(0.5, y, 2.139, g.rowH, `${pc(c.orders)}%  |  ${fmtInt(c.orders)}`, 14 * g.f,
         { bold: true, color: colour, align: 'left', valign: 'middle' }),
     );
   });

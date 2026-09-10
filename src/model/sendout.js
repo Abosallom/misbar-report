@@ -8,7 +8,7 @@
 // agents who ship the specimen abroad, and those orders are INTERNATIONAL. Only
 // seeds/sendout-master.js (the ops workbook) can make that call.
 //
-import { inferBlankFacilities } from '../engine/infer-facility.js?v=v2026-09-08.1';
+import { inferBlankFacilities } from '../engine/infer-facility.js?v=v2026-09-10.1';
 
 // PURE module: no DOM, no clock, no network, no vendor imports — the browser and
 // `node --test` share one deterministic path. The catalogue is INJECTED, never
