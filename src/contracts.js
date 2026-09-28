@@ -22,6 +22,15 @@
  * @property {string|null} [shipmentId]           - Shipment identifier ('Shipment ID'). Operational id, not PHI.
  * @property {string|null} [orderingFacilityId]   - Ordering facility id ('Ordering facility ID'). Operational id, not PHI.
  * @property {string|null} [performingFacilityId] - Performing facility id ('Performing facility id'); absent from the CSV export → null.
+ * @property {string|null} [dob] - Patient date of birth ('DOB', 'YYYY-MM-DD HH:MM:SS').
+ *   THE ONE PATIENT FIELD THIS SHAPE CARRIES, and only on ONE path: ingest/csv.js
+ *   (the manual «ملف الطلبات (CSV)» upload) sets it so the per-lab late-tests Excel
+ *   can print it — a lab matches a specimen to its patient by specimen no + DOB.
+ *   It is deliberately ABSENT on the automated path (ingest/grafana.js), because
+ *   that path's rows are encrypted into data/kamc-live.enc and committed to a
+ *   PUBLIC repo; test/grafana.test.mjs holds that line. Rows are memory-only
+ *   (store.js has no rows API), so DOB never reaches browser storage either.
+ *   Every other patient field — name, national id, MRN, gender — stays out.
  */
 
 /**

@@ -1,7 +1,10 @@
 // ingest/csv.js — parse the KAMC daily CSV export (30 cols) into normalized OrderRow[].
 // Library is injected (browser loads PapaParse separately); never imported here.
-// PII (patient/staff fields) is read but NEVER copied into OrderRow or persisted.
-import { normFacility } from '../contracts.js?v=v2026-09-10.1';
+// PII (patient/staff fields) is read but NEVER copied into OrderRow or persisted —
+// with ONE deliberate exception, DOB, carried memory-only for the per-lab late-tests
+// Excel (see `dob` below and contracts.js OrderRow). Name, national id, MRN, gender
+// and the staff "… By" columns are still never copied.
+import { normFacility } from '../contracts.js?v=v2026-09-28.1';
 
 // Columns we actually map. Missing ones are reported in errors[] (fail soft).
 export const MAPPED_COLUMNS = [
@@ -81,6 +84,15 @@ export function parseKamcCsv(text, Papa) {
       shipmentId: clean(r['Shipment ID']),
       orderingFacilityId: clean(r['Ordering facility ID']),
       performingFacilityId: clean(r['Performing facility id']),
+      // Patient date of birth, for the per-lab late-tests Excel ONLY (user request
+      // 2026-09-28: labs match a specimen to its patient by specimen no + DOB). This
+      // is PATIENT DATA and is carried on THIS path alone — the manual CSV upload,
+      // whose rows live in memory and never reach storage. ingest/grafana.js must NOT
+      // gain it: that path's rows are encrypted into the snapshot committed to a
+      // public repo. Deliberately NOT in MAPPED_COLUMNS — a CSV without it is still a
+      // complete report, so its absence must never flag the upload as broken (same
+      // soft treatment as 'Specimen Id' / 'Shipment ID' above).
+      dob: clean(r['DOB']),
     });
   }
 

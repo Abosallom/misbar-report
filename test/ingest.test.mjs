@@ -81,13 +81,22 @@ test('parseKamcCsv — OrderRow mapping is faithful (no PII, IDs as strings)', {
   assert.equal(r0.rawStatus, 'Result Approved');
   assert.equal(r0.tatDaysCsv, 3);
   assert.equal(typeof r0.lineNo, 'number');
-  // No patient/staff fields leaked onto the row.
+  // No patient/staff fields leaked onto the row — with exactly ONE deliberate
+  // exception: the key `dob`, carried memory-only for the per-lab late-tests Excel
+  // (user request 2026-09-28; see contracts.js OrderRow). The exception is the EXACT
+  // key, not a looser pattern: any other DOB-ish, name, national-id, MRN, gender or
+  // staff "… By" key is still a failure. Widening this set is a privacy decision.
+  const DELIBERATE_PATIENT_KEYS = new Set(['dob']);
   for (const k of Object.keys(r0)) {
+    if (DELIBERATE_PATIENT_KEYS.has(k)) continue;
     assert.ok(
       !/patient|national|mrn|dob|gender|by$/i.test(k),
       `unexpected PII-ish key: ${k}`,
     );
   }
+  // …and the exception actually carries its value (checked by SHAPE only — this
+  // file never asserts a real patient's birthdate).
+  assert.match(String(r0.dob), /^\d{4}-\d{2}-\d{2}/, 'dob is read from the CSV DOB column');
 });
 
 test('parseTracker — task / challenge / risk counts', { skip: SKIP.trk }, () => {

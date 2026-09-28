@@ -15,16 +15,18 @@
 // reference's per-column map — see src/export/late-labs.js. The cellXfs replicate
 // the reference styles.xml semantics:
 //   0 default (General, Calibri)
-//   1 body font (Aptos Narrow 11), General, wrap+vcenter        — header A..N
-//   2 bold white Aptos, navy fill FF1F4E78, center+vcenter+wrap — header O..T
+//   1 body font (Aptos Narrow 11), General, wrap+vcenter        — header A..O
+//   2 bold white Aptos, navy fill FF1F4E78, center+vcenter+wrap — header P..U
 //   3 body font, numFmt 165 (m/d/yyyy)                          — date data
 //   4 body font, General                                        — general data
 //   5 body font, numFmt 166 (0)                                 — integer data
 //   6 body font, General, wrap+vtop                             — Test name data
 //   7 body font, numFmt 167 (m/d/yyyy h:mm)                     — datetime data
-//   8 bold white Aptos, navy fill, center — General             — navy data (O,P,S,T)
-//   9 bold white Aptos, navy fill, center — numFmt 165          — navy date (Q)
-//  10 bold white Aptos, navy fill, center — numFmt 166          — navy int  (R)
+//   8 bold white Aptos, navy fill, center — General             — navy data (P,Q,T,U)
+//   9 bold white Aptos, navy fill, center — numFmt 165          — navy date (R)
+//  10 bold white Aptos, navy fill, center — numFmt 166          — navy int  (S)
+// (Letters are the 21-column layout: the reference's 20 plus DOB at J, which pushed
+//  every column from J on one letter right. The style SEMANTICS are unchanged.)
 
 const MS_PER_DAY = 86400000;
 // Excel serial 25569 == 1970-01-01 (both naïve/UTC-anchored here → no TZ drift).

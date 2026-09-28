@@ -75,6 +75,20 @@ function independentInclude(rows) {
 const usedRange = (ws) => XLSX.utils.decode_range(ws['!ref']);
 const cellAt = (ws, r, c) => ws[XLSX.utils.encode_cell({ r, c })];
 
+// Column index BY HEADER NAME, never a bare number. The sheet gained a column
+// mid-row in 2026-09 (DOB, after 'Specimen no') and every hardcoded index after it
+// silently pointed one column to the LEFT of what it meant. A named lookup keeps
+// each assertion on the column it is about, whatever is inserted later.
+const col = (name) => {
+  const i = LATE_LAB_HEADERS.indexOf(name);
+  assert.ok(i >= 0, `no export column named '${name}'`);
+  return i;
+};
+/** The same column as its A1 letter(s), for assertions against raw sheet XML. */
+const colLetterOf = (name) => XLSX.utils.encode_col(col(name));
+/** The last column's letter — the right edge of !ref and the autofilter. */
+const LAST_COL = XLSX.utils.encode_col(LATE_LAB_HEADERS.length - 1);
+
 // The new export returns raw XLSX bytes (a dependency-free styled writer replaced
 // SheetJS on the WRITE path). SheetJS remains the PARSER: re-read the bytes to
 // verify values/headers/autofilter/counts exactly as before. Plain read → empty
@@ -160,7 +174,7 @@ test('counts are per TEST line, not per order', () => {
 
   // Order ID column (col 4): the SAME order (000501 → 501) appears on THREE rows.
   const orderIds = [];
-  for (let r = rng.s.r + 1; r <= rng.e.r; r++) orderIds.push(cellAt(ws, r, 4)?.v);
+  for (let r = rng.s.r + 1; r <= rng.e.r; r++) orderIds.push(cellAt(ws, r, col('Order ID'))?.v);
   assert.equal(orderIds.filter((v) => v === 501).length, 3, 'one order contributes three rows');
   assert.equal(orderIds.filter((v) => v === 777).length, 1, 'the due-soon order contributes one row');
   assert.equal(orderIds.filter((v) => v === 888).length, 1, 'the due-TODAY order contributes one row');
@@ -168,16 +182,16 @@ test('counts are per TEST line, not per order', () => {
   // The boundary, read straight out of the sheet: the due-TODAY line is 'Late'
   // with delay 0 and NO ⚠ flag; the next-business-day line is 'On Time' + ⚠.
   const rowOf = (id) => {
-    for (let r = rng.s.r + 1; r <= rng.e.r; r++) if (cellAt(ws, r, 4)?.v === id) return r;
+    for (let r = rng.s.r + 1; r <= rng.e.r; r++) if (cellAt(ws, r, col('Order ID'))?.v === id) return r;
     return -1;
   };
   const dueToday = rowOf(888);
-  assert.equal(cellAt(ws, dueToday, 17).v, 0, 'due TODAY ⇒ delay 0');
-  assert.equal(cellAt(ws, dueToday, 18).v, 'Late', 'delay 0 with no result is LATE (2026-08-05 rule)');
-  assert.equal(cellAt(ws, dueToday, 19)?.v ?? '', '', 'a LATE row never carries the ⚠ due-soon flag');
+  assert.equal(cellAt(ws, dueToday, col('Delay (days)')).v, 0, 'due TODAY ⇒ delay 0');
+  assert.equal(cellAt(ws, dueToday, col('Status')).v, 'Late', 'delay 0 with no result is LATE (2026-08-05 rule)');
+  assert.equal(cellAt(ws, dueToday, col('Late Risk (next 24h)'))?.v ?? '', '', 'a LATE row never carries the ⚠ due-soon flag');
   const dueNext = rowOf(777);
-  assert.equal(cellAt(ws, dueNext, 18).v, 'On Time', 'due on the next business day is not late yet');
-  assert.equal(cellAt(ws, dueNext, 19).v, '⚠ DUE ≤24H', 'and it is the row that carries the flag');
+  assert.equal(cellAt(ws, dueNext, col('Status')).v, 'On Time', 'due on the next business day is not late yet');
+  assert.equal(cellAt(ws, dueNext, col('Late Risk (next 24h)')).v, '⚠ DUE ≤24H', 'and it is the row that carries the flag');
 });
 
 test('reference styling — styles.xml + sheet1.xml reproduce the navy computed block', () => {
@@ -189,6 +203,7 @@ test('reference styling — styles.xml + sheet1.xml reproduce the navy computed 
       orderDate: '2026-06-01', collected: '2026-06-01 07:30:00',
       dispatched: '2026-06-01 08:00:00', received: '2026-06-01 08:30:00',
       specimenNo: '9900000526', rawStatus: 'Received', tatDaysCsv: 1,
+      dob: '1985-03-12 00:00:00', // SYNTHETIC — no real patient; shape as the CSV writes it
     }),
     // RE-BASELINED 2026-08-05: tatDaysCsv was 0 (due ON the asOf day), which now
     // classifies as LATE and therefore carries NO ⚠ flag — the flag assertion at
@@ -219,26 +234,47 @@ test('reference styling — styles.xml + sheet1.xml reproduce the navy computed 
   assert.ok(styles.includes('formatCode="m/d/yyyy"'), 'numFmt 165 = m/d/yyyy');
   assert.ok(styles.includes('m/d/yyyy\\ h:mm'), 'numFmt 167 = datetime');
 
-  // Header row: A1–N1 plain (s=1), O1–T1 navy (s=2).
-  for (const col of ['A', 'B', 'H', 'N']) assert.ok(sheet.includes(`<c r="${col}1" s="1"`), `${col}1 header s=1`);
-  for (const col of ['O', 'P', 'Q', 'R', 'S', 'T']) assert.ok(sheet.includes(`<c r="${col}1" s="2"`), `${col}1 navy header s=2`);
+  // Every cell below is located BY HEADER NAME. DOB was inserted at J in 2026-09 and
+  // moved every letter after it; the old letter-based checks did not all FAIL on
+  // that — M2 kept passing, because a different datetime column had slid into M.
+  // A check that survives a layout change by coincidence is not checking anything.
+  const at = (h, row) => `<c r="${colLetterOf(h)}${row}"`;
 
-  // Data row 2: A date xf (3); E numeric int xf (5); J/M datetime xf (7);
-  // O,P,S,T navy general (8); Q navy date (9); R navy int (10).
-  assert.ok(sheet.includes('<c r="A2" s="3">'), 'A2 date xf');
-  assert.match(sheet, /<c r="E2" s="5"><v>501<\/v><\/c>/, 'E2 numeric Order ID, int xf');
-  assert.ok(sheet.includes('<c r="J2" s="7">'), 'J2 datetime xf');
-  assert.ok(sheet.includes('<c r="M2" s="7">'), 'M2 datetime xf');
-  for (const col of ['O', 'P', 'S', 'T']) assert.ok(sheet.includes(`<c r="${col}2" s="8"`), `${col}2 navy general xf`);
-  assert.ok(sheet.includes('<c r="Q2" s="9">'), 'Q2 navy date xf');
-  assert.ok(sheet.includes('<c r="R2" s="10">'), 'R2 navy int xf');
+  // Header row: the SOURCE-DATA block A..O is plain (s=1) — DOB included — and the
+  // six COMPUTED columns P..U are navy (s=2).
+  const NAVY = ['Order Status', 'Standard TAT (business days)', 'Due Date',
+    'Delay (days)', 'Status', 'Late Risk (next 24h)'];
+  for (const h of ['Order date time', 'Ordering facility ID', 'Test name', 'DOB', 'Result report date time']) {
+    assert.ok(sheet.includes(`${at(h, 1)} s="1"`), `${h}: plain header s=1`);
+  }
+  for (const h of NAVY) assert.ok(sheet.includes(`${at(h, 1)} s="2"`), `${h}: navy header s=2`);
+  // …and the navy block is still exactly those six, contiguous, closing the row.
+  assert.deepEqual(NAVY.map(col), [15, 16, 17, 18, 19, 20], 'navy block = the last six columns');
 
-  // Empty cells still carry their column style (reference behaviour): N is empty
-  // by scope but keeps the datetime column style (s=7), self-closing (no <v>).
-  assert.match(sheet, /<c r="N2" s="7"\/>/, 'empty N2 keeps its column style');
+  // Data row 2: date xf (3) on Order date; numeric int xf (5) on Order ID; datetime
+  // xf (7) on the collected/received stamps; navy general (8) on the four computed
+  // text/number columns; navy date (9) on Due Date; navy int (10) on Delay.
+  assert.ok(sheet.includes(`${at('Order date time', 2)} s="3">`), 'Order date: date xf');
+  assert.match(sheet, new RegExp(`${at('Order ID', 2)} s="5"><v>501</v></c>`), 'numeric Order ID, int xf');
+  assert.ok(sheet.includes(`${at('Specimen collected date time', 2)} s="7">`), 'collected: datetime xf');
+  assert.ok(sheet.includes(`${at('Received date time', 2)} s="7">`), 'received: datetime xf');
+  for (const h of ['Order Status', 'Standard TAT (business days)', 'Status', 'Late Risk (next 24h)']) {
+    assert.ok(sheet.includes(`${at(h, 2)} s="8"`), `${h}: navy general xf`);
+  }
+  assert.ok(sheet.includes(`${at('Due Date', 2)} s="9">`), 'Due Date: navy date xf');
+  assert.ok(sheet.includes(`${at('Delay (days)', 2)} s="10">`), 'Delay: navy int xf');
+  // DOB is a REAL Excel date in the plain date style — not text a lab cannot sort or
+  // filter. The fixture's synthetic 1985-03-12 is serial 31118, derived by hand:
+  // 1985-01-01 is 31048, then + 31 (Jan) + 28 (Feb) + 11 = 31118.
+  assert.ok(sheet.includes(`${at('DOB', 2)} s="3"><v>31118</v>`), 'DOB: real date serial, date xf');
 
-  // autoFilter over the used range; 20 custom-width columns with the ref widths.
-  assert.ok(sheet.includes('<autoFilter ref="A1:T3"/>'), 'autofilter spans used range');
+  // Empty cells still carry their column style (reference behaviour): Result report
+  // is empty by scope but keeps the datetime column style (s=7), self-closing (no <v>).
+  assert.ok(sheet.includes(`${at('Result report date time', 2)} s="7"/>`),
+    'empty Result report cell keeps its column style');
+
+  // autoFilter over the used range; custom-width columns with the ref widths.
+  assert.ok(sheet.includes(`<autoFilter ref="A1:${LAST_COL}3"/>`), 'autofilter spans used range');
   assert.ok(sheet.includes('<col min="1" max="1" width="17.5" customWidth="true"/>'), 'col A ref width');
   assert.ok(sheet.includes('<col min="8" max="8" width="55" customWidth="true"/>'), 'col H ref width');
 
@@ -274,9 +310,11 @@ test('per-lab counts + which labs qualify (deterministic, CSV-fallback TAT)', { 
   }
 });
 
-test('header row is exactly the 20 verbatim strings', { skip: SKIP }, () => {
+test('header row is exactly the 21 verbatim strings (the reference 20 + DOB)', { skip: SKIP }, () => {
   const wbs = buildLateLabWorkbooks({ rows: load(), tatTests: {}, asOfMs });
-  assert.equal(LATE_LAB_HEADERS.length, 20);
+  assert.equal(LATE_LAB_HEADERS.length, 21);
+  // DOB sits directly after 'Specimen no' — the pair a lab checks together.
+  assert.equal(col('DOB'), col('Specimen no') + 1, 'DOB follows Specimen no');
   for (const w of wbs) {
     const ws = readWs(w);
     const rng = usedRange(ws);
@@ -296,13 +334,16 @@ test('sheet name = lab (sanitized ≤31); autofilter + ref span the used range; 
     assert.ok(w.sheetName.length <= 31, 'sheet name ≤ 31 chars');
     const ws = readWs(w);
     const nRows = w.late + w.dueSoon; // data rows
-    const expectRef = `A1:T${nRows + 1}`; // header + data, 20 cols (A..T)
+    const expectRef = `A1:${LAST_COL}${nRows + 1}`; // header + data, all columns
     assert.equal(ws['!ref'], expectRef, `!ref for ${w.lab}`);
     assert.deepEqual(ws['!autofilter'], { ref: expectRef }, `autofilter for ${w.lab}`);
     // !cols only surfaces when SheetJS parses styles (cellStyles); it round-trips
     // the reference widths to their char-width (wch) equivalents.
     const wsStyled = readWsStyled(w);
-    assert.ok(Array.isArray(wsStyled['!cols']) && wsStyled['!cols'].length === 20, '!cols has 20 entries');
+    // One width per column, whatever the column count — pinned to the header list,
+    // not a number (this was '=== 20' and outlived the DOB column by a test run).
+    assert.ok(Array.isArray(wsStyled['!cols']) && wsStyled['!cols'].length === LATE_LAB_HEADERS.length,
+      `!cols has one entry per column (${LATE_LAB_HEADERS.length})`);
     assert.ok(wsStyled['!cols'].every((c) => typeof c.wch === 'number'), 'every col has a wch width');
   }
 });
@@ -318,10 +359,10 @@ test('every included row is in scope (received && !resulted, not cancelled/rejec
     let lateSeen = 0;
     let dueSoonSeen = 0;
     for (let r = rng.s.r + 1; r <= rng.e.r; r++) {
-      const status = cellAt(ws, r, 18)?.v;       // Status
-      const delay = cellAt(ws, r, 17)?.v;        // Delay (days) — a number
-      const risk = cellAt(ws, r, 19)?.v ?? '';   // Late Risk (next 24h)
-      const resultCell = cellAt(ws, r, 13);      // Result report date time — must be empty
+      const status = cellAt(ws, r, col('Status'))?.v;
+      const delay = cellAt(ws, r, col('Delay (days)'))?.v; // a number
+      const risk = cellAt(ws, r, col('Late Risk (next 24h)'))?.v ?? '';
+      const resultCell = cellAt(ws, r, col('Result report date time')); // must be empty
       assert.equal(resultCell, undefined, 'no result-report cell (scope: not yet resulted)');
       assert.equal(typeof delay, 'number', 'Delay written as a number');
       if (status === 'Late') {
@@ -375,11 +416,11 @@ test('delay math spot-check — recompute one row by hand with workday()', { ski
   const wbs = buildLateLabWorkbooks({ rows, tatTests: {}, asOfMs });
   const w = wbs.find((x) => x.lab === 'Advanced Laboratory Services .Co');
   const ws = readWs(w);
-  assert.equal(cellAt(ws, 1, 17).v, delay, 'Delay cell equals the hand-computed delay');
-  assert.equal(cellAt(ws, 1, 18).v, delay > 0 ? 'Late' : 'On Time', 'Status matches delay sign');
+  assert.equal(cellAt(ws, 1, col('Delay (days)')).v, delay, 'Delay cell equals the hand-computed delay');
+  assert.equal(cellAt(ws, 1, col('Status')).v, delay > 0 ? 'Late' : 'On Time', 'Status matches delay sign');
   // Due Date cell is the Excel serial of dueMs (integer day).
   const serial = dueMs / 86400000 + 25569;
-  assert.equal(cellAt(ws, 1, 16).v, serial, 'Due Date serial matches workday(received, tat)');
+  assert.equal(cellAt(ws, 1, col('Due Date')).v, serial, 'Due Date serial matches workday(received, tat)');
 });
 
 test('deterministic, correct file names — same output across runs', { skip: SKIP }, () => {
@@ -407,7 +448,7 @@ test('new OrderRow identifier fields are populated (specimenNo etc.) and perform
   const ws = readWs(wbs[0]);
   const rng = usedRange(ws);
   let sawSpecimen = false;
-  for (let r = rng.s.r + 1; r <= rng.e.r; r++) if (cellAt(ws, r, 8) != null) sawSpecimen = true;
+  for (let r = rng.s.r + 1; r <= rng.e.r; r++) if (cellAt(ws, r, col('Specimen no')) != null) sawSpecimen = true;
   assert.ok(sawSpecimen, 'Specimen no column populated in the workbook');
 });
 
@@ -419,8 +460,23 @@ test('PII value guard — no patient/staff value from the raw CSV appears in any
   // the key-pattern guard in ingest.test.mjs but not past this.
   const raw = Papa.parse(csvText, { header: true, skipEmptyLines: true }).data;
   const headers = Object.keys(raw[0] || {});
-  const piiCols = headers.filter((h) => /patient|national|mrn|dob|birth|gender|by$|by /i.test(h.trim()));
+  // DOB is EXPORTED ON PURPOSE since 2026-09-28 (its own tests below pin it), so it
+  // is the ONE patient column not harvested here — excluded by its EXACT header,
+  // matching the exact-key exception in ingest.test.mjs. Anything else DOB-ish, and
+  // every other patient/staff column, is still a leak.
+  // Without this exclusion the guard would not have FAILED — it would have kept
+  // passing by accident: it compares the raw text '1985-03-12 00:00:00' against the
+  // re-read cell, which is a date serial / 'm/d/yyyy', and the two never match. A
+  // guard that passes for the wrong reason is worse than none, so it is explicit.
+  const EXPORTED_ON_PURPOSE = new Set(['DOB']);
+  const piiCols = headers.filter((h) => !EXPORTED_ON_PURPOSE.has(h.trim())
+    && /patient|national|mrn|dob|birth|gender|by$|by /i.test(h.trim()));
   assert.ok(piiCols.length >= 5, `expected PII columns in the raw CSV, got: ${piiCols.join(' | ')}`);
+  // The exemption must not have cost the guard its teeth on the fields that matter.
+  for (const must of ['Patient Name', 'National Id', 'MRN ID', 'Gender']) {
+    assert.ok(piiCols.includes(must), `the leak guard must still cover '${must}'`);
+  }
+  assert.ok(!piiCols.includes('DOB'), 'DOB is exported on purpose and is not guarded as a leak');
   const piiValues = new Set();
   for (const r of raw) {
     for (const c of piiCols) {
@@ -448,5 +504,89 @@ test('PII value guard — no patient/staff value from the raw CSV appears in any
         }
       }
     }
+  }
+});
+
+// ── DOB (user request 2026-09-28) ──────────────────────────────────────────────
+// The one patient field the export carries. Everything below compares DOBs as Excel
+// SERIALS and reports failures by ORDER LINE, never by birthdate: an assertion
+// message is printed on failure, and a real patient's DOB must not land in a log.
+const dobSerial = (dob) => {
+  const ms = toEpochDay(parseDateTime(dob));
+  return ms == null ? null : ms / 86400000 + 25569;
+};
+/** Every exported data row as { key: 'orderId:lineNo', dob: <DOB cell> }, all labs. */
+function exportedDobs(wbs) {
+  const out = [];
+  for (const w of wbs) {
+    const ws = readWs(w);
+    const rng = usedRange(ws);
+    for (let r = rng.s.r + 1; r <= rng.e.r; r++) {
+      out.push({
+        key: String(cellAt(ws, r, col('Order line number'))?.v),
+        dob: cellAt(ws, r, col('DOB')),
+      });
+    }
+  }
+  return out;
+}
+
+test('DOB: every exported row carries ITS OWN patient\'s birthdate, as a real date', { skip: SKIP }, () => {
+  // Not merely "the column is populated": each row is matched back to the exact CSV
+  // line it came from (Order line number = orderId:lineNo, unique per line) and its
+  // DOB checked against THAT line's. A shifted or mis-joined column would put a
+  // real birthdate on the wrong patient's specimen — the failure that matters.
+  const rows = load();
+  const want = new Map(rows.map((r) => [`${r.orderId}:${r.lineNo}`, r.dob]));
+  const got = exportedDobs(buildLateLabWorkbooks({ rows, tatTests: {}, asOfMs }));
+  assert.ok(got.length > 0, 'the sample produces exported rows to check');
+  for (const { key, dob } of got) {
+    assert.ok(want.has(key), `exported line ${key} maps back to a CSV line`);
+    const expected = dobSerial(want.get(key));
+    assert.ok(expected != null, `CSV line ${key} has a parseable DOB`);
+    assert.ok(dob, `line ${key}: DOB cell present`);
+    assert.equal(dob.t, 'n', `line ${key}: DOB is a date serial, not text`);
+    assert.equal(dob.v, expected, `line ${key}: DOB is that line's own birthdate`);
+  }
+});
+
+test('DOB: rows WITHOUT one (the automated path) export an empty DOB column and change nothing else', { skip: SKIP }, () => {
+  // The live pull (ingest/grafana.js) deliberately never carries DOB, so its lab
+  // files must come out with the column present but empty — and DOB must affect
+  // ONLY its own column: every other cell is byte-for-byte what it would be anyway.
+  const withDob = load();
+  const withoutDob = withDob.map(({ dob, ...rest }) => rest);
+  const a = buildLateLabWorkbooks({ rows: withDob, tatTests: {}, asOfMs });
+  const b = buildLateLabWorkbooks({ rows: withoutDob, tatTests: {}, asOfMs });
+  assert.deepEqual(b.map((w) => [w.lab, w.late, w.dueSoon]), a.map((w) => [w.lab, w.late, w.dueSoon]),
+    'DOB changes neither which labs get a file nor their counts');
+  for (const { key, dob } of exportedDobs(b)) {
+    assert.ok(dob == null || dob.v === '' || dob.v == null, `line ${key}: no DOB on the automated path`);
+  }
+  const dobCol = col('DOB');
+  for (let i = 0; i < a.length; i++) {
+    const wa = readWs(a[i]); const wb = readWs(b[i]);
+    const rng = usedRange(wa);
+    for (let r = rng.s.r; r <= rng.e.r; r++) {
+      for (let c = rng.s.c; c <= rng.e.c; c++) {
+        if (c === dobCol) continue;
+        assert.deepEqual(cellAt(wb, r, c)?.v, cellAt(wa, r, c)?.v,
+          `${a[i].lab} ${XLSX.utils.encode_cell({ r, c })}: only the DOB column may differ`);
+      }
+    }
+  }
+});
+
+test('DOB: an unparseable value is written as TEXT, never silently blanked', { skip: SKIP }, () => {
+  // Every DOB in the CSV so far parses — but a lab working from this file must never
+  // be handed an empty birthdate for a patient who has one, so a format change falls
+  // back to the raw text rather than to nothing.
+  const rows = load().map((r) => ({ ...r, dob: 'NOT-A-DATE' }));
+  const got = exportedDobs(buildLateLabWorkbooks({ rows, tatTests: {}, asOfMs }));
+  assert.ok(got.length > 0);
+  for (const { key, dob } of got) {
+    assert.ok(dob, `line ${key}: DOB cell present`);
+    assert.equal(dob.t, 's', `line ${key}: falls back to text`);
+    assert.equal(dob.v, 'NOT-A-DATE', `line ${key}: the raw value, untouched`);
   }
 });

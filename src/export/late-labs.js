@@ -2,7 +2,11 @@
 // that are LATE vs their standard TAT or DUE within the next 24h. The output
 // format exactly reproduces the reference file the team already emails to labs
 // (single sheet named the lab; autofilter over the used range; custom column
-// widths; 20 verbatim headers — the 'Lonic code' typo is the established format).
+// widths; the reference's 20 verbatim headers — the 'Lonic code' typo is the
+// established format). ONE DELIBERATE DEPARTURE (user request 2026-09-28): a 21st
+// column, 'DOB', right after 'Specimen no', so a lab can match a specimen to its
+// patient. It sits in the plain source-data block, so the navy computed block keeps
+// its six columns and simply moves one letter right (O..T → P..U).
 //
 // PURE module: no DOM, no vendor imports, no Date.now(). SheetJS (XLSX) and the
 // as-of instant are injected so the browser and `node --test` share one code path
@@ -37,13 +41,18 @@
 //   • GRAIN = per test LINE (order line): counts (late/dueSoon) and data rows are
 //     NEVER deduplicated by order — one order with 3 qualifying tests contributes
 //     3 rows and counts as 3, not 1.
-import { buildTatIndex, resolveTat } from '../engine/tat.js?v=v2026-09-10.1';
+import { buildTatIndex, resolveTat } from '../engine/tat.js?v=v2026-09-28.1';
 import {
   parseDateTime, toEpochDay, workday, dayDiff,
-} from '../engine/workday.js?v=v2026-09-10.1';
-import { writeStyledXlsx } from './xlsx-styled.js?v=v2026-09-10.1';
+} from '../engine/workday.js?v=v2026-09-28.1';
+import { writeStyledXlsx } from './xlsx-styled.js?v=v2026-09-28.1';
 
-/** The 20 export columns, VERBATIM (keep the 'Lonic code' typo — established format). */
+/**
+ * The 21 export columns, VERBATIM (keep the 'Lonic code' typo — established format).
+ * The four arrays below are POSITION-LOCKED to this one: a column inserted here must
+ * be inserted at the same index in COL_WIDTH, DATA_STYLE and HEADER_STYLE, and in the
+ * cell array built by classifyRow.
+ */
 export const LATE_LAB_HEADERS = Object.freeze([
   'Order date time',
   'Ordering facility ID',
@@ -54,6 +63,9 @@ export const LATE_LAB_HEADERS = Object.freeze([
   'Lonic code',
   'Test name',
   'Specimen no',
+  // PATIENT DATA — the one patient field this file carries (see the file header).
+  // Beside 'Specimen no' on purpose: specimen + DOB is the pair a lab checks.
+  'DOB',
   'Specimen collected date time',
   'Shipment ID',
   'Dispatch date time',
@@ -68,26 +80,30 @@ export const LATE_LAB_HEADERS = Object.freeze([
 ]);
 
 // Column widths — the EXACT <col width="…"> values from the reference sheet1.xml
-// (20 columns). These are raw OOXML width units (as LibreOffice wrote them); when
-// re-read by SheetJS they yield the wch char-widths the prior export used
-// (17.5 → 16.67, etc.), so the columns render identically to the reference.
+// for its 20 columns, plus DOB's. These are raw OOXML width units (as LibreOffice
+// wrote them); when re-read by SheetJS they yield the wch char-widths the prior
+// export used (17.5 → 16.67, etc.), so the columns render identically to the
+// reference. DOB (index 9) has no reference width: 12.5 is this sheet's own width
+// for a short-header column ('Lonic code'), and fits the m/d/yyyy date it holds.
 const COL_WIDTH = Object.freeze([
-  17.5, 22.5, 24.51, 26.5, 14.51, 19.51, 12.5, 55, 13.5, 30.51,
+  17.5, 22.5, 24.51, 26.5, 14.51, 19.51, 12.5, 55, 13.5, 12.5, 30.51,
   13.5, 20.51, 20.51, 25.51, 27.5, 30.51, 10.51, 14.51, 9, 22.5,
 ]);
 
 const DUE_SOON_FLAG = '⚠ DUE ≤24H';
 
 // Per-column DATA cell style indices (into xlsx-styled.js cellXfs), replicating the
-// reference workbook's per-column map A..T. See xlsx-styled.js for what each means.
+// reference workbook's per-column map, now A..U. See xlsx-styled.js for each.
 //   3 date · 4 general · 5 int · 6 test-name(wrap/top) · 7 datetime
 //   8 navy general · 9 navy date · 10 navy int
+// DOB (index 9, column J) takes 3 — the plain date style column A already uses.
 const DATA_STYLE = Object.freeze([
-  3, 4, 4, 4, 5, 4, 4, 6, 4, 7, 7, 7, 7, 7, 8, 8, 9, 10, 8, 8,
+  3, 4, 4, 4, 5, 4, 4, 6, 4, 3, 7, 7, 7, 7, 7, 8, 8, 9, 10, 8, 8,
 ]);
-// Header row styles: A..N = 1 (plain body font, no fill); O..T = 2 (navy header).
+// Header row styles: A..O = 1 (plain body font, no fill — the SOURCE-DATA block,
+// DOB included); P..U = 2 (navy header — the six COMPUTED columns).
 const HEADER_STYLE = Object.freeze([
-  1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2,
+  1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2,
 ]);
 const EMPTY = Object.freeze({ t: 'empty' });
 
@@ -135,6 +151,19 @@ function idCell(v) {
 }
 
 /**
+ * DOB cell. A real Excel DATE (date-only — a birth time means nothing) whenever the
+ * value parses, which the CSV's 'YYYY-MM-DD HH:MM:SS' always has. If it ever does
+ * not, the raw TEXT is written instead of an empty cell: a lab working from this
+ * file must never be handed a silently blank birthdate for a patient who has one.
+ * Absent (automated path, or a CSV without the column) → an empty, still-styled cell.
+ * @param {string|null|undefined} v
+ */
+function dobCell(v) {
+  const c = dateCell(v);
+  return c === EMPTY ? strCell(v) : c;
+}
+
+/**
  * Excel sheet names cannot exceed 31 chars or contain []:*?/\ — sanitize while
  * staying as close to the lab name as possible. The full lab name is still used
  * for the 'Performing facility name' column and the file name.
@@ -154,7 +183,7 @@ export function labFileName(lab) {
 /**
  * Classify one OrderRow against asOf. Returns null when the row is out of scope
  * (no receipt / already resulted / cancelled / rejected / no StdTAT) or neither
- * late nor due-soon. Otherwise returns the derived fields + the 20-cell array.
+ * late nor due-soon. Otherwise returns the derived fields + the 21-cell array.
  */
 function classifyRow(row, tatIndex, asOfDay, nextBusinessDay, opts) {
   const cancelled = row.rawStatus === 'Order Cancelled';
@@ -193,24 +222,25 @@ function classifyRow(row, tatIndex, asOfDay, nextBusinessDay, opts) {
     strCell(row.loinc),                                        // 6  G Lonic code
     strCell(row.testName),                                     // 7  H Test name
     idCell(row.specimenNo),                                    // 8  I Specimen no
-    dtCell(row.collected),                                     // 9  J Specimen collected date time
-    strCell(row.shipmentId),                                   // 10 K Shipment ID (string, datetime col style)
-    dtCell(row.dispatched),                                    // 11 L Dispatch date time
-    dtCell(row.received),                                      // 12 M Received date time
-    EMPTY,                                                     // 13 N Result report date time (empty by scope)
-    strCell(row.rawStatus),                                    // 14 O Order Status
-    numCell(tat),                                              // 15 P Standard TAT (business days)
-    dueCell(dueMs),                                            // 16 Q Due Date
-    numCell(delay),                                            // 17 R Delay (days)
-    strCell(status),                                           // 18 S Status
-    risk ? { t: 's', v: risk } : EMPTY,                        // 19 T Late Risk (next 24h)
+    dobCell(row.dob),                                          // 9  J DOB (patient — see file header)
+    dtCell(row.collected),                                     // 10 K Specimen collected date time
+    strCell(row.shipmentId),                                   // 11 L Shipment ID (string, datetime col style)
+    dtCell(row.dispatched),                                    // 12 M Dispatch date time
+    dtCell(row.received),                                      // 13 N Received date time
+    EMPTY,                                                     // 14 O Result report date time (empty by scope)
+    strCell(row.rawStatus),                                    // 15 P Order Status
+    numCell(tat),                                              // 16 Q Standard TAT (business days)
+    dueCell(dueMs),                                            // 17 R Due Date
+    numCell(delay),                                            // 18 S Delay (days)
+    strCell(status),                                           // 19 T Status
+    risk ? { t: 's', v: risk } : EMPTY,                        // 20 U Late Risk (next 24h)
   ];
 
   return { late, dueSoon, cells };
 }
 
 const COL_A = 'A'.charCodeAt(0);
-/** 0-based column index → A1 column letters (A..T only needs a single letter). */
+/** 0-based column index → A1 column letters (A..U is single-letter; the loop handles AA+). */
 function colLetter(c) {
   let n = c;
   let s = '';
@@ -222,7 +252,7 @@ function colLetter(c) {
 }
 
 /**
- * Build the styled XLSX bytes for one lab from the pre-built 20-cell data rows.
+ * Build the styled XLSX bytes for one lab from the pre-built 21-cell data rows.
  * Every cell (header + data, including empties) carries its per-column style so
  * the workbook reproduces the reference formatting exactly.
  */

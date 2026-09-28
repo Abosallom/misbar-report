@@ -173,7 +173,12 @@ test('fetchKamcOrders — maps frames → OrderRow[] and summary (mirrors csv.js
   assert.equal(r2.orderId, '00990000000463');
   assert.equal(r2.lineNo, 2);
 
-  // No PII/staff fields leaked onto any row (same guard as ingest.test.mjs).
+  // No PII/staff fields leaked onto any row — and here, unlike ingest.test.mjs,
+  // WITHOUT the `dob` exception. This is the line that keeps patient birthdates out
+  // of the PUBLIC repo: these rows are what scripts/fetch-kamc.mjs encrypts into
+  // data/kamc-live.enc every 30 minutes, and git history keeps every version. The
+  // manual CSV path may carry DOB because its rows never leave the browser's memory;
+  // this path must not. Do not add an exception here without that conversation.
   for (const r of rows) {
     for (const k of Object.keys(r)) {
       assert.ok(!/patient|national|mrn|dob|gender|by$/i.test(k), `unexpected PII-ish key: ${k}`);
