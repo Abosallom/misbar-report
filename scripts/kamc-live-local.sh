@@ -175,6 +175,16 @@ succeed() {
 hour=$(date +%H)
 if [ "$hour" -lt 7 ] || [ "$hour" -gt 22 ]; then log "outside 07-22 window"; exit 0; fi
 
+# Hold the Mac awake until THIS run ends. With the lid closed the Mac is asleep and
+# only wakes for a few seconds at a time (Power Nap maintenance). launchd starts a
+# due run in one of those wakes — and the Mac used to drop back to sleep seconds
+# later, FREEZING the run mid-step: "fetch attempt 2 failed" logged 40 minutes after
+# attempt 1, "push failed" over an hour after its slot (2026-09-13, a lid-closed
+# Sunday). -s holds off system sleep (macOS honours it on AC power only), -i idle
+# sleep; -w releases the hold the moment this script exits — the Mac is kept up for
+# the minute a run needs and not a second longer. No setting is changed.
+/usr/bin/caffeinate -s -i -w $$ &
+
 cd "$(dirname "$0")/.." || fail "cannot enter the repo at $(dirname "$0")/.."
 
 out=$(deadline "$NET_TIMEOUT" git pull --rebase --autostash -q 2>&1); rc=$?
