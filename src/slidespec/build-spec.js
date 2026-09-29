@@ -8,6 +8,8 @@
 // The action slide used to carry the tasks table AND the support band AND the challenges +
 // risks tables; the user's 2026-08-04 review split the last three onto their own slide so
 // every block has room (tasks 15 → 18 rows, challenges/risks 3 → 10 rows each).
+// A SCOPED deck (see REPORT SCOPE below) may also carry 'تفاصيل الشحنات' right after the
+// exec slide; the unscoped deck never does, so the default shape above is unchanged.
 // The definitions slide (منهجية الأرقام) is built on demand only — it is OPT-IN via
 // reportOptions.slides.definitions === true (user decision 2026-07-26: the default deck is
 // back to the simple 20-07 reference shape). The internal variant may still exceed six
@@ -25,8 +27,23 @@
 //                                   OPT_IN_CARDS below for why those two are not a
 //                                   contradiction)
 //   m.overrides[key]              per-run manual NUMBER overrides (suppresses that delta chip)
-import { COLORS as C, GEOM } from '../theme.js?v=v2026-09-28.1';
-import { AR_COUNTRY, AR_COUNTRY_SHORT, reflabShort } from '../model/sendout.js?v=v2026-09-28.1';
+//
+// REPORT SCOPE (a SIDE report, set only by the review screen — model/scope.js):
+//   m.scope            normalizeScope(...) — labs / shipments / from–to / shipmentSlide.
+//                      ABSENT on the automation's model and EMPTY_SCOPE on an unscoped
+//                      review; both read as unscoped through isScoped(), and an unscoped
+//                      deck is BYTE-IDENTICAL to the pre-scope one (test/scope-slides).
+//   m.shipmentDetails  shipmentDetails(scopedRows, ids) — rows of the 'shipments' slide.
+//   m.reportDate       already 'to' when a range is active (the review screen sets it),
+//                      so every as-of reading in this file follows the range for free.
+// The scope NEVER changes a number here — the rows were narrowed before the engine ran.
+// What this file adds is DISCLOSURE, so a scoped deck cannot pass for the full report:
+// the cover's period/scope lines, the 'تقرير مخصص' pill on the cover and in every content
+// slide's footer strip (buildCover + buildSpec's post-pass, see scopeTag) and the opt-out
+// 'تفاصيل الشحنات' slide.
+import { COLORS as C, GEOM } from '../theme.js?v=v2026-09-29.1';
+import { AR_COUNTRY, AR_COUNTRY_SHORT, reflabShort } from '../model/sendout.js?v=v2026-09-29.1';
+import { isScoped, hasRange } from '../model/scope.js?v=v2026-09-29.1';
 
 // EXPLICIT-TRUE kpiCards KEYS. reportOptions.kpiCards normally reads "on unless === false"
 // (see buildExec's cardDefs filter). The keys in this set INVERT that: they render only
@@ -354,6 +371,47 @@ export const DEFAULT_LABELS = {
   defMLatePct: 'نسبة التأخر',                    defDLatePct: 'المتأخرة ÷ بانتظار النتيجة',
   defMTurnaround: 'معدل الدوران الفعلي/المتوقع',  defDTurnaround: 'متوسط أيام؛ ن = عدد الطلبات المقاسة',
   defMCancelled: 'الملغاة',                      defDCancelled: 'من الملف + سجل تاريخي قبل أبريل',
+  // REPORT SCOPE disclosure (a scoped deck is a SIDE report — see REPORT SCOPE at the top
+  // of this file). None of these keys is read by an unscoped build, so adding them moves
+  // nothing on the default deck; they are registry keys only because every user-facing
+  // static string is one (DEFAULT_LABELS/LABEL_NAMES parity is test-pinned).
+  // scopeTag — the pill on the cover and in every content slide's footer (see scopeTag()).
+  scopeTag: 'تقرير مخصص',
+  // Cover. coverPeriod REPLACES the 'تاريخ التقرير: …' line when a date range is active;
+  // coverScope is the one extra line for labs and/or shipments, its parts joined by ' · '.
+  // scopeListMore folds a long list ('A، B، C و2 أخرى') — shared by the cover's lab list
+  // and the shipments table's lab cell so the two read the same way.
+  // coverScopeShipments is a bare count, 'الشحنات: 3' — the earlier '{n} شحنة' was wrong
+  // Arabic for every n from 2 to 10 (شحنتان / 3 شحنات), and a label must read right for
+  // any n without a plural table.
+  coverPeriod: 'الفترة: {range}',
+  coverScope: 'النطاق: {parts}',
+  coverScopeLabs: 'المختبرات: {labs}',
+  coverScopeShipments: 'الشحنات: {n}',
+  scopeListMore: '{list} و{n} أخرى',
+  // Shipments slide ('تفاصيل الشحنات'), scoped decks only. The five status words are the
+  // shipmentDetails() buckets; 'mixed' prints the non-zero buckets with their counts, and
+  // there awaitingResult uses the SHORT form shipMixAwaiting — 'استُلمت – بانتظار النتيجة 2'
+  // repeated inside a list reads as two statuses, 'بانتظار النتيجة 2' as one.
+  // shipSubtitle discloses the two readings a status cell cannot carry by itself: the date
+  // it is AS OF (m.reportDate — 'to' when a range is active, milestones after it do not
+  // count), and that مكتملة includes rejected lines (the app-wide rule since 2026-07-28).
+  titleShipments: 'تفاصيل الشحنات',
+  shipSubtitle: 'حالة كل شحنة كما في {date} · المكتملة تشمل المرفوضة',
+  shipColId: 'رقم الشحنة',
+  shipColLab: 'المختبر',
+  shipColLines: 'عدد الفحوصات',
+  shipColDispatched: 'تاريخ الشحن',
+  shipColReceived: 'تاريخ الاستلام',
+  shipColStatus: 'الحالة',
+  shipTotalRow: 'المجموع',
+  shipStNotShipped: 'لم تُشحن',
+  shipStInTransit: 'شُحنت ولم تُستلم',
+  shipStAwaiting: 'استُلمت – بانتظار النتيجة',
+  shipStCompleted: 'مكتملة',
+  shipStCancelled: 'ملغاة',
+  shipMixAwaiting: 'بانتظار النتيجة',
+  shipNone: 'لا توجد شحنات مطابقة ضمن نطاق هذا التقرير',
 };
 
 export const LABEL_NAMES = {
@@ -464,6 +522,28 @@ export const LABEL_NAMES = {
   defMLatePct: 'منهجية: مؤشر نسبة التأخر',        defDLatePct: 'منهجية: تعريف نسبة التأخر',
   defMTurnaround: 'منهجية: مؤشر معدل الدوران',     defDTurnaround: 'منهجية: تعريف معدل الدوران',
   defMCancelled: 'منهجية: مؤشر الملغاة',          defDCancelled: 'منهجية: تعريف الملغاة',
+  scopeTag: 'التقرير المخصص: شارة الغلاف وتذييل كل شريحة',
+  coverPeriod: 'التقرير المخصص: سطر الفترة في الغلاف — {range}',
+  coverScope: 'التقرير المخصص: سطر النطاق في الغلاف — {parts}',
+  coverScopeLabs: 'التقرير المخصص: جزء المختبرات من سطر النطاق — {labs}',
+  coverScopeShipments: 'التقرير المخصص: جزء الشحنات من سطر النطاق — {n}',
+  scopeListMore: 'التقرير المخصص: اختصار القائمة الطويلة — {list} و{n}',
+  titleShipments: 'عنوان شريحة تفاصيل الشحنات',
+  shipSubtitle: 'تفاصيل الشحنات: سطر التوضيح — {date}',
+  shipColId: 'جدول الشحنات: ترويسة عمود رقم الشحنة',
+  shipColLab: 'جدول الشحنات: ترويسة عمود المختبر',
+  shipColLines: 'جدول الشحنات: ترويسة عمود عدد الفحوصات',
+  shipColDispatched: 'جدول الشحنات: ترويسة عمود تاريخ الشحن',
+  shipColReceived: 'جدول الشحنات: ترويسة عمود تاريخ الاستلام',
+  shipColStatus: 'جدول الشحنات: ترويسة عمود الحالة',
+  shipTotalRow: 'جدول الشحنات: صف المجموع',
+  shipStNotShipped: 'حالة الشحنة: لم تُشحن',
+  shipStInTransit: 'حالة الشحنة: شُحنت ولم تُستلم',
+  shipStAwaiting: 'حالة الشحنة: استُلمت – بانتظار النتيجة',
+  shipStCompleted: 'حالة الشحنة: مكتملة',
+  shipStCancelled: 'حالة الشحنة: ملغاة',
+  shipMixAwaiting: 'حالة الشحنة المختلطة: بانتظار النتيجة (الصيغة المختصرة)',
+  shipNone: 'تفاصيل الشحنات: نص عدم وجود شحنات ضمن النطاق',
 };
 
 // Per-model label lookup: user override wins, else the built-in default.
@@ -490,6 +570,25 @@ const MONTH_NAMES_AR = {
   '07': 'يوليو', '08': 'أغسطس',  '09': 'سبتمبر', '10': 'أكتوبر', '11': 'نوفمبر', '12': 'ديسمبر',
 };
 const arMonthLabel = (key) => MONTH_NAMES_AR[String(key).split('-')[1]] || String(key);
+// Scope DATE RANGE as the cover prints it — the SAME output as i18n/ar.js formatRangeAr
+// (the review screen's wording), re-implemented here because this file imports nothing
+// from i18n and already owns the month table above. Western digits, day without a
+// leading zero, an EN DASH with a space either side, and the shared parts said once:
+//   same month   '11 – 23 سبتمبر 2026'
+//   same year    '28 أغسطس – 23 سبتمبر 2026'
+//   across years '28 ديسمبر 2025 – 5 يناير 2026'
+// A ONE-DAY range (from === to) prints that day once, '23 سبتمبر 2026' — the same-month
+// rule would stutter '23 – 23 سبتمبر 2026'. Inputs are ISO-gated by the caller.
+const fmtRangeAr = (fromIso, toIso) => {
+  const [fy, fm, fd] = fromIso.split('-');
+  const [ty, tm, td] = toIso.split('-');
+  const day = (d) => String(Number(d));
+  const end = `${day(td)} ${MONTH_NAMES_AR[tm]} ${ty}`;
+  if (fromIso === toIso) return end;
+  if (fy !== ty) return `${day(fd)} ${MONTH_NAMES_AR[fm]} ${fy} – ${end}`;
+  if (fm !== tm) return `${day(fd)} ${MONTH_NAMES_AR[fm]} – ${end}`;
+  return `${day(fd)} – ${end}`;
+};
 
 // ---- tiny element factories -------------------------------------------------
 const rect = (x, y, w, h, fill, extra = {}) => ({ t: 'rect', x, y, w, h, fill, ...extra });
@@ -572,6 +671,58 @@ function chrome(title) {
   ];
 }
 
+// SCOPED-REPORT PILL — 'تقرير مخصص' on EVERY slide of a scoped deck except thanks, so no
+// single page of a side report can be lifted out and passed off as a page of the full
+// one. Content slides get it from buildSpec's post-pass (not from chrome(), which has no
+// model and eleven call sites): one place, and every content slide — continuation pages,
+// the send-out pair, the opt-in definitions slide, any slide added later — gets it by
+// construction. The cover gets a larger copy from buildCover; thanks, which carries no
+// figure, gets nothing.
+//
+// ITS BOX OVERLAPS NO OTHER ELEMENT'S BOX, on any slide of either variant — pinned
+// pairwise by test/scope-slides, not just ink-clear. The first placement (the header
+// band, beside 'مسبار') was clear at INK level only: its box sat inside chrome's title
+// box, which spans the whole band (0.5, 0.25) → (12.8, 0.80), and the 'مسبار' box
+// (0.4, 0.3) → (3.9, 0.7). In PowerPoint that is a shape stacked on the title's text
+// box (a click near the title's left grabs the pill), and a labels-editor title wider
+// than ≈9.5in of ink ran into it. No box-disjoint slot of pill size exists in that band:
+// above the title box is a 0.17in strip (0.08 → 0.25), under a 9pt line box, and just
+// below it the left half is taken on one slide or another from ≈0.72 down (the exec
+// delta legend 0.72 → 0.90, the KPI row from 0.93 starting at x 0, the tasks subhead
+// 0.84, the challenges band and the definitions table from 0.95–1.0). Freeing the band
+// would mean narrowing the title box on scoped decks, which wraps any overridden title
+// wider than the narrowed box — a broken title traded for a tidy box.
+//
+// CONTENT SLIDES — FOOTER_TAG (11.85, 7.17, 0.95, 0.26), in the footer strip every
+// content slide leaves empty but for the page number. The deck's content floor is 6.95,
+// the footer rule is (0.5, 7.1) → (12.8, 7.112) and the page number's box is
+// (0.5, 7.15) → (1.3, 7.45); nothing else goes below the floor.
+//   · y 7.17 → 7.43, centred on 7.30 = the page number's own centre line: 0.058 under the
+//     rule, 0.07 above the slide edge.
+//   · x 11.85 → 12.80, its right edge on the rule's right end (and the title box's) — the
+//     RTL start of the line, across the page from the page number at the left end.
+//   · 0.95 × 0.26 as before: its 9pt bold text is 0.727in, centred with ≈0.11in each side,
+//     and h 0.26 CONTAINS the 9pt Cairo line box (≈0.235in) — .sl-text clips at its box in
+//     the HTML/PDF path, so an under-tall pill would shave the ink it exists to show.
+// COVER — COVER_TAG (11.0, 2.1, 1.5, 0.40) at 14pt: a kicker directly above the cover
+// title, right-aligned on the cover's text column (x 0.6 → 12.5), so the first words the
+// cover says are that this is a side report. Every scoped cover gets it; a RANGE-ONLY
+// cover had nothing else — its one change is the 'الفترة: …' line, which reads like an
+// ordinary periodic report. The 14pt bold text is ≈1.131in (the 9pt 0.727 × 14/9),
+// ≈0.18in each side in 1.5; h 0.40 contains the 14pt line box (0.361). It ends 0.10 above
+// the title box (2.6) and 0.334 above the 60pt title's tallest glyph (ink top 2.834,
+// measured in the preview); the NUPCO | Lean tag above ends at 1.0 — box-disjoint too.
+// Amber fill + slate-900 bold text: the deck's caution colour, 6.8:1 contrast where white
+// on amber would be 2.1:1, and the amber edge stands ≈4.8:1 off the navy cover.
+const FOOTER_TAG = { x: 11.85, y: 7.17, w: 0.95, h: 0.26, size: 9 };
+const COVER_TAG = { x: 11.0, y: 2.1, w: 1.5, h: 0.4, size: 14 };
+function scopeTag(L, g = FOOTER_TAG) {
+  return [
+    rect(g.x, g.y, g.w, g.h, C.amber, { radius: g.h / 2 }),
+    text(g.x, g.y, g.w, g.h, L('scopeTag'), g.size, { bold: true, color: C.slate900, align: 'center', valign: 'middle', rtl: true }),
+  ];
+}
+
 // Sequential page-number footer, appended post-filter (y/size are the historic
 // footer coordinates the checkspec locates by).
 const pageFooter = (pageNo) => text(0.5, 7.15, 0.8, 0.3, String(pageNo), 9, { color: C.slate500, align: 'left', valign: 'middle' });
@@ -579,19 +730,94 @@ const pageFooter = (pageNo) => text(0.5, 7.15, 0.8, 0.3, String(pageNo), 9, { co
 // ============================================================================
 // Slide 1 — Cover
 // ============================================================================
+// Cover of a SCOPED deck (unscoped: exactly the historic elements, untouched).
+//   · ANY SCOPE → the 'تقرير مخصص' pill above the title (COVER_TAG, see scopeTag).
+//   · RANGE ACTIVE → the date line reads 'الفترة: 11 – 23 سبتمبر 2026' in place of
+//     'تاريخ التقرير: …' — same box, same style; it is still the cover's one date line.
+//     ISO-gated like deltaLegendText: a malformed from/to keeps the report-date wording
+//     rather than printing 'NaN undefined' onto a delivered cover.
+//   · LABS and/or SHIPMENTS → ONE extra line, 'النطاق: المختبرات: A، B · الشحنات: 3'.
+//     The shipment count is m.shipmentDetails.length — the shipments that still HAVE
+//     rows inside the scope, i.e. exactly the rows of the 'تفاصيل الشحنات' table — never
+//     scope.shipments.length: a chosen ID whose rows the lab/range filters removed (the
+//     review screen's 'outsideScope') made the cover say 3 over a table that lists 2.
+// WHERE THE EXTRA LINE GOES. It cannot sit directly under the date line: the date and
+// preparedBy boxes ABUT (6.15 → 6.55 → 6.95) and neither may move. Under preparedBy
+// would detach it from the period it qualifies and spend the cover's 0.55in bottom
+// margin. So it takes the slot ABOVE the date line on the SAME 0.40 pitch — a
+// (0.6, 5.75, 11.9, 0.4) box, valign middle, 12pt, i.e. the date line's own box shifted
+// up one step — and the three read as one right-aligned block: scope · period · preparer.
+// MEASURED (Range probe, 1280×720, self-hosted Cairo 12pt): the three lines' ink runs
+// 5.791 → 6.103 · 6.189 → 6.502 · 6.589 → 6.902, so the new gap (0.086) matches the old
+// one (0.087) exactly; above it the band is empty from the subtitle's ink end at 4.583.
+// NOT bottom-anchored, although that would let a wrap grow upward: .sl-text clips at its
+// box and Cairo's 12pt content area (0.313in) overhangs a bottom-anchored 1.18 line box by
+// ≈0.058in, so an Arabic descender (ق in النطاق) would be shaved in the HTML/PDF path.
+// ONE LINE BY CONSTRUCTION instead — see coverLabList: a wrapped second line in a 0.4in
+// box would be clipped in the preview and overprint the date line in PowerPoint.
+//
+// THE LAB LIST FOLD. User rule: more than three labs → the first three + 'و{n} أخرى'.
+// On top of it, a WIDTH guard folds one more name while the shown names would overrun
+// the box. Measured fixed parts at 12pt: 'النطاق: المختبرات: ' 1.195 + ' و12 أخرى' 0.651
+// + ' · الشحنات: 150 شحنة' 1.411 = 3.257in, so 11.9 − 3.257 − 0.24 of slack leaves
+// COVER_LAB_BUDGET 8.4in for the names. (That shipments part was measured with the old
+// '… شحنة' wording; the bare-count ' · الشحنات: 150' is shorter, so the budget only
+// gained slack.) Names are Latin facility strings; the estimate is
+// characters × 0.085in, the measured upper bound for real names at 12pt (a 34-character
+// ALL-CAPS hospital name 0.0828/char; mixed case 0.068–0.078). It is
+// conservative on purpose — the repo's widest pair plus the live data's widest name
+// measure 8.26in together and would just fit, but the guard folds them to two — because
+// an extra 'و1 أخرى' costs nothing and a wrapped cover line is broken in both renderers.
+const COVER_LAB_BUDGET = 8.4, COVER_CHAR_W = 0.085;
+function coverLabList(labs, L) {
+  let shown = Math.min(labs.length, 3);
+  while (shown > 1 && labs.slice(0, shown).join('، ').length * COVER_CHAR_W > COVER_LAB_BUDGET) shown--;
+  const list = labs.slice(0, shown).join('، ');
+  return shown < labs.length ? fill(L('scopeListMore'), { list, n: labs.length - shown }) : list;
+}
+
+function coverScopeLine(m, L) {
+  const s = m.scope;
+  const labs = Array.isArray(s?.labs) ? s.labs : [];
+  const ships = Array.isArray(s?.shipments) ? s.shipments : [];
+  const parts = [];
+  if (labs.length) parts.push(fill(L('coverScopeLabs'), { labs: coverLabList(labs, L) }));
+  // The part appears whenever shipments were CHOSEN (it says what kind of scope this
+  // is); its NUMBER is the in-scope count, so 'الشحنات: 0' sits over the shipments
+  // slide's 'لا توجد شحنات مطابقة…' page rather than contradicting it.
+  if (ships.length) {
+    const n = Array.isArray(m.shipmentDetails) ? m.shipmentDetails.length : 0;
+    parts.push(fill(L('coverScopeShipments'), { n }));
+  }
+  return parts.length ? fill(L('coverScope'), { parts: parts.join(' · ') }) : null;
+}
+
 function buildCover(m) {
   const L = labelOf(m);
-  return {
-    id: 'cover', bg: C.navy, elements: [
-      rect(0, 0, 0.15, 7.5, C.purple),
-      rect(13.15, 0, 0.15, 7.5, C.orange),
-      text(8.7, 0.5, 4.0, 0.5, 'NUPCO  |  Lean', 18, { bold: true, color: C.white, align: 'right', valign: 'middle' }),
-      text(0.6, 2.6, 11.9, 1.3, L('coverTitle'), 60, { bold: true, color: C.white, align: 'right', valign: 'middle', rtl: true }),
-      text(0.6, 4.0, 11.9, 0.6, L('coverSubtitle'), 22, { color: CARD_TITLE, align: 'right', valign: 'middle', rtl: true }),
-      text(0.6, 6.15, 11.9, 0.4, 'تاريخ التقرير: ' + fmtDate(m.reportDate), 12, { color: CARD_TITLE, align: 'right', valign: 'middle', rtl: true }),
-      text(0.6, 6.55, 11.9, 0.4, L('coverPreparedBy'), 12, { color: CARD_TITLE, align: 'right', valign: 'middle', rtl: true }),
-    ],
-  };
+  const s = m.scope;
+  const scoped = isScoped(s);
+  const range = scoped && hasRange(s) && isIsoDate(s.from) && isIsoDate(s.to);
+  const dateLine = range
+    ? fill(L('coverPeriod'), { range: fmtRangeAr(s.from, s.to) })
+    : 'تاريخ التقرير: ' + fmtDate(m.reportDate);
+  const scopeLine = scoped ? coverScopeLine(m, L) : null;
+  const elements = [
+    rect(0, 0, 0.15, 7.5, C.purple),
+    rect(13.15, 0, 0.15, 7.5, C.orange),
+    text(8.7, 0.5, 4.0, 0.5, 'NUPCO  |  Lean', 18, { bold: true, color: C.white, align: 'right', valign: 'middle' }),
+    text(0.6, 2.6, 11.9, 1.3, L('coverTitle'), 60, { bold: true, color: C.white, align: 'right', valign: 'middle', rtl: true }),
+    text(0.6, 4.0, 11.9, 0.6, L('coverSubtitle'), 22, { color: CARD_TITLE, align: 'right', valign: 'middle', rtl: true }),
+    text(0.6, 6.15, 11.9, 0.4, dateLine, 12, { color: CARD_TITLE, align: 'right', valign: 'middle', rtl: true }),
+    text(0.6, 6.55, 11.9, 0.4, L('coverPreparedBy'), 12, { color: CARD_TITLE, align: 'right', valign: 'middle', rtl: true }),
+  ];
+  // Amber, the scoped pill's colour, so the cover's disclosure and the pill on every
+  // page read as one signal (≈4.8:1 on the navy cover).
+  if (scopeLine) {
+    elements.push(text(0.6, 5.75, 11.9, 0.4, scopeLine, 12, { color: C.amber, align: 'right', valign: 'middle', rtl: true }));
+  }
+  // Appended last, like the scope line, so every historic element keeps its index.
+  if (scoped) elements.push(...scopeTag(L, COVER_TAG));
+  return { id: 'cover', bg: C.navy, elements };
 }
 
 // ============================================================================
@@ -965,6 +1191,293 @@ function buildExecFunnel(m) {
     els.push(text(0.5, 0.72, 6.0, 0.18, deltaLegendText(L, m.deltaWindow), 8.5, { color: C.deltaGreen, align: 'left', valign: 'middle', rtl: true }));
   }
   return { id: 'execFunnel', bg: C.white, elements: els };
+}
+
+// ============================================================================
+// Shipments ('تفاصيل الشحنات') — SCOPED decks only, right after the exec slide
+// ============================================================================
+// One row per chosen Shipment ID that still has rows inside the scope, read verbatim off
+// m.shipmentDetails (model/scope.js shipmentDetails — this file classifies nothing).
+// Present only when the scope names shipments AND the review screen's show/hide toggle
+// (scope.shipmentSlide, default ON) was not switched off; see showShipmentSlide.
+//
+// STATUS VOCABULARY. A shipment is one of five buckets, or 'mixed' when its lines sit in
+// more than one; the status cell prints the single bucket's word in its colour, or the
+// non-zero buckets with their counts ('مكتملة 5 · بانتظار النتيجة 2') in body slate.
+// SHIP_MIX_ORDER is most-advanced first and FIXED, so every mixed cell on the page lists
+// its buckets in the same order and two rows can be compared by eye.
+// Colours: completed C.greenBright (the monthly completion colour / funnel's final
+// stage), inTransit C.amber (the funnel's شحن العينة stage), awaitingResult
+// CARD_DEEP_BLUE (the exec 'فحوصات تحت الإجراء' card — the same bucket), notShipped and
+// cancelled slate. Every status cell is BOLD: greenBright (2.9:1) and amber (2.1:1) sit
+// under the 4.5:1 body-text bar on white, and the stroke weight is what keeps them
+// legible — the pairing the compliance slide's light-red late columns already rely on.
+// counts.rejected is a SUBSET of completed (a rejection is a finished outcome), never a
+// bucket of its own; the subtitle says مكتملة includes it.
+const SHIP_STATUS = {
+  completed:      { key: 'shipStCompleted',  mix: 'shipStCompleted',  color: C.greenBright },
+  awaitingResult: { key: 'shipStAwaiting',   mix: 'shipMixAwaiting',  color: CARD_DEEP_BLUE },
+  inTransit:      { key: 'shipStInTransit',  mix: 'shipStInTransit',  color: C.amber },
+  notShipped:     { key: 'shipStNotShipped', mix: 'shipStNotShipped', color: C.slate500 },
+  cancelled:      { key: 'shipStCancelled',  mix: 'shipStCancelled',  color: C.slate500 },
+};
+const SHIP_MIX_ORDER = ['completed', 'awaitingResult', 'inTransit', 'notShipped', 'cancelled'];
+
+// PAGINATION — AT MOST 12 ROWS A PAGE (user spec), FEWER WHEN ROWS WRAP. Geometry
+// mirrors the send-out lab table, the deck's other full-width Latin-name table: x 0.833,
+// w 11.667, rowH 0.361, table top 1.167 under a 9pt subtitle at y 0.722. A page's table
+// must end on or above the deck's content floor, SHIP_FLOOR 6.95 (= CONT_Y_BOT), i.e.
+// header + rows (+ totals on the last page) must fit SHIP_BAND = 5.783in. Twelve one-line
+// rows + header + totals are 14 × 0.361 = 5.054, so a deck whose rows all set on one line
+// still paginates at exactly 12, as it always did.
+// WHY NOT A FIXED 12: rowH is a MINIMUM. Both renderers grow a row whose text wraps, and
+// any two real facility names joined overrun the lab column's 2.50in of text — a two-lab
+// shipment is two lines, a long pair three. The fixed 12 leaned on the page's 0.729in of
+// slack to absorb that, which held for three such rows: four pushed the table past 6.95
+// and five through the 7.1 footer rule in PowerPoint. So pages are cut by HEIGHT: each
+// row is costed shipRowH(its estimated line count, LINE ESTIMATE below) and a page takes
+// rows while they fit SHIP_BAND and it holds fewer than SHIP_PAGE (paginateShipments).
+// ROW HEIGHT for n lines = max(0.361, n × SHIP_LINE_H + SHIP_CELL_PAD). SHIP_LINE_H is
+// 10pt × 0.0258in/pt, the Cairo line box this file measures every text box against;
+// SHIP_CELL_PAD 0.10 is PowerPoint's default 0.05in top + bottom cell margin (pptxgenjs
+// writes none of its own). One line: 0.358 → the 0.361 row. Each extra line costs 0.258
+// — more than either renderer spends: the ≈0.2in a wrapped row grows by in PowerPoint
+// (the figure the fixed-12 budget used), and the HTML table (1.15 × 10pt ≈ 0.160in a
+// line, 0.042in of padding) sets two lines inside 0.361 and three in ≈0.52 — measured:
+// a page of two- and three-line rows costed to end at 6.36 ended at 4.12 in the preview.
+// So a page cut by this cost ends at or above 6.95 in both.
+const SHIP_PAGE = 12;
+const SHIP_ROW_H = 0.361, SHIP_TABLE_Y = 1.167;
+const SHIP_FLOOR = 6.95;
+const SHIP_BAND = SHIP_FLOOR - SHIP_TABLE_Y;
+const SHIP_LINE_H = 10 * 0.0258, SHIP_CELL_PAD = 0.1;
+const shipRowH = (lines) => Math.max(SHIP_ROW_H, lines * SHIP_LINE_H + SHIP_CELL_PAD);
+// colW in LOGICAL (RTL, right→left) order. Sum = 11.667 = the table width. PowerPoint
+// offers colW − 0.2in of text width (pptxgenjs' default cell margins — see COL_W in
+// buildCompliance), so every width is budgeted against THAT, measured by Range in the
+// deck's self-hosted Cairo at 10pt (headers bold; the status cells are bold too):
+//   رقم الشحنة      1.15 (0.95) — 'ELAB626016' bold 0.777                    → +0.173
+//   المختبر         2.70 (2.50) — widest lab name in the repo 2.332          → +0.168
+//   عدد الفحوصات    1.15 (0.95) — header 0.889                              → +0.061
+//   تاريخ الشحن     1.15 (0.95) — '23 / 09 / 2026' 0.860                    → +0.090
+//   تاريخ الاستلام  1.15 (0.95) — same date 0.860 (header 0.840)            → +0.090
+//   الحالة          4.367 (4.167) — a FIVE-bucket mixed cell at 9pt ≈3.99   → ≈+0.18
+// The status column takes everything left because it is the one whose text grows with
+// the data: 'استُلمت – بانتظار النتيجة' is 1.488 at 10pt, and a mixed list grows with its
+// buckets — 'مكتملة 125 · بانتظار النتيجة 32 · شُحنت ولم تُستلم 4 · لم تُشحن 2 · ملغاة 1'
+// is 4.434 at 10pt, which WRAPPED in the preview (every state at once is exactly what the
+// totals row of a varied selection looks like). Mixed cells therefore print at 9pt
+// (shipStatusCell), where that worst case is ≈3.99 and stays on one line.
+const SHIP_COL_W = [1.15, 2.7, 1.15, 1.15, 1.15, 4.367];
+
+// LINE ESTIMATE — the lines a row sets on; the row costs its tallest cell. The count and
+// the two dates are fixed-width and measured to fit (above), so three cells are
+// estimated, each word-wrapped greedily on spaces against its column's width less
+// PowerPoint's 0.2in of cell margins (the HTML table's are 0.083in, so PowerPoint binds),
+// a word longer than a line breaking inside itself, as both renderers do:
+//   · LAB — TWO OR MORE names (joined 'A، B', or folded 'A، B و2 أخرى') at the file's
+//     Latin-name convention, COVER_CHAR_W scaled to 10pt: 0.0708in a character (35 a
+//     line). Checked against the self-hosted Cairo's 10pt glyph widths (canvas
+//     measureText, greedy wrap at 2.50in): it never under-calls a pair of real names —
+//     the 46-character pair the round-1 review saw wrap is 2.546in → 2 lines, est. 2; the
+//     repo's widest pair, 4.724in → 2, est. 3. ONE mixed-case name is one line
+//     and is NOT estimated: the column is sized to the widest name in the repo (2.332 ≤
+//     2.50 above, the premise the compliance and send-out lab columns rest on too) —
+//     real mixed-case names run 0.053–0.065in a character, so the convention, applied to
+//     a single name, calls three of the six two lines and would cut pages of ordinary
+//     one-lab shipments short of 12 for nothing.
+//     CAPITALS are the exception to both: the same names set in ALL CAPS run 0.068–0.076in
+//     a character — the repo's two widest become 2.674 and 2.750in, and each wraps ALONE —
+//     past the convention. So a lab text whose letters are mostly capitals is estimated,
+//     one name or several, at SHIP_CAPS_CHAR_W 0.077 (32 a line), that measured ALL-CAPS
+//     rate rounded up.
+//   · STATUS — the same convention at the cell's own size (9pt for a mixed list). On
+//     Arabic it overshoots (the strings measured above run ≈0.059in a character at 10pt
+//     bold), so a five-bucket list that sets on one line is costed two: slack spent on a
+//     rare row, never a page overrun. A totals row costed two still fits under 12 one-line
+//     rows (13 × 0.361 + 0.616 = 5.309 ≤ 5.783).
+//   · SHIPMENT ID — bold capitals and digits run wider than the convention: 'ELAB626016'
+//     is 0.0777in a character (above), hence SHIP_ID_CHAR_W 0.078, 12 characters a line.
+//     The 10-character ELAB ids are one line; a longer pasted id is costed as it sets.
+const SHIP_CELL_MARGIN = 0.2;
+const SHIP_ID_CHAR_W = 0.078, SHIP_CAPS_CHAR_W = 0.077;
+const charWAt = (pt) => (COVER_CHAR_W / 12) * pt;
+/** Capitals are at least half of the Latin letters ('ACME CLINICAL LAB', not 'Acme Clinical Lab'). */
+const mostlyCaps = (t) => {
+  const letters = String(t).match(/[A-Za-z]/g) || [];
+  return letters.length > 0 && letters.filter((ch) => ch >= 'A' && ch <= 'Z').length * 2 >= letters.length;
+};
+/** Lines of the lab cell (see LINE ESTIMATE — LAB). */
+function shipLabLines(names, cellText) {
+  if (mostlyCaps(cellText)) return wrapLines(cellText, SHIP_COL_W[1], SHIP_CAPS_CHAR_W);
+  return names.length > 1 ? wrapLines(cellText, SHIP_COL_W[1], charWAt(10)) : 1;
+}
+function wrapLines(t, colW, charW) {
+  const max = Math.max(1, Math.floor((colW - SHIP_CELL_MARGIN) / charW));
+  let lines = 1, used = 0;
+  for (const word of String(t ?? '').split(/\s+/).filter(Boolean)) {
+    const n = word.length;
+    if (used > 0 && used + 1 + n <= max) { used += 1 + n; continue; }
+    if (used > 0) lines++;
+    const spans = Math.ceil(n / max);
+    lines += spans - 1;
+    used = n - (spans - 1) * max;
+  }
+  return lines;
+}
+
+// Cut the costed rows ({h}) into pages: a page takes rows while they fit SHIP_BAND under
+// its header and it holds fewer than SHIP_PAGE. The totals row (totalH) closes the LAST
+// page only; when that page cannot also hold it, the page's last shipment moves onto a new
+// last page with the totals — how 13 one-line shipments have always split (12, then 1 +
+// totals). One row + header + totals always fits, so one move is enough.
+function paginateShipments(rows, totalH) {
+  const pages = [];
+  let page = [], used = SHIP_ROW_H;
+  for (const r of rows) {
+    if (page.length && (page.length >= SHIP_PAGE || used + r.h > SHIP_BAND + 1e-9)) {
+      pages.push(page);
+      page = [];
+      used = SHIP_ROW_H;
+    }
+    page.push(r);
+    used += r.h;
+  }
+  if (page.length > 1 && used + totalH > SHIP_BAND + 1e-9) {
+    const moved = page.pop();
+    pages.push(page);
+    page = [moved];
+  }
+  pages.push(page);
+  return pages;
+}
+
+// isScoped() first: it normalises, so a stray blank id in a hand-built scope cannot
+// summon a shipments slide onto a deck that is otherwise (and correctly) unscoped.
+const showShipmentSlide = (m) => isScoped(m.scope) && Array.isArray(m.scope.shipments)
+  && m.scope.shipments.length > 0 && m.scope.shipmentSlide !== false;
+
+/** Status cell for a bucket name + its counts (a row's, or the totals row's sums). */
+function shipStatusCell(status, counts, L) {
+  const one = SHIP_STATUS[status];
+  if (one) return { text: L(one.key), color: one.color, bold: true };
+  const parts = SHIP_MIX_ORDER
+    .filter((k) => (Number(counts?.[k]) || 0) > 0)
+    .map((k) => `${L(SHIP_STATUS[k].mix)} ${counts[k]}`);
+  // 9pt: a mixed cell is a compound, secondary reading (like the send-out table's 9pt
+  // reference-lab column), and at 9pt even a FIVE-bucket list fits the status column on
+  // one line — see SHIP_COL_W.
+  return { text: parts.length ? parts.join(' · ') : '-', color: C.slate900, bold: true, size: 9 };
+}
+
+/** The single non-zero bucket of a counts object, else 'mixed' (shipmentDetails' rule). */
+function shipStatusOf(counts) {
+  const nz = SHIP_MIX_ORDER.filter((k) => (Number(counts?.[k]) || 0) > 0);
+  return nz.length === 1 ? nz[0] : 'mixed';
+}
+
+const shipDate = (iso) => (isIsoDate(iso) ? fmtDate(iso) : '-');
+
+// Returns an ARRAY of slides ('shipments', 'shipments-cont-1', …) — buildSpec splices
+// them inline like the task continuation slides, so they pick up sequential footers.
+function buildShipments(m) {
+  const L = labelOf(m);
+  const details = Array.isArray(m.shipmentDetails) ? m.shipmentDetails : [];
+  const title = L('titleShipments');
+  // Same slot and style as the send-out slides' subtitles (right half, under the title).
+  // A FACTORY, not a shared element: each page gets its own object.
+  const subtitle = () => text(6.054, 0.722, 6.75, 0.181,
+    fill(L('shipSubtitle'), { date: isIsoDate(m.reportDate) ? fmtDate(m.reportDate) : '-' }), 9,
+    { color: C.slate500, align: 'right', valign: 'middle', rtl: true });
+
+  // Nothing inside the scope for any chosen ID (e.g. a range that excludes them all): the
+  // slide still renders — the operator asked for it — and says so instead of drawing an
+  // empty table.
+  if (!details.length) {
+    return [{ id: 'shipments', bg: C.white, elements: [
+      ...chrome(title), subtitle(),
+      text(0.833, SHIP_TABLE_Y, 11.667, 0.4, L('shipNone'), 12,
+        { color: C.slate600, align: 'center', valign: 'middle', rtl: true }),
+    ] }];
+  }
+
+  const header = rev([L('shipColId'), L('shipColLab'), L('shipColLines'),
+    L('shipColDispatched'), L('shipColReceived'), L('shipColStatus')]);
+  // A shipment normally goes to ONE lab (a single name always fits: 2.332 ≤ 2.50). Two
+  // are joined — a pair of real names wraps onto a second line, a long pair a third,
+  // which the row's cost below counts — and three or more fold into 'A، B و1 أخرى'
+  // (scopeListMore, the cover's wording), so the cell never lists more than two names.
+  const labsOf = (labs) => (Array.isArray(labs) ? labs.filter(Boolean) : []);
+  const labsText = (a) => {
+    if (!a.length) return '-';
+    return a.length > 2 ? fill(L('scopeListMore'), { list: a.slice(0, 2).join('، '), n: a.length - 2 }) : a.join('، ');
+  };
+  // Each body row with its HEIGHT COST (see LINE ESTIMATE / paginateShipments).
+  const bodyRow = (d) => {
+    const labs = labsOf(d.labs);
+    const id = String(d.id);
+    const lab = labsText(labs);
+    const status = shipStatusCell(d.status, d.counts, L);
+    const lines = Math.max(
+      wrapLines(id, SHIP_COL_W[0], SHIP_ID_CHAR_W),
+      shipLabLines(labs, lab),
+      wrapLines(status.text, SHIP_COL_W[5], charWAt(status.size || 10)),
+    );
+    return {
+      h: shipRowH(lines),
+      cells: rev([
+        { text: id, bold: true, color: C.navy },
+        { text: lab, align: 'right' },
+        String(Number(d.lines) || 0),
+        shipDate(d.dispatched),
+        shipDate(d.received),
+        status,
+      ]),
+    };
+  };
+  // Totals row — over ALL shipments, so it appears ONCE, on the last page. Its status
+  // cell sums every row's buckets and goes through the same single/mixed rule, which is
+  // the one-line answer to "where do these shipments stand overall".
+  const sumCounts = {};
+  for (const k of SHIP_MIX_ORDER) sumCounts[k] = details.reduce((s, d) => s + (Number(d.counts?.[k]) || 0), 0);
+  const totalLines = details.reduce((s, d) => s + (Number(d.lines) || 0), 0);
+  const tf = C.bgLighter;
+  const totalStatus = shipStatusCell(shipStatusOf(sumCounts), sumCounts, L);
+  const totalRow = rev([
+    { text: L('shipTotalRow'), bold: true, fill: tf },
+    { text: '', fill: tf },
+    { text: String(totalLines), bold: true, fill: tf },
+    { text: '', fill: tf },
+    { text: '', fill: tf },
+    { ...totalStatus, fill: tf },
+  ]);
+  // Its one variable cell is the status list — every bucket, with the selection's summed
+  // (so the widest) counts.
+  const totalH = shipRowH(wrapLines(totalStatus.text, SHIP_COL_W[5], charWAt(totalStatus.size || 10)));
+
+  const paged = paginateShipments(details.map(bodyRow), totalH);
+  const pages = paged.length;
+  const slides = [];
+  for (let p = 0; p < pages; p++) {
+    const rows = paged[p].map((r) => r.cells);
+    if (p === pages - 1) rows.push(totalRow);
+    slides.push({
+      id: p === 0 ? 'shipments' : `shipments-cont-${p}`,
+      bg: C.white,
+      elements: [
+        // '(2/3)' only when there IS more than one page — a single page keeps the bare title.
+        ...chrome(pages > 1 ? `${title} (${p + 1}/${pages})` : title),
+        subtitle(),
+        {
+          t: 'table', x: 0.833, y: SHIP_TABLE_Y, w: 11.667, rtl: true, rowH: SHIP_ROW_H,
+          header: { fill: C.navy, color: C.white, bold: true },
+          colW: rev(SHIP_COL_W),
+          rows: [header.slice(), ...rows],
+        },
+      ],
+    });
+  }
+  return slides;
 }
 
 // ============================================================================
@@ -1942,6 +2455,12 @@ export function buildSpec(reportModel, { variant = 'internal' } = {}) {
   // pick up the sequential post-filter footer numbering automatically.
   const middleDefs = [
     { key: 'execFunnel', build: () => [buildExecFunnel(m)] },
+    // Shipments ('تفاصيل الشحنات') — SCOPED decks only, right after the exec slide (user
+    // spec). Its real gate is the scope itself (showShipmentSlide: shipments chosen AND
+    // the review screen's toggle not off), so an unscoped deck never reaches the builder.
+    // It still passes through on() only because every middle slide does; no settings
+    // writer stores a 'shipments' key, so on() reads it as ON.
+    { key: 'shipments', build: () => (showShipmentSlide(m) ? buildShipments(m) : []) },
     { key: 'monthly', build: () => [buildMonthly(m)] },
     // Send-out — two slides under ONE toggle: the local/international split and
     // its by-country bars, then the lab x country table. They render only when
@@ -1963,7 +2482,17 @@ export function buildSpec(reportModel, { variant = 'internal' } = {}) {
     { key: 'definitions', build: () => [buildDefinitions(m)] },
   ];
   const middle = middleDefs.filter((x) => on(x.key)).flatMap((x) => x.build());
-  middle.forEach((s, i) => s.elements.push(pageFooter(i + 1)));
+  // SCOPED-REPORT PILL on every content slide (see scopeTag — it shares the footer strip
+  // with the page number), pushed in the same pass as the page number and BEFORE it, so
+  // the page number stays each slide's last element. buildCover adds the cover's own.
+  // Nothing is pushed when unscoped — m.scope absent (the automation's model) or empty —
+  // which is what keeps the default deck byte-identical.
+  const scoped = isScoped(m.scope);
+  const L = labelOf(m);
+  middle.forEach((s, i) => {
+    if (scoped) s.elements.push(...scopeTag(L, FOOTER_TAG));
+    s.elements.push(pageFooter(i + 1));
+  });
   return [buildCover(m), ...middle, buildThanks(m)];
 }
 

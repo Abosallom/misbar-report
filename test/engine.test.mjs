@@ -439,6 +439,51 @@ test('excludeNoTat never drops a no-TAT CANCELLED row from cancelled counting', 
   assert.equal(on.excludedNoTat, 2);
 });
 
+// ---- inferBlanks (a scoped report's facilities are final) --------------------
+// applyScope (model/scope.js) infers blank facilities over the FULL rows, then filters.
+// A blank that survives is one the full report leaves unattributed on purpose (its
+// test runs at two labs); inferred AGAIN on a scope's subset, where only one of those
+// labs' rows may remain, it would be credited to that lab. So a scoped build passes
+// inferBlanks:false, and every other caller passes nothing.
+test('inferBlanks:false skips the blank-facility inference; the default still infers', () => {
+  const row = (orderId, facility) => ({ ...synRows()[0], orderId, facility });
+  const labs = (out) => Object.fromEntries(out.byLab.map((l) => [l.lab, l.total]));
+  const asOf = '2026-07-09';
+  // FULL data: the test runs at Lab A and Lab B, so the blank 'z' stays unattributed
+  // (the CSV's empty cell arrives as '', and is counted under that empty lab).
+  const full = [row('a1', 'Lab A'), row('a2', 'Lab A'), row('b1', 'Lab B'), row('z', '')];
+  assert.deepEqual(labs(compute(full, SYN_TAT, { asOf })), { 'Lab A': 2, 'Lab B': 1, '': 1 });
+  // A shipment scope hands over [a1, z]: only Lab A runs the test there.
+  const subset = [full[0], full[3]];
+  assert.deepEqual(labs(compute(subset, SYN_TAT, { asOf })), { 'Lab A': 2 },
+    'the default infers from whatever rows it is given — the hole the flag closes');
+  const off = compute(subset, SYN_TAT, { asOf, inferBlanks: false });
+  assert.deepEqual(labs(off), { 'Lab A': 1, '': 1 }, 'z stays unattributed, as in the full report');
+  assert.deepEqual(off.totals, { lines: 2, cancelledInData: 0, total: 2 }, 'and still counted');
+  // Nothing but the attribution moves.
+  const on = compute(subset, SYN_TAT, { asOf });
+  assert.deepEqual({ ...off, byLab: null }, { ...on, byLab: null });
+  assert.equal(subset[1].facility, '', 'the caller\'s row is never written to');
+  // A null facility (no such column value at all) is the same case.
+  const nulled = compute([full[0], row('n', null)], SYN_TAT, { asOf, inferBlanks: false });
+  assert.deepEqual(labs(nulled), { 'Lab A': 1, 'غير محدد': 1 });
+  // dedupe still runs under the flag: it is only the inference that is skipped.
+  const dup = compute([full[0], full[0], full[3]], SYN_TAT, { asOf, inferBlanks: false, dedupe: true });
+  assert.deepEqual(labs(dup), { 'Lab A': 1, '': 1 });
+});
+
+test('inferBlanks: only `false` skips it — every other value is the full report\'s default', () => {
+  // The unscoped report passes nothing, so it must be computed exactly as before.
+  const row = (orderId, facility) => ({ ...synRows()[0], orderId, facility });
+  const rows = [row('a1', 'Lab A'), row('z', '')];
+  const base = compute(rows, SYN_TAT, { asOf: '2026-07-09' });
+  for (const v of [undefined, null, true, 0, 'false']) {
+    assert.deepEqual(compute(rows, SYN_TAT, { asOf: '2026-07-09', inferBlanks: v }), base, String(v));
+  }
+  const golden = compute(GOLDEN_ORDERS, TAT_LOOKUP, goldenOpts());
+  assert.deepEqual(compute(GOLDEN_ORDERS, TAT_LOOKUP, { ...goldenOpts(), inferBlanks: true }), golden);
+});
+
 // ---- additive cancelled (C6) ------------------------------------------------
 test('manual-only cancelled month surfaces (orders 0, cancelled = manual)', () => {
   // 2026-01 has no orders and no in-data cancels; it appears solely from the

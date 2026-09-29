@@ -15,17 +15,17 @@
 // throws on write; on failure we fall back to an in-memory doc and expose
 // isEphemeral() so the UI can warn the user their edits will not persist.
 
-import { SETTINGS_KEY } from './contracts.js?v=v2026-09-28.1';
-import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-09-28.1';
-import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-09-28.1';
+import { SETTINGS_KEY } from './contracts.js?v=v2026-09-29.1';
+import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-09-29.1';
+import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-09-29.1';
 import {
   HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED, GRAFANA_SEED, REPORT_OPTIONS_SEED,
   SNAPSHOT_HISTORY_SEED, AUTOMATION_SEED, TASK_LOG_SEED,
-} from './seeds/defaults.js?v=v2026-09-28.1';
-import { DELTA_MODES, canonicalDeltaMode } from './model/delta-baseline.js?v=v2026-09-28.1';
+} from './seeds/defaults.js?v=v2026-09-29.1';
+import { DELTA_MODES, canonicalDeltaMode } from './model/delta-baseline.js?v=v2026-09-29.1';
 import {
   sanitizeTaskLog, recordShownTasks, TASK_LOG_LIMIT, TASK_KEY_MAX,
-} from './model/task-lifecycle.js?v=v2026-09-28.1';
+} from './model/task-lifecycle.js?v=v2026-09-29.1';
 
 export const SCHEMA_VERSION = 9;
 
@@ -991,7 +991,17 @@ const IMPORT_KEYS = ['schemaVersion', 'tatLookup', 'displayNames', 'scorecard', 
 // 'challenges' (v6) is the «التحديات والمخاطر» slide split out of the old
 // tasks-and-challenges slide; an ABSENT flag renders it (build-spec treats a
 // missing key as ON), so an install that never stored it keeps the full deck.
-const REPORT_OPTION_SLIDE_KEYS = ['execFunnel', 'monthly', 'compliance', 'action', 'challenges', 'definitions'];
+// 'sendout' (the محلي/دولي pair) was MISSING here while the seed, the review chip and
+// the Settings box all had it — the same hand-written-list drift as 'turnaround' below.
+// pickImportKeys dropped the key, so a backup carrying sendout:false restored as
+// whatever the device already held — the seed/backfill ON on a fresh device. No
+// version fixup is needed for it (unlike 'turnaround'): its default never changed, so
+// any stored false is a real choice and imports verbatim.
+//
+// NOT a scope key: the review screen's report scope (labs / shipments / date range)
+// is per-run state and is never persisted — there is deliberately no settings field
+// for it, here or anywhere in IMPORT_KEYS.
+const REPORT_OPTION_SLIDE_KEYS = ['execFunnel', 'monthly', 'compliance', 'action', 'challenges', 'sendout', 'definitions'];
 const REPORT_OPTION_CARD_KEYS = [
   'total', 'awaitingDispatch', 'awaitingResults', 'completed', 'rejected', 'lateNoResult', 'shippedNotReceived',
   // 'turnaround' (v9): the monthly slide's line chart + overall-average card. It was
@@ -1073,7 +1083,7 @@ function pickImportKeys(doc) {
     out.grafana = picked;
   }
   if (isPlainObject(out.reportOptions)) {
-    // Whitelist exactly {excludeNoTat, autoDownloadFiles, deltaMode, slides(6 keys),
+    // Whitelist exactly {excludeNoTat, autoDownloadFiles, deltaMode, slides(7 keys),
     // kpiCards(8 keys), labels}. Flags coerce to booleans; only string label values
     // survive; unknown slide/card subkeys are discarded.
     const ro = out.reportOptions;

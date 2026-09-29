@@ -719,6 +719,47 @@ test('importSettings whitelists reportOptions keys, coerces flags, drops unknown
   assert.equal(ro.unknownSub, undefined); // unknown top-level reportOptions key dropped
 });
 
+// slides.sendout (the محلي/دولي pair) was missing from the import whitelist, so a
+// backup's OFF was dropped by pickImportKeys and the device's seeded ON won the merge.
+test('importSettings keeps slides.sendout:false (and a true) instead of reviving the seed', () => {
+  fresh();
+  assert.equal(store.loadSettings().reportOptions.slides.sendout, true, 'precondition: seeded ON');
+  store.importSettings(JSON.stringify({
+    schemaVersion: store.SCHEMA_VERSION,
+    reportOptions: { slides: { sendout: false } },
+  }));
+  let s = store.loadSettings();
+  assert.equal(s.reportOptions.slides.sendout, false, 'the imported OFF must survive merge + backfill');
+  assert.equal(s.reportOptions.slides.monthly, true, 'untouched slide flags keep the device value');
+  // …and it round-trips through export → import on another device.
+  const exported = JSON.stringify(s);
+  fresh();
+  store.importSettings(exported);
+  s = store.loadSettings();
+  assert.equal(s.reportOptions.slides.sendout, false, 'export → import on a fresh device keeps OFF');
+  // A truthy value coerces like every other slide flag.
+  store.importSettings(JSON.stringify({
+    schemaVersion: store.SCHEMA_VERSION,
+    reportOptions: { slides: { sendout: 1 } },
+  }));
+  assert.equal(store.loadSettings().reportOptions.slides.sendout, true);
+});
+
+// The review screen's report scope is per-run state: no settings field may carry it,
+// and an import cannot smuggle one in.
+test('report scope is never persisted — an imported scope key is discarded', () => {
+  fresh();
+  store.importSettings(JSON.stringify({
+    schemaVersion: store.SCHEMA_VERSION,
+    scope: { labs: ['Lab A'], shipments: ['ELAB000001'], from: '2026-09-01', to: '2026-09-10' },
+    reportOptions: { scope: { labs: ['Lab A'] }, slides: { scope: true } },
+  }));
+  const s = store.loadSettings();
+  assert.equal(s.scope, undefined, 'no top-level scope field');
+  assert.equal(s.reportOptions.scope, undefined, 'no reportOptions.scope field');
+  assert.equal(s.reportOptions.slides.scope, undefined, 'no slide flag named scope');
+});
+
 // ---- reportOptions.deltaMode: week-to-date (the default since 2026-08-04) ----
 test('first run seeds deltaMode week and the definitions slide OFF (simple 6-slide deck)', () => {
   fresh();

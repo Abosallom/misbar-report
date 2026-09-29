@@ -25,13 +25,13 @@
 // Both changes make the golden workbook's _cachedDue/_cachedDelay/_cachedStatus
 // an OUT-OF-DATE external oracle for due-derived fields — deliberately.
 
-import { normTest, normFacility } from '../contracts.js?v=v2026-09-28.1';
+import { normTest, normFacility } from '../contracts.js?v=v2026-09-29.1';
 import {
   parseDateTime, toEpochDay, workday, dayDiff, calDaysBetween, monthKey,
-} from './workday.js?v=v2026-09-28.1';
-import { buildTatIndex, resolveTat, CHART_TEST_CATALOG } from './tat.js?v=v2026-09-28.1';
-import { dedupeRows } from './dedupe.js?v=v2026-09-28.1';
-import { fillBlankFacilities } from './infer-facility.js?v=v2026-09-28.1';
+} from './workday.js?v=v2026-09-29.1';
+import { buildTatIndex, resolveTat, CHART_TEST_CATALOG } from './tat.js?v=v2026-09-29.1';
+import { dedupeRows } from './dedupe.js?v=v2026-09-29.1';
+import { fillBlankFacilities } from './infer-facility.js?v=v2026-09-29.1';
 
 export const STATUS = Object.freeze({
   CANCELLED: 'Cancelled',
@@ -333,9 +333,10 @@ function buildByLab(nonCancelled) {
   };
   for (const e of nonCancelled) {
     // Reachable only when the blank could NOT be resolved (engine/infer-facility.js
-    // already filled every unambiguous one): the test runs at more than one lab, or
-    // the row carries no test name either. Such a row is genuinely unattributable and
-    // must stay visible rather than be folded into somebody else's row.
+    // already filled every unambiguous one — in compute(), or for a scoped report in
+    // applyScope over the FULL rows): the test runs at more than one lab, or the row
+    // carries no test name either. Such a row is genuinely unattributable and must
+    // stay visible rather than be folded into somebody else's row.
     const L = get(e.facility ?? 'غير محدد');
     L.total++;
     // pipeline: no received date (and not rejected) — pre-receipt lines.
@@ -423,6 +424,10 @@ function buildByTest(nonCancelled, chartTests) {
  *   (no StdTAT from lookup OR CSV fallback) BEFORE aggregation. Cancelled/rejected
  *   rows are never 'No Match', so cancelled counting is untouched. The count of
  *   dropped rows surfaces as EngineOutput.excludedNoTat.
+ * @param {boolean} [opts.inferBlanks=true]   fill blank facilities from the rows given
+ *   (engine/infer-facility.js). Only `=== false` skips it — for rows whose facilities
+ *   are ALREADY FINAL, i.e. a scoped report's (model/scope.js "SCOPED ROWS ARE FINAL").
+ *   Every other caller omits it, so the full report is computed exactly as before.
  * @returns {import('../contracts.js').EngineOutput}
  */
 export function compute(rows, tatLookup, opts = {}) {
@@ -438,7 +443,17 @@ export function compute(rows, tatLookup, opts = {}) {
   // Without this the hole became its own phantom lab — 'غير محدد' — on the compliance
   // table, while the real lab's row sat one short. An unrecognised NAME is never
   // touched; only a genuinely blank field is filled.
-  const source = fillBlankFacilities(opts.dedupe === true ? dedupeRows(rows) : rows);
+  //
+  // opts.inferBlanks === false SKIPS it, and exists for ONE caller: a scoped report.
+  // The rule's answer depends on which rows it is shown, so applyScope (model/scope.js)
+  // runs it on the FULL row set before filtering; a blank that survives is one the
+  // full report leaves unattributed on purpose (its test runs at two labs). Run again
+  // here on a shipment or date-range SUBSET holding only one of those labs' rows, it
+  // would look settled and credit the order to that lab — a count the full report
+  // never gives it. Opt-in, so the unscoped report (which passes nothing, and whose
+  // own pass here IS the full-set inference) stays byte-identical.
+  const deduped = opts.dedupe === true ? dedupeRows(rows) : rows;
+  const source = opts.inferBlanks === false ? deduped : fillBlankFacilities(deduped);
   // enrichedAll keeps EVERY row; unmatchedTests reporting reads from it so the
   // upload warning still lists no-TAT tests even when they are excluded below.
   const enrichedAll = source.map((r) => enrichRow(r, tatIndex, asOfMs, opts));

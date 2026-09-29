@@ -2,16 +2,17 @@
 // The file-producing core now lives in automation/pipeline.js (produceReportFiles) so
 // an unattended run makes byte-identical files; this screen drives it and paints the
 // very same progress bar, file rows and live slide thumbnails it always has.
-import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-09-28.1';
-import { el, progressBar, toast } from './components.js?v=v2026-09-28.1';
-import { resetRunData } from '../state.js?v=v2026-09-28.1';
-import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-09-28.1';
-import { autoDraft, splitTaskLists } from '../model/drafts.js?v=v2026-09-28.1';
-import { buildLateLabsSection, triggerDownload } from './late-labs-section.js?v=v2026-09-28.1';
+import { STR, todayISO, formatDateAr, formatRangeAr } from '../i18n/ar.js?v=v2026-09-29.1';
+import { el, progressBar, toast } from './components.js?v=v2026-09-29.1';
+import { resetRunData } from '../state.js?v=v2026-09-29.1';
+import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-09-29.1';
+import { autoDraft, splitTaskLists } from '../model/drafts.js?v=v2026-09-29.1';
+import { buildLateLabsSection, triggerDownload } from './late-labs-section.js?v=v2026-09-29.1';
 import {
   applyWindowDeltas, buildFileDefs, produceReportFiles, recordRunSnapshot,
   shouldAutoDownloadFiles,
-} from '../automation/pipeline.js?v=v2026-09-28.1';
+} from '../automation/pipeline.js?v=v2026-09-29.1';
+import { isScoped, hasRange, normalizeScope } from '../model/scope.js?v=v2026-09-29.1';
 
 async function tryImport(path) { try { return await import(path); } catch { return null; } }
 const isMobile = () => /iP(hone|ad|od)|Android/i.test(navigator.userAgent);
@@ -107,7 +108,54 @@ function makeThumbStrip() {
 // 'فحوصات مكتملة' is the deck-wide name for this number (build-spec DEFAULT_LABELS
 // .kpiCompleted / compCompleted / monthlyRowResults) — the shared summary must not
 // call the printed metric something else.
-function buildShareCard(model, date, fileCount) {
+//
+// SCOPED RUN (model.scope): the pasted text travels without the deck, so it has to say
+// what the deck's cover says — the heading date becomes the order-date RANGE when one is
+// set (a single day would claim a report date the numbers were not cut at), and a second
+// line names the scope so a reader never takes one lab's numbers for the programme's.
+// Unscoped → the text is exactly what it always was.
+const SHARE_MAX_IDS = 5; // a pasted message listing 40 shipment ids buries the numbers
+// Labs fold the way the cover's lab list does (build-spec coverLabList, its scopeListMore
+// wording): the first three, then 'و{n} أخرى'. The cover's extra WIDTH guard is not
+// copied — it exists because a 0.4in cover box cannot wrap; a pasted message can.
+const SHARE_MAX_LABS = 3;
+
+/**
+ * The share card's scope line. Normalises first (idempotent), so the arrays are always
+ * there and a half-valid range can never print. Only meaningful for a scoped model —
+ * the caller gates on isScoped. Exported for test/scope-pipeline.test.mjs.
+ * @param {Object} scope model/scope.js scope
+ * @returns {string} e.g. 'تقرير مخصص — المختبرات: A، B، C و2 أخرى · الشحنات: …'
+ */
+export function scopeShareLine(scope) {
+  const s = normalizeScope(scope);
+  const S = STR.review.scope;
+  const parts = [];
+  if (s.labs.length) {
+    const names = s.labs.slice(0, SHARE_MAX_LABS).join('، ');
+    const more = s.labs.length - SHARE_MAX_LABS;
+    parts.push(`${S.labs}: ${names}${more > 0 ? ` و${more} أخرى` : ''}`);
+  }
+  if (s.shipments.length) {
+    const ids = s.shipments.slice(0, SHARE_MAX_IDS).join('، ');
+    const more = s.shipments.length - SHARE_MAX_IDS;
+    parts.push(`${S.shipments}: ${ids}${more > 0 ? ` (+${more})` : ''}`);
+  }
+  // The range's VALUE, not the bare label — a range-only run used to read
+  // 'تقرير مخصص — الفترة (حسب تاريخ الطلب)', a dangling item. The heading carries the
+  // same dates; this line is where the reader learns they are ORDER dates.
+  if (hasRange(s)) parts.push(`${S.range}: ${formatRangeAr(s.from, s.to)}`);
+  return `${S.active} — ${parts.join(' · ')}`;
+}
+
+/**
+ * The share card's text — pure, so the pasted message is pinned by a test without a DOM.
+ * @param {Object} model the ReportModel generated from
+ * @param {string} date 'YYYY-MM-DD' the report date (the heading when there is no range)
+ * @param {number} fileCount files actually produced
+ * @returns {string}
+ */
+export function shareText(model, date, fileCount) {
   const V = (key, computed) => (Number.isFinite(model.overrides && model.overrides[key]) ? model.overrides[key] : computed);
   const k = model.kpi || {};
   const b = k.buckets || {};
@@ -119,8 +167,10 @@ function buildShareCard(model, date, fileCount) {
   const rejected = num(V('rejected', b.rejected));
   const cancelled = num(V('cancelledNote', k.cancelledNote));
   const pct = total ? Math.round((completed / total) * 100) : 0;
-  const text =
-    `تقرير مسبار الأسبوعي — ${formatDateAr(date) || date}\n` +
+  const scope = normalizeScope(model.scope); // same view isScoped/hasRange judge by
+  const when = (hasRange(scope) && formatRangeAr(scope.from, scope.to)) || formatDateAr(date) || date;
+  return `تقرير مسبار الأسبوعي — ${when}\n` +
+    (isScoped(scope) ? `${scopeShareLine(scope)}\n` : '') +
     `• إجمالي الطلبات: ${total}\n` +
     `• فحوصات مكتملة (تشمل المرفوضة): ${completed} (${pct}%)\n` +
     `↳ منها مرفوضة: ${rejected}\n` +
@@ -128,9 +178,14 @@ function buildShareCard(model, date, fileCount) {
     `↳ منها متأخرة: ${late}\n` +
     `• ملغاة: ${cancelled}\n` +
     `الملفات: ${fileCount} (نسختا PPTX و PDF داخلية ونوبكو)`;
+}
+
+function buildShareCard(model, date, fileCount) {
+  const text = shareText(model, date, fileCount);
+  const scoped = isScoped(model.scope); // one more line → one more textarea row
 
   const ta = el('textarea', {
-    dir: 'rtl', readOnly: true, rows: 6, value: text,
+    dir: 'rtl', readOnly: true, rows: scoped ? 7 : 6, value: text,
     style: 'width:100%;box-sizing:border-box;resize:vertical;font-family:inherit;font-size:.9rem;line-height:1.8;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-light);color:var(--slate-500)',
   });
 
@@ -175,15 +230,20 @@ export async function render(container, ctx) {
   // (Under the retired baseline stamper the two copies could pick different baselines and
   // the deck silently won.) THE INVARIANT: only the chips changed meaning — the big
   // cumulative numbers on slides 2/3/4 are untouched.
+  // The rows are model.scopedRows when the model carries them (applyWindowDeltas picks),
+  // so a SCOPED deck's chips count the same subset as its cards — and the review preview
+  // stays deep-equal only while screen-review stamps from that same field.
   // recordSnapshot (below) still appends this run's published numbers to snapshotHistory
-  // for the history panel. Both modules are guarded → engine deltas if either is absent.
-  const dwMod = await tryImport('../model/delta-window.js?v=v2026-09-28.1');
-  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-09-28.1');
+  // for the history panel — for a FULL report only; a scoped one writes nothing.
+  // Both modules are guarded → engine deltas if either is absent.
+  const dwMod = await tryImport('../model/delta-window.js?v=v2026-09-29.1');
+  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-09-29.1');
   const recordSnapshot = dbMod && dbMod.recordSnapshot;
   applyWindowDeltas(model, state, store, dwMod && dwMod.stampWindowDeltas);
 
-  // Same four definitions produceReportFiles will walk — one shared source.
-  const fileDefs = buildFileDefs(date);
+  // Same four definitions produceReportFiles will walk — one shared source, and the SAME
+  // scope argument it passes, so a painted row name is always the downloaded file's name.
+  const fileDefs = buildFileDefs(date, model.scope);
 
   const rowEls = {};
   const fileList = el('div', { class: 'gen-files' }, fileDefs.map((f) => {
@@ -283,7 +343,9 @@ export async function render(container, ctx) {
     // unattended generation feeds the same delta/history features.
     // recordShownTasks also writes the closed-task grace log (v6) from this very
     // model — guarded import, so an older/partial build just keeps the numbers path.
-    const tlMod = await tryImport('../model/task-lifecycle.js?v=v2026-09-28.1');
+    // A SCOPED model is a side report: recordRunSnapshot returns before either write
+    // (see its guard), so it is still called unconditionally here — one owner of the rule.
+    const tlMod = await tryImport('../model/task-lifecycle.js?v=v2026-09-29.1');
     recordRunSnapshot({
       model, store, state, date, recordSnapshot,
       recordShownTasks: tlMod && tlMod.recordShownTasks,
@@ -321,6 +383,9 @@ export async function render(container, ctx) {
         onClick: () => { produced.forEach((p) => { p.url = triggerDownload(p.blob, p.def.name); }); },
       }),
       hadError ? el('p', { class: 'small muted', text: STR.generate.genMissing }) : null,
+      // Scoped run: say, at the moment of success, that nothing was recorded — an
+      // operator who expects this deck in the history panel must not go looking for it.
+      isScoped(model.scope) ? el('p', { class: 'small muted', text: STR.review.scope.sideReport }) : null,
       el('p', {
         class: 'small muted',
         style: 'margin-top:6px',
@@ -349,15 +414,33 @@ export async function render(container, ctx) {
     toast(STR.generate.done, 'ok');
   }
 
-  // Per-lab "Late & Due" Excel export — built from the SAME dataset this run used
-  // (works whether or not the four report files were produced, incl. live-snapshot).
+  // Per-lab "Late & Due" Excel export — built from the run's parsed order rows (works
+  // whether or not the four report files were produced, incl. live-snapshot).
   // labRecipients only pre-fills the To: line of a downloaded .eml draft — nothing
   // is sent from here; without it the settings tab's per-lab addresses do nothing.
+  //
+  // NEVER SCOPED — always every parsed order, as of the CHOSEN report date. These are
+  // OPERATIONAL follow-up lists: each workbook goes to its lab as a draft pre-addressed
+  // to that lab, named labFileName(lab) exactly like the full run's. Scoped, it would be
+  // an incomplete chase list nothing marks as partial — a range drops every order placed
+  // before 'from' and judges "late / due in 24h" as of 'to' (possibly weeks ago); a
+  // shipment scope drops the lab's other late orders. So: state.parsed.orders (never
+  // model.scopedRows), and a scoped model's date is NOT model.reportDate (= 'to' under a
+  // range) but state.reportDate, the date the operator picked. Unscoped, model.reportDate
+  // is passed exactly as before. A one-line note says so above the section.
+  const scopedRun = isScoped(model.scope);
+  const labsAsOf = scopedRun ? (state.reportDate || todayISO()) : model.reportDate;
+  if (scopedRun) {
+    resultHost.appendChild(el('p', {
+      class: 'small muted', style: 'margin:16px 0 0;text-align:right',
+      text: STR.generate.lateLabsUnscoped.replace('{date}', formatDateAr(labsAsOf) || labsAsOf),
+    }));
+  }
   try {
     resultHost.appendChild(await buildLateLabsSection({
       rows: (state.parsed && state.parsed.orders) || null,
       tatTests: (store.settings && store.settings.tatLookup) || {},
-      reportDate: model.reportDate,
+      reportDate: labsAsOf,
       labRecipients: (store.settings && store.settings.automation
         && store.settings.automation.labRecipients) || null,
     }));

@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>مسبار — منصة شاشة المراجعة</title>
+<!--
+  DEV HARNESS for ui/screen-review.js — mounts the review screen's render() WITHOUT the
+  sign-in gate, the router or the upload screen, so the scope card, the send-out cards
+  and the live preview can be driven in a plain browser (serve the repo root, open
+  /test/review-harness.html).
+
+  SYNTHETIC BY CONSTRUCTION — it must never read real data or credentials:
+    • rows      = test/fixtures/golden-orders.js (patient-free, already public), with
+                  Shipment IDs assigned DETERMINISTICALLY here (ELAB9xxxxx — a range no
+                  real shipment uses), one per lab + dispatch day;
+    • settings  = an in-memory store seeded from src/seeds (public defaults); nothing
+                  touches localStorage, and there is no Grafana key to unseal anything;
+    • catalogue = state.sendoutMaster is set BEFORE render, so the screen never calls
+                  loadSendoutMaster (which would fetch + decrypt the real, encrypted
+                  catalogue). ?master=1 (default) builds a tiny FAKE one — invented vendor
+                  names, one fake country — from the fixture's own test names, enough to
+                  exercise the by-test-name and unmapped cards; ?master=0 gives none.
+  Query: ?date=YYYY-MM-DD (report date, default the golden asOf 2026-07-09), ?master=0|1,
+         ?ambiguous=1 (adds two SYNTHETIC lines — see withAmbiguousBlank below).
+
+  THE ENGINE is the real one, handed to the screen through ctx.compute (the screen's
+  dev-harness seam; main.js never sets it) wrapped so the live line can COUNT the runs and
+  so «فشل الحساب المخصص» can make every SCOPED build throw (a scoped build is the one
+  that passes inferBlanks:false) — the only way to reach modelFor's fall-back-to-the-full-
+  report path in a browser. The review screen recomputes the figures itself as of the
+  effective report date, full report included; the upload-screen output cached on
+  state.engineOutput is only its fallback, exactly as in the app.
+
+  WHAT EACH BUTTON REPLAYS (every one leaves state.reportModel in place, like the app):
+    «إعادة تحميل البيانات»  a same-shape re-pull: a NEW orders array (same count, same
+        first/last ids) + a fresh upload-screen engine output, then back to review — the
+        app-bar home path. A scope chosen before it must be gone; the figures are new.
+    «إعدادات: …»  a Settings edit and a return to review: remove/restore the busiest
+        test's TAT, flip «استبعاد بدون TAT», add/remove 50 to one month's historical
+        cancellations. The figures (الإجمالي / المتأخرة / المستبعدة) must follow at once.
+    «تشغيل آلي»  what an automation run started from the upload-screen panel does to the
+        SHARED state while this screen stays open, WITHOUT a rerender: its own model in
+        state.reportModel (support line «AUTOMATION») — and, with «+ سحب», a new orders
+        array too. Then press «توليد»: the handed-over model must carry YOUR edits, never
+        «AUTOMATION»; with a scope on and «+ سحب», generate must refuse and show the full
+        report instead of publishing it unseen.
+  The live line under the bar reads state.scope, the model's scope, the numbers and the
+  compute-run count after every render and every click.
+  STALE MODULES: python's http.server sends no cache headers, so after editing a source
+  file a plain reload can run the browser's heuristically-cached copy of it (seen here
+  with engine.js). Hard-reload, or open the page with a fresh query (…&r=2).
+  window.__harness = { state, store, ctx, rows } for poking from the console.
+-->
+<link rel="stylesheet" href="../styles/fonts.css">
+<link rel="stylesheet" href="../styles/app.css">
+<link rel="stylesheet" href="../styles/slide.css">
+<style>
+  .harness-bar { position:sticky; top:0; z-index:30; display:flex; align-items:center; flex-wrap:wrap; gap:6px 10px;
+    background:var(--white); border-bottom:1px solid var(--border-dark); padding:8px 16px; font-size:.82rem; }
+  .harness-bar strong { color:var(--brand-ink); }
+  .harness-bar button { font:inherit; font-weight:700; cursor:pointer; border:1px solid var(--border-dark);
+    background:var(--bg-lighter); color:var(--brand-ink); border-radius:6px; padding:4px 10px; min-height:32px; }
+  .harness-bar label { display:inline-flex; align-items:center; gap:6px; font-weight:700; color:var(--slate-600); cursor:pointer; }
+  .harness-bar .sep { width:1px; align-self:stretch; background:var(--border-dark); }
+  #harness-status, #harness-live { color:var(--slate-600); overflow-wrap:anywhere; flex:1 1 100%; margin:0; }
+  #harness-live { font-size:.78rem; }
+</style>
+</head>
+<body>
+<div class="harness-bar">
+  <strong>منصة شاشة المراجعة (بيانات اصطناعية)</strong>
+  <button id="h-reset" type="button">إعادة ضبط الحالة</button>
+  <button id="h-reload" type="button">إعادة تحميل البيانات</button>
+  <span class="sep" aria-hidden="true"></span>
+  <button id="h-set-tat" type="button"></button>
+  <button id="h-set-excl" type="button"></button>
+  <button id="h-set-cancel" type="button"></button>
+  <span class="sep" aria-hidden="true"></span>
+  <button id="h-auto" type="button">تشغيل آلي (النموذج فقط)</button>
+  <button id="h-auto-pull" type="button">تشغيل آلي + سحب</button>
+  <label><input id="h-fail" type="checkbox"> فشل الحساب المخصص</label>
+  <button id="h-theme" type="button">فاتح/داكن</button>
+  <p id="harness-status"></p>
+  <p id="harness-live" aria-live="polite"></p>
+</div>
+<main id="app"></main>
+
+<script type="module">
+  import { render } from '../src/ui/screen-review.js';
+  import { compute } from '../src/engine/engine.js';
+  import { buildFileDefs } from '../src/automation/pipeline.js';
+  import { isScoped, normalizeScope } from '../src/model/scope.js';
+  import { LOCAL_COUNTRY } from '../src/model/sendout.js';
+  import { TAT_LOOKUP } from '../src/seeds/tat-lookup.js';
+  import { SCORECARD_SEED } from '../src/seeds/scorecard.js';
+  import { HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED } from '../src/seeds/defaults.js';
+  import { GOLDEN_ORDERS } from './fixtures/golden-orders.js';
+
+  const params = new URLSearchParams(location.search);
+  const REPORT_DATE = /^\d{4}-\d{2}-\d{2}$/.test(params.get('date') || '') ? params.get('date') : '2026-07-09';
+  const WITH_MASTER = params.get('master') !== '0';
+  const WITH_AMBIGUOUS = params.get('ambiguous') === '1';
+  const UNATTRIBUTED = 'غير محدد'; // engine.js byLab caption for a blank facility
+  const app = document.getElementById('app');
+  const statusEl = document.getElementById('harness-status');
+  const liveEl = document.getElementById('harness-live');
+  const clone = (o) => JSON.parse(JSON.stringify(o));
+
+  /* Rows: the golden fixture + deterministic synthetic Shipment IDs. A shipment here is
+   * "one lab's lines dispatched on one day" (plus 'Batch Id Assigned' lines grouped by
+   * order day, so a not-yet-shipped shipment exists too); ids are numbered in sorted key
+   * order, so every load gets the same ids for the same lines. Rows are copied, never
+   * mutated — the fixture module is shared with nothing else here, but the habit holds. */
+  function withShipments(rows) {
+    const keyOf = (r) => {
+      const day = (s) => (s ? String(s).slice(0, 10) : null);
+      if (day(r.dispatched)) return `${r.facility}|D|${day(r.dispatched)}`;
+      if (r.rawStatus === 'Batch Id Assigned' && day(r.orderDate)) return `${r.facility}|B|${day(r.orderDate)}`;
+      return null;
+    };
+    const keys = [...new Set(rows.map(keyOf).filter(Boolean))].sort();
+    const idOf = new Map(keys.map((k, i) => [k, `ELAB9${String(i + 1).padStart(5, '0')}`]));
+    return rows.map((r) => ({ ...r, shipmentId: idOf.get(keyOf(r)) || null }));
+  }
+
+  /* ?ambiguous=1 — the shape a scoped report must NOT re-infer (inferBlanks:false). The
+   * fixture has no blank facility and no test at two labs, so two SYNTHETIC lines are
+   * copied from one real line R (test T, lab A, shipment S):
+   *   SYNTH-AMBIG-B — T at a SECOND lab, in that lab's own shipment: T now runs at two labs;
+   *   SYNTH-AMBIG-Z — T with a BLANK lab, in S beside R.
+   * Full report: Z is unattributed (the inference refuses a two-lab test). Scope = S alone:
+   * S holds only lab A's T lines, so re-inferring there would credit Z to lab A — the live
+   * line's «غير محدد» must stay 1 and lab A's count must not grow by Z. */
+  function withAmbiguousBlank(rows) {
+    const r = rows.find((x) => x.shipmentId && x.facility && x.testName && x.rawStatus !== 'Order Cancelled');
+    const other = r && rows.find((x) => x.facility && x.facility !== r.facility && x.shipmentId);
+    if (!r || !other) return { rows, info: null };
+    return {
+      rows: [
+        ...rows,
+        { ...r, orderId: 'SYNTH-AMBIG-B', facility: other.facility, shipmentId: other.shipmentId },
+        { ...r, orderId: 'SYNTH-AMBIG-Z', facility: null, shipmentId: r.shipmentId },
+      ],
+      info: { shipment: r.shipmentId, lab: r.facility },
+    };
+  }
+
+  let ambiguous = null; // { shipment, lab } when ?ambiguous=1 injected the two lines
+  function loadRows() {
+    const shipped = withShipments(GOLDEN_ORDERS);
+    if (!WITH_AMBIGUOUS) return shipped;
+    const out = withAmbiguousBlank(shipped);
+    ambiguous = out.info;
+    return out.rows;
+  }
+
+  /* A FAKE send-out catalogue, derived at runtime from the fixture's own test names —
+   * invented vendor names that no FACILITY_TO_VENDOR alias points at, so every matched
+   * order lands in sendout.js's byTestName bucket and every other one is unmapped. No
+   * real vendor, country pairing or reference lab is written anywhere in this file. */
+  function fakeMaster(rows) {
+    const counts = new Map();
+    for (const r of rows) if (r.testName) counts.set(r.testName, (counts.get(r.testName) || 0) + 1);
+    const names = [...counts.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).map(([n]) => n);
+    const pick = (from, n) => names.slice(from, from + n);
+    return [
+      ...pick(0, 4).map((item) => ({ vendor: 'Synthetic Vendor One', country: LOCAL_COUNTRY, reflab: '', item })),
+      ...pick(4, 3).map((item) => ({ vendor: 'Synthetic Vendor Two', country: 'Testland', reflab: 'Synthetic Reference Lab', item })),
+    ];
+  }
+
+  function seedSettings() {
+    return {
+      schemaVersion: 1,
+      tatLookup: { ...TAT_LOOKUP },
+      displayNames: {},
+      scorecard: SCORECARD_SEED.map((x) => ({ ...x })),
+      historicalConstants: { cancelledByMonth: { ...HISTORICAL_CONSTANTS_SEED.cancelledByMonth } },
+      snapshot: clone(SNAPSHOT_SEED),
+      snapshotHistory: {},
+      taskLog: {},
+      cachedTracker: null,
+    };
+  }
+
+  /* In-memory store with the adapter surface the screens use (main.js makeAdapter). */
+  function memStore() {
+    let doc = seedSettings();
+    return {
+      loadSettings: () => clone(doc),
+      saveSettings: (s) => { doc = clone(s); return clone(doc); },
+      updateSnapshot: ({ asOf, numbers } = {}) => {
+        doc.snapshot = { asOf: asOf ?? null, numbers: { ...((doc.snapshot || {}).numbers || {}), ...(numbers || {}) } };
+        return clone(doc);
+      },
+      updateCachedTracker: () => clone(doc),
+      isEphemeral: () => true,
+      get persistent() { return false; },
+      get settings() { return clone(doc); },
+      getSettings: () => clone(doc),
+      setTat(name, days) { doc.tatLookup = { ...(doc.tatLookup || {}), [name]: Number(days) }; return clone(doc); },
+    };
+  }
+
+  /* The upload screen's engine run, with ITS engineOpts (screen-upload.js engineOpts):
+   * what state.engineOutput holds in the app. The review screen only falls back to it
+   * (no engine, or a compute failure on the full report). */
+  function uploadEngineOutput(orders, s) {
+    return compute(orders, s.tatLookup, {
+      asOf: REPORT_DATE,
+      cancelledByMonth: (s.historicalConstants || {}).cancelledByMonth || {},
+      snapshot: s.snapshot,
+      excludeNoTat: !!(s.reportOptions && s.reportOptions.excludeNoTat),
+    });
+  }
+
+  /* ctx.compute — the real engine, counted, and failing SCOPED builds on demand. */
+  let computeRuns = 0;
+  const failBox = document.getElementById('h-fail');
+  function harnessCompute(rows, tat, opts) {
+    computeRuns += 1;
+    if (failBox.checked && opts && opts.inferBlanks === false) {
+      throw new Error('harness: simulated scoped compute failure');
+    }
+    return compute(rows, tat, opts);
+  }
+
+  let rows = loadRows();
+  let store;
+  let state;
+  let ctx;
+
+  function freshState() {
+    store = memStore();
+    const s = store.settings;
+    computeRuns = 0;
+    state = {
+      files: { csv: { name: 'golden-orders (synthetic)' }, tracker: null },
+      parsed: { orders: rows, tracker: null, summary: null }, // tracker null → buildMockTracker()
+      engineOutput: uploadEngineOutput(rows, s), // the upload screen's cached output
+      reportModel: null,
+      edits: {},
+      reportDate: REPORT_DATE,
+      settings: s,
+      screen: 'review',
+      sendoutMaster: WITH_MASTER ? fakeMaster(rows) : null, // set ⇒ the real loader never runs
+    };
+    ctx = { state, store, navigate, rerender, compute: harnessCompute };
+    window.__harness = { state, store, ctx, rows };
+  }
+
+  /* ---- live readout: what the screen is showing, and what generate would receive ---- */
+  const scopeText = (sc) => {
+    if (!sc) return 'بلا نطاق';
+    const n = normalizeScope(sc);
+    const parts = [];
+    if (n.labs.length) parts.push(`مختبرات ${n.labs.length}`);
+    if (n.shipments.length) parts.push(`شحنات ${n.shipments.join(',')}`);
+    if (n.from && n.to) parts.push(`${n.from}…${n.to}`);
+    return `${isScoped(n) ? parts.join(' + ') : 'كامل'} · شريحة الشحنات ${n.shipmentSlide ? '✓' : '✗'}`;
+  };
+  const labTotal = (kpi, lab) => ((kpi && kpi.byLab) || []).filter((l) => l.lab === lab).reduce((n, l) => n + (l.total || 0), 0);
+  function paintLive() {
+    const m = state.reportModel;
+    const k = m && m.kpi;
+    const s = store.settings;
+    const bits = [
+      `state.scope: ${scopeText(state.scope)}`,
+      `model.scope: ${m ? scopeText(m.scope) : '—'}`,
+      `الإجمالي ${k && k.totals ? k.totals.total : '?'}`,
+      `المتأخرة ${k && k.buckets ? k.buckets.lateNoResult : '?'}`,
+      `المستبعدة ${k ? (k.excludedNoTat || 0) : '?'}`,
+      `الملغاة ${k && k.cancelledNote != null ? k.cancelledNote : '?'}`,
+      `${UNATTRIBUTED} ${labTotal(k, UNATTRIBUTED)}`,
+      `غير منسوبة (محلي/دولي) ${m && m.sendout ? (m.sendout.unmapped || []).length : '—'}`,
+      `مرات الحساب ${computeRuns}`,
+      `تعديلات يدوية ${m && m.overrides ? Object.keys(m.overrides).length : 0}`,
+      `إعدادات: TAT ${removedTat ? 'محذوف' : 'أصلي'} · استبعاد ${s.reportOptions && s.reportOptions.excludeNoTat ? 'نعم' : 'لا'} · إلغاءات ${cancelBumped ? '+50' : 'أصلية'}`,
+    ];
+    if (ambiguous) bits.push(`صف غامض: الشحنة ${ambiguous.shipment} · ${ambiguous.lab} = ${labTotal(k, ambiguous.lab)}`);
+    liveEl.textContent = bits.join(' • ');
+  }
+  // The shipment-slide box and the override inputs change state WITHOUT a rerender.
+  app.addEventListener('change', () => setTimeout(paintLive, 0));
+  app.addEventListener('click', () => setTimeout(paintLive, 0));
+
+  function describe(m) {
+    if (!m) return '';
+    const scoped = isScoped(m.scope);
+    const names = buildFileDefs(m.reportDate, m.scope).map((f) => f.name).join(' | ');
+    const support = ((m.panels && m.panels.supportRequired) || []).join(' / ') || '—';
+    return `→ generate: التاريخ ${m.reportDate} • ${scoped ? 'مخصص' : 'كامل'} • الإجمالي ${m.kpi && m.kpi.totals ? m.kpi.totals.total : '?'}`
+      + ` • شحنات ${(m.shipmentDetails || []).length} • الدعم المطلوب: ${support} • ${names}`;
+  }
+
+  /* Router stand-in: 'generate' only reports what the screen handed over (the model the
+   * generate screen would receive); anything else re-renders the review screen. */
+  function navigate(id) {
+    if (id === 'generate') {
+      statusEl.textContent = describe(state.reportModel);
+      window.__harness.handedOver = state.reportModel;
+      rerender();
+      return;
+    }
+    rerender();
+  }
+
+  /* Same choreography as main.js renderScreen — clear, a loading line, a tick (the
+   * router's awaited import), clear again, render INTO the live container — so the
+   * screen's own scroll/focus restore after a scope change is exercised as in the app. */
+  async function rerender() {
+    app.innerHTML = '';
+    app.appendChild(Object.assign(document.createElement('p'), { className: 'muted', textContent: 'جاري التحميل…' }));
+    await new Promise((r) => setTimeout(r, 0));
+    try {
+      app.innerHTML = '';
+      await render(app, ctx);
+    } catch (e) {
+      console.error('[harness] render failed', e);
+      app.innerHTML = '';
+      app.appendChild(Object.assign(document.createElement('pre'), { textContent: String(e && e.stack || e) }));
+    }
+    paintLive();
+  }
+
+  /* ---- Settings edits, then "back to review" (state.reportModel kept) ---- */
+  let removedTat = null;   // { key, days } while the busiest test's TAT is removed
+  let cancelBumped = null; // the month key while +50 is added to it
+  const busiestTatKey = (tat) => {
+    const counts = new Map();
+    for (const r of rows) if (r.testName) counts.set(r.testName, (counts.get(r.testName) || 0) + 1);
+    const norm = (x) => String(x).trim().replace(/\s+/g, ' ').toUpperCase();
+    const top = [...counts].sort((a, b) => b[1] - a[1])[0];
+    return top && Object.keys(tat).find((k) => norm(k) === norm(top[0]));
+  };
+  function editSettings(mutate, note) {
+    const doc = store.loadSettings();
+    mutate(doc);
+    store.saveSettings(doc);
+    statusEl.textContent = note;
+    paintSettingsButtons();
+    rerender();
+  }
+  function paintSettingsButtons() {
+    const s = store.settings;
+    document.getElementById('h-set-tat').textContent = removedTat ? 'إعدادات: أعِد TAT الفحص الأكثر' : 'إعدادات: احذف TAT الفحص الأكثر';
+    document.getElementById('h-set-excl').textContent = `إعدادات: استبعاد بدون TAT (${s.reportOptions && s.reportOptions.excludeNoTat ? 'مفعّل' : 'معطّل'})`;
+    document.getElementById('h-set-cancel').textContent = cancelBumped ? 'إعدادات: أعِد ثوابت الإلغاء' : 'إعدادات: ثوابت الإلغاء +50';
+  }
+  document.getElementById('h-set-tat').addEventListener('click', () => editSettings((doc) => {
+    if (removedTat) { doc.tatLookup[removedTat.key] = removedTat.days; removedTat = null; return; }
+    const key = busiestTatKey(doc.tatLookup);
+    if (!key) return;
+    removedTat = { key, days: doc.tatLookup[key] };
+    delete doc.tatLookup[key];
+  }, 'عُدّل جدول TAT في الإعدادات ثم عودة للمراجعة — الأرقام يجب أن تتبعه فوراً'));
+  document.getElementById('h-set-excl').addEventListener('click', () => editSettings((doc) => {
+    doc.reportOptions = { ...(doc.reportOptions || {}), excludeNoTat: !(doc.reportOptions && doc.reportOptions.excludeNoTat) };
+  }, 'بُدّل «استبعاد بدون TAT» في الإعدادات ثم عودة للمراجعة — مع حذف TAT يتغير الإجمالي'));
+  document.getElementById('h-set-cancel').addEventListener('click', () => editSettings((doc) => {
+    const cbm = doc.historicalConstants.cancelledByMonth;
+    if (cancelBumped) { cbm[cancelBumped] -= 50; cancelBumped = null; return; }
+    cancelBumped = Object.keys(cbm)[0] || '2026-01';
+    cbm[cancelBumped] = Number(cbm[cancelBumped] || 0) + 50;
+  }, 'عُدّلت ثوابت الإلغاء التاريخية ثم عودة للمراجعة — الشريحة الشهرية للتقرير الكامل تتبعها'));
+
+  /* ---- an automation run sharing `state` while the review screen stays open ---- */
+  function automationRun(withPull) {
+    if (withPull) {
+      rows = loadRows();                 // stepPull assigns a NEW orders array
+      state.parsed.orders = rows;
+      state.engineOutput = uploadEngineOutput(rows, store.settings);
+      window.__harness.rows = rows;
+    }
+    const cur = state.reportModel || {};
+    state.reportModel = {                // stepEngine writes ITS OWN (full) model
+      ...cur,
+      scope: undefined, scopedRows: undefined, shipmentDetails: undefined, overrides: {},
+      panels: { ...(cur.panels || {}), supportRequired: ['AUTOMATION'] },
+    };
+    statusEl.textContent = withPull
+      ? 'تشغيل آلي + سحب: نموذج آخر ومصفوفة طلبات جديدة في الحالة المشتركة — اضغط «توليد»'
+      : 'تشغيل آلي: نموذج آخر في state.reportModel — اضغط «توليد»؛ يجب أن يُسلَّم نموذجك أنت';
+    paintLive();
+  }
+  document.getElementById('h-auto').addEventListener('click', () => automationRun(false));
+  document.getElementById('h-auto-pull').addEventListener('click', () => automationRun(true));
+
+  document.getElementById('h-reset').addEventListener('click', () => {
+    rows = loadRows(); removedTat = null; cancelBumped = null;
+    freshState(); paintSettingsButtons(); statusEl.textContent = ''; rerender();
+  });
+  // A same-shape re-pull (see the header): a NEW array of the same lines — what the live
+  // pull assigns — and the hero's fresh engine output; state.reportModel is KEPT.
+  document.getElementById('h-reload').addEventListener('click', () => {
+    rows = loadRows();
+    state.parsed.orders = rows;
+    state.engineOutput = uploadEngineOutput(rows, store.settings);
+    window.__harness.rows = rows;
+    statusEl.textContent = 'أُعيد تحميل البيانات: مصفوفة طلبات جديدة بالشكل نفسه — يجب أن يعود التقرير كاملاً';
+    rerender();
+  });
+  failBox.addEventListener('change', () => {
+    statusEl.textContent = failBox.checked
+      ? 'كل حساب مخصص سيفشل الآن: طبّق نطاقاً — يجب أن يعود التقرير كاملاً مع رسالة خطأ تسمّي النطاق'
+      : '';
+  });
+  document.getElementById('h-theme').addEventListener('click', () => {
+    const root = document.documentElement;
+    root.setAttribute('data-theme', root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+
+  freshState();
+  paintSettingsButtons();
+  rerender();
+</script>
+</body>
+</html>

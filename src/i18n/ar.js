@@ -1,4 +1,14 @@
 // i18n/ar.js — all Arabic UI strings + filename/date helpers (Track E).
+//
+// The ONE import: model/scope.js owns what "scoped" means (isScoped/normalizeScope), and
+// buildFileName's suffix must agree with the deck's cover line and header tag, which
+// build-spec reads from the very same predicate. A local re-derivation here is exactly
+// how a filename would one day say «مخصص» while the cover says nothing (or the reverse).
+// scope.js is pure (no DOM, no vendor, no ar.js back-edge), so this adds no cycle.
+import { isScoped, normalizeScope } from '../model/scope.js?v=v2026-09-29.1';
+
+/** Join ids for a sentence: Arabic comma, tolerant of a bare string or a missing list. */
+const joinIds = (ids) => [].concat(ids == null ? [] : ids).map(String).join('، ');
 
 /** All UI strings, grouped by screen/area. */
 export const STR = {
@@ -100,9 +110,80 @@ export const STR = {
     previewTitle: 'معاينة مباشرة',
     previewMissing: 'وحدات المعاينة غير متوفرة بعد (قيد الإنشاء).',
     generate: 'توليد التقارير (4 ملفات)',
+    // Send-out attribution disclosure (ui/screen-review.js: the amber gaps card and the
+    // informational by-test-name card). Each hint says EXACTLY what model/sendout.js puts
+    // in its bucket — change the two together:
+    //   unmapped   — the performing lab is blank (and the shared inference could not fill
+    //                it from the test's other orders), OR the lab is no KNOWN supplier (no
+    //                alias reaching one, and its own name is not a supplier's) AND its test
+    //                name does not pin exactly one supplier+country+reference lab: absent
+    //                from the file, or listed with several;
+    //   unresolved — the supplier IS known and contracted in several countries, but this
+    //                test name is not among its listed tests (matched as written, only
+    //                case/whitespace folded — no prefix or dash tolerance);
+    //   byTestName — NOT a gap: the lab is no known supplier, so the order was placed by
+    //                a test name listed under exactly one supplier. On the slides.
+    // WHY THE REWRITE (2026-09-29): the old single hint said the lab "has no matching
+    // supplier in the master file" — in the Genalive case the supplier WAS in the file,
+    // only the lab↔supplier link was missing — and the first rewrite still told the
+    // reviewer to "check the spelling" of both names. An unmapped order's names may be
+    // spelled perfectly (a blank lab; a test listed under two suppliers), so no hint may
+    // send the reviewer to correct something that is already right.
+    // noLab/orders: the gaps card's caption for a blank-lab group and its per-group count.
+    sendout: {
+      gapsTitle: 'طلبات لم تُنسب إلى دولة',
+      unmappedHint: 'لم تُنسب هذه الطلبات إلى دولة: إمّا أن المختبر المُنفِّذ فارغ في الطلب ولم يمكن استنتاجه من طلبات الفحص نفسه، وإمّا أن اسم المختبر لا يقابله مورد معروف في ملف الموردين واسم الفحص ليس مُدرجًا تحت مورد واحد فقط — فهو غير مُدرج في الملف، أو مُدرج بأكثر من مورد أو دولة أو مختبر مرجعي. لا تظهر هذه الطلبات في شريحتَي محلي/دولي، ولن تُنسب إلى دولة بالتخمين.',
+      unresolvedHint: 'المورد معروف ومتعاقد معه في أكثر من دولة، لكن اسم هذا الفحص ليس ضمن فحوصاته المُدرجة في ملف الموردين (يُطابَق الاسم كما هو، دون اعتبار لحالة الأحرف والمسافات)، فتعذّر تحديد الدولة. لا تظهر هذه الطلبات في شريحتَي محلي/دولي، ولا تُنسب إلى مورد آخر.',
+      byTestNameTitle: 'طلبات نُسبت حسب اسم الفحص',
+      byTestNameHint: 'للاطلاع: اسم المختبر في هذه الطلبات لا يقابله مورد معروف في ملف الموردين، فنُسب كل طلب إلى دولة حسب اسم الفحص لأنه مُدرج تحت مورد واحد فقط. تظهر هذه الطلبات في شريحتَي محلي/دولي باسم المختبر نفسه.',
+      noLab: 'بدون مختبر مُنفِّذ',
+      orders: (n) => `${n} طلبًا`,
+    },
+    // Report SCOPE (review screen) — narrows the ORDER ROWS before any number is
+    // computed. A scoped deck is a SIDE REPORT: it never writes the published history
+    // or the task log (automation/pipeline.js recordRunSnapshot), and it announces
+    // itself on the cover, on every slide header and in the file name — `active` is the
+    // same word as buildFileName's «(مخصص)» suffix so all three read alike. Never
+    // persisted: the scope lives on the run, not in settings.
+    scope: {
+      title: 'نطاق التقرير',
+      allLabs: 'كل المختبرات',
+      labs: 'المختبرات',
+      shipments: 'الشحنات',
+      shipmentsHint: 'اختياري — رقم شحنة أو أكثر، تفصل بينها فاصلة أو مسافة أو سطر جديد.',
+      shipmentsPlaceholder: 'مثال: ELAB626016، ELAB626017',
+      shipmentsApply: 'تطبيق الشحنات',
+      shipmentSlide: 'شريحة تفاصيل الشحنات',
+      range: 'الفترة (حسب تاريخ الطلب)',
+      from: 'من',
+      to: 'إلى',
+      rangeApply: 'تطبيق الفترة',
+      rangeInvalid: 'حدّد تاريخَي البداية والنهاية معًا، على ألّا يكون تاريخ البداية بعد النهاية.',
+      rangeFuture: 'تاريخ النهاية لا يمكن أن يكون بعد اليوم.',
+      reset: 'العودة للتقرير الكامل',
+      active: 'تقرير مخصص',
+      sideReport: 'هذا تقرير جانبي مخصص: لا يُسجَّل في سجل التقارير، ولا يؤثر على مقارنات التقرير الكامل ولا على متابعة المهام.',
+      notFoundTitle: 'شحنات غير موجودة في البيانات',
+      notFoundBody: (ids) => `لم نجد هذه الشحنات في بيانات الطلبات الحالية: ${joinIds(ids)}. هل تتابع بدونها أم تراجع الأرقام؟`,
+      proceed: 'المتابعة بدونها',
+      recheck: 'مراجعة الأرقام',
+      noneFound: 'لم يُعثر على أيٍّ من أرقام الشحنات المُدخلة في البيانات.',
+      outsideScope: (ids) => `هذه الشحنات موجودة في البيانات لكن لا طلبات لها ضمن النطاق المحدد (المختبر/الفترة)، فلن تظهر في التقرير: ${joinIds(ids)}`,
+      // Shown IN PLACE of the history panel under a scope: that panel charts the
+      // published FULL reports, and one lab's (or one week's) figures beside them would
+      // read as one series.
+      historyHidden: 'أرقام التقارير المنشورة تخص التقرير الكامل، لذلك لا تظهر في التقرير المخصص.',
+      // Toast when a scope change drops the manual KPI overrides (screen-review
+      // refreshedModel): one typed against one population means nothing for another.
+      overridesCleared: 'أُلغيت التعديلات اليدوية على الأرقام لأن نطاق التقرير تغيّر.',
+      // Toast when a scoped build throws (screen-review modelFor fallback): the screen
+      // falls back to the FULL report, and must say so rather than look unchanged.
+      failed: 'تعذّر حساب أرقام نطاق التقرير، فعُرض التقرير الكامل بدلاً منه.',
+      // Toast when the order data was reloaded under an open review screen: the scope
+      // was built for the old rows, so it is dropped and nothing is generated yet.
+      dataChanged: 'تغيّرت بيانات الطلبات فأُلغي نطاق التقرير ولم يُولَّد شيء — راجع التقرير الكامل قبل التوليد.',
+    },
     // Slide-toggle chip row (bound to reportOptions.slides.*).
-    sendoutGapsTitle: 'طلبات لم تُنسب إلى دولة',
-    sendoutGapsHint: 'هذه الطلبات غير معروضة في شريحتَي محلي/دولي — لا يوجد لها مختبر مُنفِّذ مطابق في ملف الموردين الرئيسي. أبلغ عنها ليُحدَّث الملف؛ لن تُنسب إلى دولة بالتخمين.',
     slideTogglesTitle: 'الشرائح:',
     slideToggles: {
       execFunnel: 'الملخص',
@@ -182,6 +263,11 @@ export const STR = {
     newReport: 'تقرير جديد',
     genMissing: 'وحدات التوليد غير متوفرة بعد (قيد الإنشاء).',
     failed: 'تعذّر إنشاء الملفات',
+    // Scoped run only, above the per-lab "Late & Due" section: those workbooks are the
+    // labs' operational chase lists and are NEVER scoped (screen-generate says why), so
+    // the operator must not read them as part of the side report. {date} = the chosen
+    // report date they are evaluated at.
+    lateLabsUnscoped: 'ملفات المختبرات أدناه لا يُطبَّق عليها نطاق التقرير المخصص: تشمل جميع الطلبات كما في {date}.',
   },
   router: {
     missingScreen: 'هذه الشاشة قيد الإنشاء.',
@@ -235,12 +321,56 @@ export function formatDateLongAr(dateStr) {
 }
 
 /**
+ * A scoped report's date range, as the cover and the share card print it.
+ * Only the parts that differ are repeated, so the common case stays short:
+ *   same month  → '11 – 23 سبتمبر 2026'
+ *   same year   → '28 أغسطس – 23 سبتمبر 2026'
+ *   across years→ '28 ديسمبر 2025 – 5 يناير 2026'
+ * Western digits and an en dash with spaces, like every other date in the deck. A
+ * one-day range prints as that single day ('23 سبتمبر 2026') — '23 – 23' reads as a
+ * typo. Either end unusable → '' (a range is both-or-neither, as in model/scope.js).
+ * Order is NOT checked: the review screen rejects from > to before a scope exists.
+ * @param {string} fromIso 'YYYY-MM-DD'
+ * @param {string} toIso 'YYYY-MM-DD'
+ * @returns {string}
+ */
+export function formatRangeAr(fromIso, toIso) {
+  const a = parseISO(fromIso);
+  const b = parseISO(toIso);
+  if (!a || !b) return '';
+  const tail = `${b.d} ${AR_MONTHS[b.m - 1]} ${b.y}`;
+  if (a.y === b.y && a.m === b.m) {
+    return a.d === b.d ? tail : `${a.d} – ${tail}`;
+  }
+  if (a.y === b.y) return `${a.d} ${AR_MONTHS[a.m - 1]} – ${tail}`;
+  return `${a.d} ${AR_MONTHS[a.m - 1]} ${a.y} – ${tail}`;
+}
+
+/**
  * Build an output filename per the report convention.
+ *
+ * `scope` (optional, a model/scope.js scope) exists so a SIDE REPORT can never be
+ * mistaken for the full one once it is a loose file in a chat or a mail thread:
+ *   • unscoped / absent → byte-identical to the historic name (the automation and the
+ *     full manual report never pass a scope, and existing file names must not move);
+ *   • date range        → the date part becomes 'DDMMYYYY-DDMMYYYY' (from-to), since
+ *     a single day would misstate what the deck covers;
+ *   • scoped at all     → ' (مخصص)' before the extension — also for a labs- or
+ *     shipments-only scope, whose date part alone looks exactly like the full report's.
  * @param {string} variantPrefix e.g. 'تقرير مسبار' | 'تقرير مسبار الداخلي'
  * @param {string} dateStr 'YYYY-MM-DD'
  * @param {string} ext 'pptx' | 'pdf'
- * @returns {string} e.g. 'تقرير مسبار 19072026.pptx'
+ * @param {Object} [scope] model/scope.js scope (normalizeScope output)
+ * @returns {string} e.g. 'تقرير مسبار 19072026.pptx',
+ *   'تقرير مسبار 11092026-23092026 (مخصص).pptx'
  */
-export function buildFileName(variantPrefix, dateStr, ext) {
-  return `${variantPrefix} ${compactDate(dateStr)}.${ext}`;
+export function buildFileName(variantPrefix, dateStr, ext, scope) {
+  if (!isScoped(scope)) return `${variantPrefix} ${compactDate(dateStr)}.${ext}`;
+  // Read the range off the NORMALISED scope — the same view isScoped just judged — so a
+  // half-valid pair can never put one date in the name of a report it did not scope.
+  const n = normalizeScope(scope);
+  const datePart = (n.from && n.to)
+    ? `${compactDate(n.from)}-${compactDate(n.to)}`
+    : compactDate(dateStr);
+  return `${variantPrefix} ${datePart} (مخصص).${ext}`;
 }

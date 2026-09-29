@@ -14,9 +14,26 @@
 //
 // PHI rule unchanged: order rows live in `state` only. Nothing here logs a row
 // or writes one to storage — only aggregate numbers reach store.updateSnapshot.
-import { STR, todayISO, buildFileName } from '../i18n/ar.js?v=v2026-09-28.1';
-import { VARIANTS, normTest } from '../contracts.js?v=v2026-09-28.1';
-import { getGenLibs } from '../vendor-loader.js?v=v2026-09-28.1';
+//
+// REPORT SCOPE (2026-09-29): the review screen can narrow a MANUAL report to some labs /
+// shipments / an order-date range. Such a model carries model.scope + model.scopedRows,
+// and this file honours it in exactly three places — recordRunSnapshot (writes nothing),
+// applyWindowDeltas (chips from the scoped rows) and buildFileDefs (scoped file names).
+// runAutomation never PUBLISHES a model it did not build itself: stepEngine drafts from
+// the full row set with no scope and hands its model to the later steps through a
+// run-local variable, NOT through state.reportModel — that field is the live app state
+// the review screen writes, so reading it back would publish whatever (possibly scoped)
+// model the operator left there whenever the engine step skipped or failed. So the
+// unattended run is the FULL report, or no report.
+import { STR, todayISO, buildFileName } from '../i18n/ar.js?v=v2026-09-29.1';
+import { VARIANTS, normTest } from '../contracts.js?v=v2026-09-29.1';
+import { getGenLibs } from '../vendor-loader.js?v=v2026-09-29.1';
+// STATIC on purpose, unlike the injected model modules below: isScoped gates the
+// published-history write, and neither guarded fallback is safe — "absent ⇒ unscoped"
+// would let a side report overwrite the history, "absent ⇒ scoped" would silently stop
+// recording full reports. scope.js is pure (no DOM, no vendor bundle), and ar.js above
+// already depends on it for the «(مخصص)» file-name suffix, so this adds no new failure mode.
+import { isScoped } from '../model/scope.js?v=v2026-09-29.1';
 
 /* ------------------------------------------------------------------ *
  * Shared micro-helpers (same idioms the screens use)
@@ -76,12 +93,22 @@ function fmtHHMM(iso) {
 //
 // DEGRADES, never throws: no stamper, no rows, or an unusable report date → kpi.deltas is
 // left exactly as the engine produced it.
+//
+// WHICH ROWS: model.scopedRows when the model carries it (the review screen sets it on
+// every model it builds — the scoped rows, or all rows when unscoped), else the parsed
+// orders as before (runAutomation's model and screen-generate's fallback have none). The
+// chips must count the SAME rows as the big numbers beside them: a scoped deck stamped
+// from all rows would print lab X's cards with the whole programme's weekly activity.
+// An EMPTY scopedRows array is honoured, never widened to all rows — a scope that
+// matched nothing keeps the engine's deltas (the stamper's no-rows path), not everyone's.
 export function applyWindowDeltas(model, state, store, stampWindowDeltas) {
   if (typeof stampWindowDeltas !== 'function' || !model || !model.kpi) return;
   const settings = (store && store.settings) || {};
   try {
     stampWindowDeltas(model, {
-      rows: (state && state.parsed && state.parsed.orders) || null,
+      rows: Array.isArray(model.scopedRows)
+        ? model.scopedRows
+        : ((state && state.parsed && state.parsed.orders) || null),
       tatTests: settings.tatLookup || {},
       mode: settings.reportOptions && settings.reportOptions.deltaMode,
     });
@@ -151,6 +178,9 @@ function shippedVariantSet(shippedVariants) {
  * ALSO records what this report SHOWED (`recordShownTasks`, the closed-task grace
  * log) in a second, INDEPENDENT block below: the numbers write is unchanged and a
  * failure in either one cannot take the other down.
+ *
+ * A SCOPED model (model.scope, set by the review screen) writes NOTHING — neither
+ * block runs. See the guard below.
  * @param {{recordShownTasks?:Function, shippedVariants?:Iterable<string>}} args -
  *   `recordShownTasks` is the task-lifecycle writer; omitted = numbers-only
  *   behaviour, exactly as before. `shippedVariants` lists the deck variants that
@@ -159,6 +189,21 @@ function shippedVariantSet(shippedVariants) {
 export function recordRunSnapshot({
   model, store, state, date, recordSnapshot, recordShownTasks, shippedVariants,
 } = {}) {
+  // SIDE REPORT ⇒ NO WRITE, before either block. A scoped deck's numbers describe a
+  // subset (some labs / shipments / an order-date window evaluated as of its end), so:
+  //   • snapshot / snapshotHistory — they are the PUBLISHED series the history panel
+  //     lists and the next report's comparisons read. One lab's totals stored under a
+  //     report date would stand in for the programme's on that day.
+  //   • taskLog — a closed task earns exactly ONE grace showing. Recording it here would
+  //     spend that showing on a side deck its real audience never receives, and the next
+  //     full report would prune the task unseen (the same harm the per-variant rule
+  //     below prevents for a failed variant).
+  // FAIL CLOSED: a scope that cannot even be read is not provably the full report, and a
+  // missed write heals on the next full run while a polluted history does not.
+  let scoped;
+  try { scoped = isScoped(model && model.scope); } catch { scoped = true; }
+  if (scoped) return;
+
   try {
     const k = (model && model.kpi) || {};
     const numbers = {
@@ -266,7 +311,7 @@ function installFastTimers() {
 // Build the SlideSpec per VARIANT — the variant changes slide-5 content
 // (task rows), so one shared spec would leak internal tasks into NUPCO files.
 async function buildVariantSpec(model, variant) {
-  const mod = await tryImport('../slidespec/build-spec.js?v=v2026-09-28.1');
+  const mod = await tryImport('../slidespec/build-spec.js?v=v2026-09-29.1');
   const fn = pickFn(mod, ['buildSpec', 'build', 'makeSpec', 'toSpec']);
   if (!fn) return null;
   let spec = fn(model, { variant });
@@ -292,7 +337,7 @@ async function toBlob(result, kind) {
 // renderPptx(spec, {variant, PptxGenJS}) -> Promise<Blob>
 async function makePptx(spec, variant, libs) {
   if (!spec) return null;
-  const mod = await tryImport('../render/pptx-renderer.js?v=v2026-09-28.1');
+  const mod = await tryImport('../render/pptx-renderer.js?v=v2026-09-29.1');
   const fn = pickFn(mod, ['renderPptx', 'buildPptx', 'toPptx', 'makePptx', 'render']);
   if (!fn) return null;
   const r = await fn(spec, { variant, PptxGenJS: libs.PptxGenJS });
@@ -304,9 +349,9 @@ async function makePptx(spec, variant, libs) {
 // the host and before capture starts — screen-generate clones them into live thumbnails.
 async function makePdf(spec, variant, libs, host, onProgress, onSlides) {
   if (!spec) return null;
-  const rMod = await tryImport('../render/html-renderer.js?v=v2026-09-28.1');
+  const rMod = await tryImport('../render/html-renderer.js?v=v2026-09-29.1');
   const renderSlides = pickFn(rMod, ['renderSlides', 'renderSpec', 'renderHtml', 'render']);
-  const pMod = await tryImport('../render/pdf-export.js?v=v2026-09-28.1');
+  const pMod = await tryImport('../render/pdf-export.js?v=v2026-09-29.1');
   const exportPdf = pickFn(pMod, ['exportPdf', 'renderPdf', 'toPdf', 'buildPdf', 'render']);
   if (!renderSlides || !exportPdf) return null;
   host.innerHTML = '';
@@ -331,14 +376,18 @@ async function makePdf(spec, variant, libs, host, onProgress, onSlides) {
  * The four report files of a run, in produce order. Exported so screen-generate can
  * paint its file rows BEFORE generation starts and still share one definition.
  * @param {string} dateStr - report date ('yyyy-mm-dd')
+ * @param {Object} [scope] - the model's scope (model.scope). Absent/unscoped = the
+ *   historic names, byte for byte; scoped = the range and/or «(مخصص)» suffix
+ *   (i18n/ar.js buildFileName). Both callers pass model.scope, so the rows painted
+ *   before generation and the files produced can never disagree on a name.
  */
-export function buildFileDefs(dateStr) {
+export function buildFileDefs(dateStr, scope) {
   const date = dateStr || todayISO();
   return [
-    { id: 'internal-pptx', variant: 'internal', kind: 'pptx', label: STR.generate.fileInternalPptx, icon: '📊', name: buildFileName(VARIANTS.internal.filePrefix, date, 'pptx') },
-    { id: 'nupco-pptx', variant: 'nupco', kind: 'pptx', label: STR.generate.fileNupcoPptx, icon: '📊', name: buildFileName(VARIANTS.nupco.filePrefix, date, 'pptx') },
-    { id: 'internal-pdf', variant: 'internal', kind: 'pdf', label: STR.generate.fileInternalPdf, icon: '📄', name: buildFileName(VARIANTS.internal.filePrefix, date, 'pdf') },
-    { id: 'nupco-pdf', variant: 'nupco', kind: 'pdf', label: STR.generate.fileNupcoPdf, icon: '📄', name: buildFileName(VARIANTS.nupco.filePrefix, date, 'pdf') },
+    { id: 'internal-pptx', variant: 'internal', kind: 'pptx', label: STR.generate.fileInternalPptx, icon: '📊', name: buildFileName(VARIANTS.internal.filePrefix, date, 'pptx', scope) },
+    { id: 'nupco-pptx', variant: 'nupco', kind: 'pptx', label: STR.generate.fileNupcoPptx, icon: '📊', name: buildFileName(VARIANTS.nupco.filePrefix, date, 'pptx', scope) },
+    { id: 'internal-pdf', variant: 'internal', kind: 'pdf', label: STR.generate.fileInternalPdf, icon: '📄', name: buildFileName(VARIANTS.internal.filePrefix, date, 'pdf', scope) },
+    { id: 'nupco-pdf', variant: 'nupco', kind: 'pdf', label: STR.generate.fileNupcoPdf, icon: '📄', name: buildFileName(VARIANTS.nupco.filePrefix, date, 'pdf', scope) },
   ];
 }
 
@@ -375,7 +424,8 @@ export async function produceReportFiles({ model, ctx, onProgress, host, signal 
     try { onProgress(evt); } catch (e) { console.warn('[generate] onProgress failed', e); }
   };
   const date = (model && model.reportDate) || todayISO();
-  const fileDefs = buildFileDefs(date);
+  // model.scope is undefined on runAutomation's model → the historic file names.
+  const fileDefs = buildFileDefs(date, model && model.scope);
 
   let ownHost = null;
   let renderHost = host || null;
@@ -473,6 +523,7 @@ const MSG = Object.freeze({
   noEngine: 'محرك الحساب غير متوفر',
   engineFailed: 'تعذّر حساب المؤشرات',
   noModel: 'لا يوجد نموذج تقرير',
+  scopedModel: 'نموذج التقرير مخصص — التشغيل الآلي ينشئ التقرير الكامل فقط',
   noFiles: 'تعذّر إنشاء ملفات التقرير',
   noLabFiles: 'لا توجد ملفات مختبرات',
   noLateLabs: 'لا توجد فحوصات متأخرة أو مستحقة',
@@ -490,26 +541,26 @@ const PULL_REUSE_MS = 15000;
 
 /** Default heavy dependencies — every one overridable through `deps` (tests inject fakes). */
 const DEFAULT_DEPS = Object.freeze({
-  loadGrafana: () => import('../ingest/grafana.js?v=v2026-09-28.1'),
-  loadEngine: () => tryImport('../engine/engine.js?v=v2026-09-28.1'),
-  loadReportModel: () => import('../model/report-model.js?v=v2026-09-28.1'),
-  loadDeltaBaseline: () => tryImport('../model/delta-baseline.js?v=v2026-09-28.1'),
+  loadGrafana: () => import('../ingest/grafana.js?v=v2026-09-29.1'),
+  loadEngine: () => tryImport('../engine/engine.js?v=v2026-09-29.1'),
+  loadReportModel: () => import('../model/report-model.js?v=v2026-09-29.1'),
+  loadDeltaBaseline: () => tryImport('../model/delta-baseline.js?v=v2026-09-29.1'),
   // The delta-chip stamper. Guarded like the rest: a build without it degrades to the
   // engine's own clamped deltas instead of failing this module at load time.
-  loadDeltaWindow: () => tryImport('../model/delta-window.js?v=v2026-09-28.1'),
-  loadTaskLifecycle: () => tryImport('../model/task-lifecycle.js?v=v2026-09-28.1'),
-  loadLateLabs: () => import('../export/late-labs.js?v=v2026-09-28.1'),
-  loadTatSuggest: () => tryImport('../ingest/tat-suggest.js?v=v2026-09-28.1'),
-  loadTatLoinc: () => tryImport('../seeds/tat-lookup.js?v=v2026-09-28.1'),
+  loadDeltaWindow: () => tryImport('../model/delta-window.js?v=v2026-09-29.1'),
+  loadTaskLifecycle: () => tryImport('../model/task-lifecycle.js?v=v2026-09-29.1'),
+  loadLateLabs: () => import('../export/late-labs.js?v=v2026-09-29.1'),
+  loadTatSuggest: () => tryImport('../ingest/tat-suggest.js?v=v2026-09-29.1'),
+  loadTatLoinc: () => tryImport('../seeds/tat-lookup.js?v=v2026-09-29.1'),
   // Track 5's module; absent until it ships → the emails step reports 'skip'.
-  loadEmlDraft: () => tryImport('../export/eml-draft.js?v=v2026-09-28.1'),
+  loadEmlDraft: () => tryImport('../export/eml-draft.js?v=v2026-09-29.1'),
   // The encrypted send-out catalogue. Guarded: absent module or a failed decrypt
   // means the deck simply omits the two send-out slides.
-  loadSendoutMaster: () => tryImport('../ingest/sendout-master.js?v=v2026-09-28.1'),
+  loadSendoutMaster: () => tryImport('../ingest/sendout-master.js?v=v2026-09-29.1'),
   // The vendor contact book (To: per lab + the standard CC block). Guarded: a
   // build without it just means drafts fall back to the Settings map alone.
-  loadLabContacts: () => tryImport('../seeds/lab-contacts.js?v=v2026-09-28.1'),
-  loadDownload: () => tryImport('../ui/late-labs-section.js?v=v2026-09-28.1'),
+  loadLabContacts: () => tryImport('../seeds/lab-contacts.js?v=v2026-09-29.1'),
+  loadDownload: () => tryImport('../ui/late-labs-section.js?v=v2026-09-29.1'),
   produceReportFiles,
   now: () => Date.now(),
 });
@@ -628,6 +679,9 @@ async function acceptSuggestedTats(D, store, state) {
  * generate. A second concurrent call resolves immediately with
  * errors:['already-running']. `signal` is honoured between steps (and between the
  * generated files): everything after the abort reports 'skip'.
+ * generate (and the drafts' date) use ONLY the model this run's engine step built: when
+ * engine skips or fails, generate skips with MSG.noModel — whatever state.reportModel
+ * holds from the review screen is never published (see runModel below).
  */
 export async function runAutomation({
   store, state, ctx, options, onEvent, signal, deps,
@@ -649,6 +703,14 @@ export async function runAutomation({
   const files = [];
   const labFiles = [];
   const drafts = [];
+  // The model THIS run built — set by stepEngine on success and nowhere else; generate
+  // and emails read only this. theState.reportModel is still written (the screens read
+  // it after a run, as they always have) but never read back: it is shared with the
+  // review screen, so when stepEngine skips (no orders, no engine) or throws, it still
+  // holds the operator's model — possibly a SCOPED side report — and publishing that
+  // unattended would ship «(مخصص)» files as the morning report. Not cleared on failure
+  // either: a failed run must not wipe the operator's review edits.
+  let runModel = null;
 
   const N = AUTOMATION_STEPS.length;
   const emit = (step, status, message, pct) => {
@@ -764,6 +826,7 @@ export async function runAutomation({
     const dw = typeof D.loadDeltaWindow === 'function' ? await D.loadDeltaWindow() : null;
     applyWindowDeltas(model, theState, theStore, dw && dw.stampWindowDeltas);
     theState.reportModel = model;
+    runModel = model; // the ONLY hand-off to generate/emails — see runModel above
 
     const total = (out.totals && out.totals.total) != null ? out.totals.total : 0;
     return { message: `${total} طلب` };
@@ -771,9 +834,18 @@ export async function runAutomation({
 
   // The 4 report files + the snapshot/history write a successful run owes the
   // delta features. autoDownload additionally pushes them to the browser.
+  // Renders ONLY this run's own model (runModel): no engine success → nothing to publish.
   async function stepGenerate() {
-    const model = theState.reportModel;
+    const model = runModel;
     if (!model) return { status: 'skip', message: MSG.noModel };
+    // Belt and braces: stepEngine sets no scope, so this can only trip if buildReportModel
+    // one day starts carrying one. Refuse rather than publish a side report unattended —
+    // recordRunSnapshot would skip the history, but the files (and autoDownload) would
+    // still go out. FAIL CLOSED like recordRunSnapshot: an unreadable scope is not
+    // provably the full report.
+    let scoped;
+    try { scoped = isScoped(model.scope); } catch { scoped = true; }
+    if (scoped) return { status: 'error', message: MSG.scopedModel };
     const produced = await D.produceReportFiles({
       model, ctx: ctx || { state: theState, store: theStore }, onProgress: null, host: null, signal,
     });
@@ -846,7 +918,9 @@ export async function runAutomation({
     if (typeof build !== 'function') return { status: 'skip', message: MSG.noEmlModule };
     const settings = theStore.settings || {};
     const lookup = pickFn(await D.loadLabContacts(), ['lookupLabContacts']);
-    const reportDate = (theState.reportModel && theState.reportModel.reportDate)
+    // This run's model's date, else the chosen report date — never the leftover review
+    // model's, whose reportDate is a scoped range's END ('to'), not the day of this run.
+    const reportDate = (runModel && runModel.reportDate)
       || theState.reportDate || todayISO();
     let failed = 0;
     for (const lf of labFiles) {
