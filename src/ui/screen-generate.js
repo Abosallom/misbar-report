@@ -2,17 +2,17 @@
 // The file-producing core now lives in automation/pipeline.js (produceReportFiles) so
 // an unattended run makes byte-identical files; this screen drives it and paints the
 // very same progress bar, file rows and live slide thumbnails it always has.
-import { STR, todayISO, formatDateAr, formatRangeAr } from '../i18n/ar.js?v=v2026-09-29.1';
-import { el, progressBar, toast } from './components.js?v=v2026-09-29.1';
-import { resetRunData } from '../state.js?v=v2026-09-29.1';
-import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-09-29.1';
-import { autoDraft, splitTaskLists } from '../model/drafts.js?v=v2026-09-29.1';
-import { buildLateLabsSection, triggerDownload } from './late-labs-section.js?v=v2026-09-29.1';
+import { STR, todayISO, formatDateAr, formatRangeAr } from '../i18n/ar.js?v=v2026-10-05.1';
+import { el, progressBar, toast } from './components.js?v=v2026-10-05.1';
+import { resetRunData } from '../state.js?v=v2026-10-05.1';
+import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-10-05.1';
+import { autoDraft, splitTaskLists } from '../model/drafts.js?v=v2026-10-05.1';
+import { buildLateLabsSection, triggerDownload } from './late-labs-section.js?v=v2026-10-05.1';
 import {
   applyWindowDeltas, buildFileDefs, produceReportFiles, recordRunSnapshot,
   shouldAutoDownloadFiles,
-} from '../automation/pipeline.js?v=v2026-09-29.1';
-import { isScoped, hasRange, normalizeScope } from '../model/scope.js?v=v2026-09-29.1';
+} from '../automation/pipeline.js?v=v2026-10-05.1';
+import { isScoped, hasRange, normalizeScope } from '../model/scope.js?v=v2026-10-05.1';
 
 async function tryImport(path) { try { return await import(path); } catch { return null; } }
 const isMobile = () => /iP(hone|ad|od)|Android/i.test(navigator.userAgent);
@@ -236,8 +236,8 @@ export async function render(container, ctx) {
   // recordSnapshot (below) still appends this run's published numbers to snapshotHistory
   // for the history panel — for a FULL report only; a scoped one writes nothing.
   // Both modules are guarded → engine deltas if either is absent.
-  const dwMod = await tryImport('../model/delta-window.js?v=v2026-09-29.1');
-  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-09-29.1');
+  const dwMod = await tryImport('../model/delta-window.js?v=v2026-10-05.1');
+  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-10-05.1');
   const recordSnapshot = dbMod && dbMod.recordSnapshot;
   applyWindowDeltas(model, state, store, dwMod && dwMod.stampWindowDeltas);
 
@@ -345,7 +345,7 @@ export async function render(container, ctx) {
     // model — guarded import, so an older/partial build just keeps the numbers path.
     // A SCOPED model is a side report: recordRunSnapshot returns before either write
     // (see its guard), so it is still called unconditionally here — one owner of the rule.
-    const tlMod = await tryImport('../model/task-lifecycle.js?v=v2026-09-29.1');
+    const tlMod = await tryImport('../model/task-lifecycle.js?v=v2026-10-05.1');
     recordRunSnapshot({
       model, store, state, date, recordSnapshot,
       recordShownTasks: tlMod && tlMod.recordShownTasks,

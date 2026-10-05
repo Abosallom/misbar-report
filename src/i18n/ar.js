@@ -5,7 +5,7 @@
 // build-spec reads from the very same predicate. A local re-derivation here is exactly
 // how a filename would one day say «مخصص» while the cover says nothing (or the reverse).
 // scope.js is pure (no DOM, no vendor, no ar.js back-edge), so this adds no cycle.
-import { isScoped, normalizeScope } from '../model/scope.js?v=v2026-09-29.1';
+import { isScoped, normalizeScope } from '../model/scope.js?v=v2026-10-05.1';
 
 /** Join ids for a sentence: Arabic comma, tolerant of a bare string or a missing list. */
 const joinIds = (ids) => [].concat(ids == null ? [] : ids).map(String).join('، ');

@@ -13,7 +13,7 @@ import { dirname, join } from 'node:path';
 
 import {
   buildLabEmailDraft, labEmailSubject, labEmailText, labDraftFileName,
-  formatMailDate, LAB_EMAIL_BODY, SHEET_MIME, EML_MIME,
+  formatMailDate, LAB_EMAIL_BODY, EMAIL_SEPARATOR, SHEET_MIME, EML_MIME,
 } from '../src/export/eml-draft.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -94,6 +94,23 @@ test('Subject is the verbatim team wording', () => {
   assert.ok(!labEmailText().includes(labEmailSubject(LAB)));
   assert.ok(LAB_EMAIL_BODY.startsWith('Dear all,'));
   assert.ok(LAB_EMAIL_BODY.includes('Please find the attachment for more info about the orders.'));
+});
+
+test('the body closes with the sign-off, a separator rule, then "do not reply" — in that order', () => {
+  // User request 2026-10-05, copied from the team's own sent email: everything above
+  // the sign-off is unchanged, and the last three paragraphs are exactly these.
+  const paras = LAB_EMAIL_BODY.split('\n\n');
+  assert.deepEqual(paras.slice(-3), [
+    'Thank you for your cooperation.',
+    EMAIL_SEPARATOR,
+    'Please do not reply to this email.',
+  ]);
+  // A rule, not a stray character: only underscores, long enough to read as a line,
+  // short enough (< 78, RFC 5322) never to wrap in a plain-text client.
+  assert.match(EMAIL_SEPARATOR, /^_+$/);
+  assert.ok(EMAIL_SEPARATOR.length >= 40 && EMAIL_SEPARATOR.length < 78);
+  // The clipboard button and the .eml draft share ONE body — both carry the footer.
+  assert.ok(labEmailText().endsWith('Please do not reply to this email.'));
 });
 
 test('the plain-text part carries the standard wording verbatim', () => {

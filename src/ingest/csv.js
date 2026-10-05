@@ -4,7 +4,7 @@
 // with ONE deliberate exception, DOB, carried memory-only for the per-lab late-tests
 // Excel (see `dob` below and contracts.js OrderRow). Name, national id, MRN, gender
 // and the staff "… By" columns are still never copied.
-import { normFacility } from '../contracts.js?v=v2026-09-29.1';
+import { normFacility } from '../contracts.js?v=v2026-10-05.1';
 
 // Columns we actually map. Missing ones are reported in errors[] (fail soft).
 export const MAPPED_COLUMNS = [

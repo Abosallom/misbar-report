@@ -36,7 +36,13 @@ const BOUNDARY = '----=_Misbar_LabDraft_Boundary_7c1f';
 /**
  * The team's standard notification wording — the SINGLE source of truth shared by
  * the .eml body and the "نسخ نص البريد" clipboard button. Verbatim: do not reword.
+ * The closing separator + "do not reply" line were added at the user's request
+ * (2026-10-05), copied from the team's own sent email; every earlier line is
+ * unchanged. The separator is a plain run of underscores — the body is plain text,
+ * so it must read as a rule in any client — kept under 78 characters (RFC 5322's
+ * recommended line length) so it never wraps onto a second line.
  */
+export const EMAIL_SEPARATOR = '_'.repeat(70);
 export const LAB_EMAIL_BODY = [
   'Dear all,',
   'This is a reminder regarding laboratory orders that require your attention.',
@@ -44,6 +50,8 @@ export const LAB_EMAIL_BODY = [
   'Please confirm once the listed orders have been addressed. If you have any questions or are facing issues preventing fulfillment, let us know so we can support you.',
   'Please find the attachment for more info about the orders.',
   'Thank you for your cooperation.',
+  EMAIL_SEPARATOR,
+  'Please do not reply to this email.',
 ].join('\n\n');
 
 /** Subject line for a lab — verbatim wording. */
