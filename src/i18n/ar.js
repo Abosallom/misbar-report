@@ -5,7 +5,7 @@
 // build-spec reads from the very same predicate. A local re-derivation here is exactly
 // how a filename would one day say «مخصص» while the cover says nothing (or the reverse).
 // scope.js is pure (no DOM, no vendor, no ar.js back-edge), so this adds no cycle.
-import { isScoped, normalizeScope } from '../model/scope.js?v=v2026-10-05.1';
+import { isScoped, normalizeScope } from '../model/scope.js?v=v2026-10-05.2';
 
 /** Join ids for a sentence: Arabic comma, tolerant of a bare string or a missing list. */
 const joinIds = (ids) => [].concat(ids == null ? [] : ids).map(String).join('، ');
@@ -81,6 +81,42 @@ export const STR = {
     mockLoaded: 'تم تحميل بيانات تجريبية',
     ingestMissing: 'وحدة التحليل غير متوفرة بعد (قيد الإنشاء) — سيتم استخدام بيانات تجريبية.',
     engineMissing: 'محرك الحساب غير متوفر بعد (قيد الإنشاء).',
+    // The OPTIONAL filtered-CSV download (ui/csv-export-section.js, rules in
+    // model/csv-filter.js). It hands the user back THEIR OWN uploaded rows — every
+    // column, patient name / national id / MRN included — so `privacy` sits beside the
+    // button and must keep saying so. `stage` labels are the csv-filter.js stage keys:
+    // each order line is in exactly ONE (hint says why: the LAST milestone date it
+    // reached; cancelled / rejected by status). The five ladder stages are sequential,
+    // which contiguityHint explains — it is ALSO the title of a ladder chip the section
+    // disables, the reason a chip cannot be ticked. noRaw replaces the whole selection
+    // when the orders did not come from a CSV upload (live pull / snapshot: no patient
+    // columns, nothing to hand back). `failed` and `stale` are section-only toasts:
+    // stale = the order data changed under an open card, so it rebuilt and the operator
+    // must re-check the (reset) choice before the file can be downloaded.
+    csvExport: {
+      title: 'تنزيل ملف الطلبات مُصفّى (CSV)',
+      hint: 'اختياري — نزّل سطور ملفك الأصلي لمختبرات ومراحل تختارها. كل طلب في مرحلة واحدة: آخر تاريخ وصل إليه.',
+      labs: 'المختبرات',
+      allLabs: 'كل المختبرات',
+      stages: 'مرحلة الطلب',
+      allStages: 'كل المراحل',
+      stage: {
+        notCollected: 'لم تُسحب العينة بعد',
+        notShipped: 'لم تُشحن بعد',
+        notReceived: 'لم تُستلم بعد',
+        notResulted: 'لم تصدر النتيجة بعد',
+        resulted: 'صدرت النتيجة',
+        rejected: 'مرفوضة',
+        cancelled: 'ملغاة',
+      },
+      contiguityHint: 'المراحل متتالية: اختر مراحل متجاورة فقط، فلا تُترك مرحلة بين مرحلتين مختارتين. «مرفوضة» و«ملغاة» مستقلتان.',
+      count: (n) => `عدد السطور المطابقة: ${n}`,
+      download: '⬇ تنزيل الملف المُصفّى',
+      noRaw: 'هذه الأداة تعمل مع ملف CSV مرفوع فقط — السحب المباشر من Grafana ولقطة البيانات لا يحملان أعمدة بيانات المرضى.',
+      privacy: 'الملف يحتوي على بيانات المرضى (الاسم والهوية والرقم الطبي) — تعامل معه بسرية ولا تشاركه إلا مع المعنيين.',
+      failed: 'تعذّر إنشاء الملف المُصفّى.',
+      stale: 'تغيّرت بيانات الطلبات فأُعيد ضبط الاختيار — راجعه ثم نزّل الملف.',
+    },
   },
   review: {
     title: 'مراجعة وتحرير التقرير',

@@ -1,10 +1,23 @@
-// ingest/csv.js — parse the KAMC daily CSV export (30 cols) into normalized OrderRow[].
+// ingest/csv.js — parse the KAMC daily CSV export (30 cols) into normalized OrderRow[]
+// PLUS the file's own parsed rows, untouched (`raw`).
 // Library is injected (browser loads PapaParse separately); never imported here.
-// PII (patient/staff fields) is read but NEVER copied into OrderRow or persisted —
-// with ONE deliberate exception, DOB, carried memory-only for the per-lab late-tests
-// Excel (see `dob` below and contracts.js OrderRow). Name, national id, MRN, gender
-// and the staff "… By" columns are still never copied.
-import { normFacility } from '../contracts.js?v=v2026-10-05.1';
+// PATIENT DATA has exactly two carriers here, both MEMORY-ONLY and both confined to
+// this manual-upload path:
+//  • OrderRow — carries NO patient/staff field except `dob`, kept for the per-lab
+//    late-tests Excel (see `dob` below and contracts.js OrderRow). Name, national id,
+//    MRN, gender and the staff "… By" columns are never copied onto it, so the engine,
+//    reports, late-labs files, .eml drafts and automation — which all consume OrderRow
+//    and nothing else — structurally cannot leak them.
+//  • `raw` — KEEPS every column of the uploaded file, patient name / national id / MRN
+//    included (user request 2026-10-05: the optional filtered-CSV download on the upload
+//    screen hands the user back THEIR OWN rows, cut down to the labs / stages they tick,
+//    with every original column — see model/csv-filter.js). It lives only in
+//    state.parsed.raw while the page is open: never persisted (localStorage / settings),
+//    never logged, never put into a report, draft or automation run; it leaves the
+//    browser solely as the file the user explicitly downloads. ingest/grafana.js has NO
+//    `raw` and must never gain one — its rows are encrypted into the snapshot committed
+//    to a public repo, and the live pull carries no patient columns anyway.
+import { normFacility } from '../contracts.js?v=v2026-10-05.2';
 
 // Columns we actually map. Missing ones are reported in errors[] (fail soft).
 export const MAPPED_COLUMNS = [
@@ -37,7 +50,13 @@ const intOrNull = (v) => {
 /**
  * @param {string} text - raw CSV text (UTF-8)
  * @param {*} Papa - the PapaParse library object
- * @returns {{rows: import('../contracts.js').OrderRow[], summary: Object, errors: string[]}}
+ * @returns {{rows: import('../contracts.js').OrderRow[], summary: Object, errors: string[],
+ *   raw: {fields: string[], records: Object[]}}}
+ *   raw.fields  = the header row in the FILE'S column order (Papa meta.fields);
+ *   raw.records = Papa's data rows, every column, string values exactly as parsed —
+ *   INCLUDING rows skipped from `rows` (no order id), so the two stay index-aligned:
+ *   raw.records[row.lineNo] is always that OrderRow's original record. PATIENT DATA —
+ *   see the header: memory-only, for the user's own filtered download.
  */
 export function parseKamcCsv(text, Papa) {
   const errors = [];
@@ -67,7 +86,11 @@ export function parseKamcCsv(text, Papa) {
       orderDate: dateOnly(r['Order date time']),
       facility: normFacility(r['Performing facility name']),
       orderId, // string — leading zeros preserved
-      lineNo: i, // CSV has no line-number column; use the data-row index
+      // CSV has no line-number column; use the data-row index. LOAD-BEARING beyond
+      // ordering: it is the key back into raw.records (the filtered-CSV download reads
+      // raw.records[row.lineNo]), so it must stay the index into res.data — never a
+      // position in `rows`, which skips id-less records and would drift.
+      lineNo: i,
       loinc: clean(r['Test code']),
       testName: clean(r['Test name']) ?? '',
       collected: clean(r['Specimen collected date time']),
@@ -114,6 +137,9 @@ export function parseKamcCsv(text, Papa) {
 
   return {
     rows,
+    // The SAME objects Papa produced — no copy (a daily export is a few thousand rows;
+    // duplicating every column of it would only double the patient data held in memory).
+    raw: { fields, records: data },
     summary: {
       rowCount: rows.length,
       distinctOrders: distinct.size,

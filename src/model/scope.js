@@ -78,9 +78,9 @@
 // shared with every other surface, and they are patient-adjacent, so nothing here
 // writes them anywhere either.
 
-import { normFacility } from '../contracts.js?v=v2026-10-05.1';
-import { fillBlankFacilities } from '../engine/infer-facility.js?v=v2026-10-05.1';
-import { parseDateTime, toEpochDay } from '../engine/workday.js?v=v2026-10-05.1';
+import { normFacility } from '../contracts.js?v=v2026-10-05.2';
+import { fillBlankFacilities } from '../engine/infer-facility.js?v=v2026-10-05.2';
+import { parseDateTime, toEpochDay } from '../engine/workday.js?v=v2026-10-05.2';
 
 // engine.js keys its cascade off these exact rawStatus literals (not exported), and
 // asof.js mirrors them the same way; the three files must compare the same strings.

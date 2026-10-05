@@ -1,10 +1,10 @@
 // ui/screen-review.js — review/edit report content with a live slide preview (Track E).
-import { STR, todayISO, formatDateAr, formatRangeAr } from '../i18n/ar.js?v=v2026-10-05.1';
-import { el, editableTable, textareaField, toast } from './components.js?v=v2026-10-05.1';
-import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-10-05.1';
-import { autoDraft, splitTaskLists } from '../model/drafts.js?v=v2026-10-05.1';
-import { analyseSendout, hasMaster, AR_COUNTRY } from '../model/sendout.js?v=v2026-10-05.1';
-import { buildHistoryPanel } from './history-table.js?v=v2026-10-05.1';
+import { STR, todayISO, formatDateAr, formatRangeAr } from '../i18n/ar.js?v=v2026-10-05.2';
+import { el, editableTable, textareaField, toast } from './components.js?v=v2026-10-05.2';
+import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-10-05.2';
+import { autoDraft, splitTaskLists } from '../model/drafts.js?v=v2026-10-05.2';
+import { analyseSendout, hasMaster, AR_COUNTRY } from '../model/sendout.js?v=v2026-10-05.2';
+import { buildHistoryPanel } from './history-table.js?v=v2026-10-05.2';
 // REPORT SCOPE (2026-09-29). STATIC, not guarded like delta-window below: scope decides
 // WHICH ROWS every number is computed from, and there is no safe degraded answer — a
 // build that silently ignored a chosen scope would publish the full programme's numbers
@@ -13,17 +13,17 @@ import { buildHistoryPanel } from './history-table.js?v=v2026-10-05.1';
 import {
   EMPTY_SCOPE, normalizeScope, isScoped, hasRange, parseShipmentIds, labOptions,
   findShipments, applyScope, shipmentDetails,
-} from '../model/scope.js?v=v2026-10-05.1';
+} from '../model/scope.js?v=v2026-10-05.2';
 import {
   normalizeDeltaMode, isWeekDeltaMode, DEFAULT_DELTA_MODE,
-} from '../model/delta-baseline.js?v=v2026-10-05.1';
+} from '../model/delta-baseline.js?v=v2026-10-05.2';
 // Same module instance drafts.js already imports (identical specifier) — the grace
 // re-check below MUST use task-lifecycle's own identity/status vocabulary, never a
 // second local copy of it. Static, not guarded: drafts.js (imported above) already
 // depends on this module, so there is no new failure mode.
 import {
   CLOSED as CLOSED_STATUS, LIST_EXTERNAL, LIST_INTERNAL, taskKey,
-} from '../model/task-lifecycle.js?v=v2026-10-05.1';
+} from '../model/task-lifecycle.js?v=v2026-10-05.2';
 
 /* small local module helpers (kept local to avoid cross-screen coupling) */
 async function tryImport(path) { try { return await import(path); } catch { return null; } }
@@ -818,7 +818,7 @@ export async function render(container, ctx) {
   // any failure, which simply omits the two slides.
   if (state.sendoutMaster === undefined) {
     const dataKey = ((store.settings || {}).grafana || {}).dataKey || '';
-    const mod = await tryImport('../ingest/sendout-master.js?v=v2026-10-05.1');
+    const mod = await tryImport('../ingest/sendout-master.js?v=v2026-10-05.2');
     state.sendoutMaster = (mod && mod.loadSendoutMaster)
       ? await mod.loadSendoutMaster(dataKey)
       : null;
@@ -834,7 +834,7 @@ export async function render(container, ctx) {
   // so the app always takes the guarded import.
   const compute = typeof ctx.compute === 'function'
     ? ctx.compute
-    : pickFn(await tryImport('../engine/engine.js?v=v2026-10-05.1'), ['compute', 'runEngine', 'run']);
+    : pickFn(await tryImport('../engine/engine.js?v=v2026-10-05.2'), ['compute', 'runEngine', 'run']);
   const model = modelFor(state, store, compute);
   { // settings may have been edited since the model was drafted — re-source them
     const s = store.settings || {};
@@ -861,7 +861,7 @@ export async function render(container, ctx) {
   // Guarded import, exactly as the retired picker was: a build without the module
   // degrades to the engine's own deltas instead of throwing. Re-run below on a
   // report-date change and on a mode switch; being PURE, every re-run agrees.
-  const dwMod = await tryImport('../model/delta-window.js?v=v2026-10-05.1');
+  const dwMod = await tryImport('../model/delta-window.js?v=v2026-10-05.2');
   const stampWindow = dwMod && dwMod.stampWindowDeltas;
   // The chips need the parsed CSV rows: with no upload in this session (mock preview)
   // stampWindowDeltas leaves the engine's deltas alone and stamps no window, and the
@@ -954,9 +954,9 @@ export async function render(container, ctx) {
     // A range's END when one is active (the deck is dated 'to'), else the chosen date.
     model.reportDate = effectiveReportDate(state, model.scope);
     stampDeltas(); // re-window the chips for the current report date (pure → idempotent)
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-10-05.1');
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-10-05.2');
     const buildSpec = pickFn(specMod, ['buildSpec', 'build', 'makeSpec', 'toSpec']);
-    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-10-05.1');
+    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-10-05.2');
     const renderFn = pickFn(rendMod, ['renderSpec', 'renderSlides', 'renderHtml', 'render']);
 
     if (!buildSpec || !renderFn) {
@@ -1417,7 +1417,7 @@ export async function render(container, ctx) {
     el('summary', { class: 'card__title', style: 'cursor:pointer', text: STR.review.labelsCardTitle }),
   ]);
   (async () => {
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-10-05.1');
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-10-05.2');
     const LABEL_NAMES = specMod && specMod.LABEL_NAMES;
     const DEFAULT_LABELS = (specMod && specMod.DEFAULT_LABELS) || {};
     if (!LABEL_NAMES || typeof LABEL_NAMES !== 'object') {

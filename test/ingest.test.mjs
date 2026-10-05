@@ -99,6 +99,82 @@ test('parseKamcCsv — OrderRow mapping is faithful (no PII, IDs as strings)', {
   assert.match(String(r0.dob), /^\d{4}-\d{2}-\d{2}/, 'dob is read from the CSV DOB column');
 });
 
+// ---- raw: the uploaded file's own rows, kept for the filtered-CSV download ----------
+// SYNTHETIC input, so these always run (the real-sample suites above skip on a fresh
+// clone). Every patient value is obviously fake. The header deliberately interleaves the
+// patient columns between mapped ones and is NOT in MAPPED_COLUMNS order, so «raw.fields
+// is the file's order» cannot pass by accident. The data covers what could break the
+// raw.records[row.lineNo] link: an id-less record (skipped from rows, kept in raw — every
+// later lineNo must still index raw), a blank line (skipEmptyLines drops it from BOTH),
+// an order id padded with spaces (OrderRow trims, raw keeps the value as parsed), a
+// quoted field with a comma, and a leading-zero national id (no dynamic typing).
+const SYN_HEADER = [
+  'Patient Name', 'Order ID', 'National ID', 'Order date time', 'MRN', 'DOB', 'Gender',
+  'Performing facility name', 'Order Status', 'Specimen collected date time',
+  'Dispatch date time', 'Received date time', 'Result report date time', 'Test code',
+  'Test name', 'TAT - Days', 'Specimen Id', 'Shipment ID', 'Collected By',
+];
+const SYN_CSV = [
+  SYN_HEADER.join(','),
+  'مريض تجريبي ١,00990000001,0000000001,2026-09-01 08:00:00,MRN-TEST-0001,1990-01-01 00:00:00,M,Test Lab A,Result Approved,2026-09-01 09:00:00,2026-09-02 10:00:00,2026-09-03 11:00:00,2026-09-05 12:00:00,0000-0,"Test Panel, Serum",4,SP-TEST-1,SHP-TEST-1,Test Staff A',
+  'Test Patient B,,0000000002,2026-09-02 08:00:00,MRN-TEST-0002,1991-02-02 00:00:00,F,Test Lab B,Order Cancelled,,,,,0000-1,Test Assay,,,,Test Staff B',
+  '',
+  'مريض تجريبي ٣,  00990000003  ,0000000003,2026-09-03 08:00:00,MRN-TEST-0003,1992-03-03 00:00:00,F,Test Lab B,Dispatched,2026-09-03 09:00:00,2026-09-04 10:00:00,,,0000-2,Test Assay,,SP-TEST-3,SHP-TEST-3,Test Staff C',
+  'Test Patient D,00990000004,0000000004,2026-09-04 08:00:00,MRN-TEST-0004,1993-04-04 00:00:00,M,Test Lab A,Order Created,,,,,0000-3,"Test Panel, Serum",,,,',
+].join('\n');
+
+test('parseKamcCsv — raw keeps the file\'s own rows, index-aligned with OrderRow.lineNo', () => {
+  const { rows, raw, errors } = parseKamcCsv(SYN_CSV, Papa);
+  assert.deepEqual(errors, [], 'the synthetic file carries every mapped column');
+  assert.ok(raw && Array.isArray(raw.fields) && Array.isArray(raw.records), 'raw has the pinned shape');
+  // Field order = the file's header order, every column (patient ones included).
+  assert.deepEqual(raw.fields, SYN_HEADER);
+  // records = Papa's data rows 1:1 — same options, so the same count. The id-less record
+  // is IN raw (skipEmptyLines drops only the blank line), which is what keeps lineNo valid.
+  const papaData = Papa.parse(SYN_CSV, { header: true, skipEmptyLines: 'greedy' }).data;
+  assert.equal(raw.records.length, papaData.length);
+  assert.equal(raw.records.length, 4, 'sanity: 4 data records, blank line dropped');
+  assert.equal(rows.length, 3, 'sanity: the id-less record is skipped from rows');
+  // THE link the filtered download relies on: raw.records[row.lineNo] is that row's own
+  // record, for every row — including the ones AFTER the skipped id-less record.
+  for (const row of rows) {
+    const rec = raw.records[row.lineNo];
+    assert.ok(rec, `raw.records[${row.lineNo}] exists`);
+    assert.equal(String(rec['Order ID']).trim(), row.orderId, `lineNo ${row.lineNo} points at its own record`);
+  }
+  assert.deepEqual(rows.map((r) => r.lineNo), [0, 2, 3], 'lineNo indexes raw.records, not rows');
+  // Values exactly as parsed: untrimmed, leading zeros kept, quoted comma intact, and
+  // every column present on every record.
+  assert.equal(raw.records[2]['Order ID'], '  00990000003  ');
+  assert.equal(raw.records[0]['National ID'], '0000000001');
+  assert.equal(raw.records[0]['Patient Name'], 'مريض تجريبي ١');
+  assert.equal(raw.records[0]['Test name'], 'Test Panel, Serum');
+  assert.equal(raw.records[1]['Order ID'], '');
+  for (const rec of raw.records) assert.deepEqual(Object.keys(rec), SYN_HEADER);
+  // An empty file still yields the pinned shape (callers never null-check inside raw).
+  assert.deepEqual(parseKamcCsv('', Papa).raw, { fields: [], records: [] });
+});
+
+test('parseKamcCsv — keeping raw does not widen OrderRow: no patient key, no patient value', () => {
+  const { rows } = parseKamcCsv(SYN_CSV, Papa);
+  // The SAME key guard as the real-sample case above, applied to every synthetic row so
+  // it runs on a fresh clone too. Exactly one deliberate exception: `dob`.
+  const DELIBERATE_PATIENT_KEYS = new Set(['dob']);
+  for (const r of rows) {
+    for (const k of Object.keys(r)) {
+      if (DELIBERATE_PATIENT_KEYS.has(k)) continue;
+      assert.ok(!/patient|national|mrn|dob|gender|by$/i.test(k), `unexpected PII-ish key: ${k}`);
+    }
+  }
+  // …and by VALUE: no name, national id, MRN, gender or staff value reached an OrderRow
+  // under any key (raw holds them; OrderRow must not).
+  const flat = JSON.stringify(rows);
+  for (const v of ['مريض تجريبي', 'Test Patient', '0000000001', '0000000003', 'MRN-TEST', 'Test Staff']) {
+    assert.ok(!flat.includes(v), `patient/staff value leaked onto an OrderRow: ${v}`);
+  }
+  assert.equal(rows[0].dob, '1990-01-01 00:00:00', 'the one deliberate exception still carries DOB');
+});
+
 test('parseTracker — task / challenge / risk counts', { skip: SKIP.trk }, () => {
   const trk = parseTracker(trkBuf, XLSX);
   assert.equal(trk.tasks.length, 51, 'tasks');

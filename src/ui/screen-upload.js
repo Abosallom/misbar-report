@@ -1,15 +1,19 @@
 // ui/screen-upload.js — file upload + parse + engine kickoff (Track E).
-import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-10-05.1';
-import { el, dropZone, fileSummaryCard, toast } from './components.js?v=v2026-10-05.1';
-import { normTest } from '../contracts.js?v=v2026-10-05.1';
-import { getPapa, getXLSX } from '../vendor-loader.js?v=v2026-10-05.1';
-import { TAT_LOINC } from '../seeds/tat-lookup.js?v=v2026-10-05.1';
-import { buildLateLabsSection } from './late-labs-section.js?v=v2026-10-05.1';
-import { buildAutomationPanel } from './automation-panel.js?v=v2026-10-05.1';
+import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-10-05.2';
+import { el, dropZone, fileSummaryCard, toast } from './components.js?v=v2026-10-05.2';
+import { normTest } from '../contracts.js?v=v2026-10-05.2';
+import { getPapa, getXLSX } from '../vendor-loader.js?v=v2026-10-05.2';
+import { TAT_LOINC } from '../seeds/tat-lookup.js?v=v2026-10-05.2';
+import { buildLateLabsSection } from './late-labs-section.js?v=v2026-10-05.2';
+import { buildAutomationPanel } from './automation-panel.js?v=v2026-10-05.2';
+// Optional filtered-CSV download (labs × order stages → the uploaded file's own rows).
+// It reads state.parsed.raw — PATIENT DATA, memory-only; see state.js for the pairing
+// rule this screen upholds at every site that writes state.parsed.orders.
+import { buildCsvExportSection } from './csv-export-section.js?v=v2026-10-05.2';
 
 /** The SAME specifier main.js and ui/automation-panel.js import — resolving to
  *  the identical URL means the probe below hits the already-cached module. */
-const AUTOMATION_PIPELINE_URL = '../automation/pipeline.js?v=v2026-10-05.1';
+const AUTOMATION_PIPELINE_URL = '../automation/pipeline.js?v=v2026-10-05.2';
 
 /** Format an ISO timestamp as local 'HH:MM' for snapshot-freshness labels. */
 function fmtHHMM(iso) {
@@ -201,7 +205,12 @@ function normalizeOrders(res) {
     : res.orders || res.rows || res.data || null;
   if (!Array.isArray(orders)) return null;
   const errors = res.errors || res.warnings || [];
-  return { orders, errors: errors.map(String) };
+  // parseKamcCsv's untouched parsed rows (every column, patient ones included) for the
+  // filtered-CSV download. Passed through by SHAPE only — a bare-array result or a
+  // parser whose `raw` is something else yields null, i.e. «no export», never a guess.
+  const r = Array.isArray(res) ? null : res.raw;
+  const raw = (r && Array.isArray(r.fields) && Array.isArray(r.records)) ? r : null;
+  return { orders, errors: errors.map(String), raw };
 }
 
 function normalizeTracker(res) {
@@ -221,7 +230,7 @@ function normalizeTracker(res) {
 
 async function ingestCsv(file) {
   const Papa = await getPapa();
-  const mod = await tryImport('../ingest/csv.js?v=v2026-10-05.1');
+  const mod = await tryImport('../ingest/csv.js?v=v2026-10-05.2');
   const fn = pickFn(mod, ['parseKamcCsv', 'parseCsv', 'ingestCsv', 'parseOrders', 'parse']);
   if (fn) {
     const text = await file.text();
@@ -234,7 +243,7 @@ async function ingestCsv(file) {
 
 async function ingestTracker(file) {
   const XLSX = await getXLSX();
-  const mod = await tryImport('../ingest/xlsx.js?v=v2026-10-05.1');
+  const mod = await tryImport('../ingest/xlsx.js?v=v2026-10-05.2');
   const fn = pickFn(mod, ['parseTracker', 'ingestXlsx', 'parseXlsx', 'parse']);
   if (fn) {
     const buf = await file.arrayBuffer();
@@ -302,6 +311,10 @@ export async function render(container, ctx) {
   let heroSeq = 0; // guards overlapping async hero runs — only the latest paints
   let unmatchedSeq = 0; // guards overlapping async suggestion runs on the unmatched panel
   let lateLabsSeq = 0; // guards overlapping async late-labs Excel-card runs
+  // { orders, raw, name } the mounted filtered-CSV card was built from (paintCsvExport).
+  // Declared up here with the other per-render paint guards, not beside its helper: a
+  // `let` lower in render() is in its TDZ for any paint() that runs before that line.
+  let csvExportBuiltFor = null;
   const errorsByKind = { csv: [], tracker: [] };
 
   const head = el('div', { class: 'screen__head' }, [
@@ -413,6 +426,7 @@ export async function render(container, ctx) {
 
   const summaryHost = el('div');
   const lateLabsHost = el('div'); // per-lab 'Late & Due' Excel card (filled by paintLateLabs once data lands)
+  const csvExportHost = el('div'); // optional filtered-CSV download card (filled by paintCsvExport once data lands)
   const unmatchedHost = el('div');
   const actionsHost = el('div', { class: 'sticky-actions' });
 
@@ -423,7 +437,7 @@ export async function render(container, ctx) {
   ]) : null;
 
   container.appendChild(el('div', { class: 'screen' }, [
-    head, heroHost, grafanaBar, dropgrid, devBar, automationPanel, summaryHost, lateLabsHost, unmatchedHost, actionsHost,
+    head, heroHost, grafanaBar, dropgrid, devBar, automationPanel, summaryHost, lateLabsHost, csvExportHost, unmatchedHost, actionsHost,
   ]));
 
   // Reuse the last-parsed Project Tracker when no fresh file was dropped —
@@ -451,7 +465,7 @@ export async function render(container, ctx) {
     const gcfg = (store.settings && store.settings.grafana) || {};
     const dataKey = (gcfg.dataKey || '').trim();
     try {
-      const mod = await import('../ingest/grafana.js?v=v2026-10-05.1');
+      const mod = await import('../ingest/grafana.js?v=v2026-10-05.2');
       const asOf = state.reportDate || todayISO();
       const directConfigured = !!(gcfg.baseUrl && gcfg.accessToken);
       try {
@@ -461,6 +475,9 @@ export async function render(container, ctx) {
           fromMs: mod.yearStartMs(asOf), toMs: Date.now(),
         });
         state.parsed.orders = res.rows;
+        // Live rows carry no patient columns, and an earlier upload's raw must never
+        // pair with them (state.js) — the accessor already drops it; stated for intent.
+        state.parsed.raw = null;
         state.heroDataAt = new Date().toISOString(); // freshness for 'لمحة اليوم'
         errorsByKind.csv = res.errors || [];
         state.files.csv = { name: `${STR.upload.grafanaSourceName} ${new Date().toLocaleString('en-GB')}` };
@@ -472,6 +489,7 @@ export async function render(container, ctx) {
         if (direct instanceof TypeError && dataKey) {
           const snap = await mod.fetchKamcSnapshot(dataKey);
           state.parsed.orders = snap.rows;
+          state.parsed.raw = null; // the encrypted snapshot has no patient columns either
           state.heroDataAt = snap.fetchedAt; // snapshot's real age, not load time
           errorsByKind.csv = snap.errors || [];
           const t = fmtHHMM(snap.fetchedAt);
@@ -500,7 +518,10 @@ export async function render(container, ctx) {
     }
   }
 
-  async function handleFile(kind, file) {
+  /** `dev: true` = the ?dev=1 «load samples» fixture, not the user's own upload: its
+   *  orders load normally but raw stays null — the filtered-CSV download (patient
+   *  columns) exists only for a file the user dropped themselves (state.js). */
+  async function handleFile(kind, file, { dev = false } = {}) {
     state.files[kind] = file;
     (kind === 'csv' ? csvZone : trackerZone).setBusy(true);
     errorsByKind[kind] = [];
@@ -510,9 +531,17 @@ export async function render(container, ctx) {
         if (res._missing || !res.orders) {
           usedMock = true;
           state.parsed.orders = buildMockOrders();
+          state.parsed.raw = null; // mock rows have no original file behind them
           toast(STR.upload.ingestMissing, 'warn');
         } else {
+          // ORDER MATTERS: orders first, then raw — assigning orders drops any raw
+          // (state.js accessor), so the reverse would silently lose this upload's.
+          // The ONLY place in the app raw is set to a value.
           state.parsed.orders = res.orders;
+          // The file NAME travels inside raw, captured from THIS upload. state.files.csv
+          // is reassigned before a new parse resolves, so a download that read it at
+          // click time could carry the NEW file's name over the OLD file's rows.
+          state.parsed.raw = dev || !res.raw ? null : { ...res.raw, fileName: file.name };
           errorsByKind.csv = res.errors || [];
         }
         state.heroDataAt = new Date().toISOString(); // orders (re)landed — refresh hero freshness
@@ -535,6 +564,10 @@ export async function render(container, ctx) {
     } catch (e) {
       console.error('[upload] parse failed', kind, e);
       errorsByKind[kind] = [(e && e.message) || String(e)];
+      // The orders still on screen came from an EARLIER file, but state.files.csv now
+      // names the one that just failed — a download would carry that name over another
+      // file's patient rows. Withhold the export until a file parses cleanly.
+      if (kind === 'csv') state.parsed.raw = null;
       (kind === 'csv' ? csvZone : trackerZone).setError();
     } finally {
       (kind === 'csv' ? csvZone : trackerZone).setBusy(false);
@@ -552,7 +585,7 @@ export async function render(container, ctx) {
         const blob = await csvResp.blob();
         const f = new File([blob], 'KAMC Order details (sample).csv', { type: 'text/csv' });
         csvZone.setLoaded(f.name);
-        await handleFile('csv', f);
+        await handleFile('csv', f, { dev: true });
       }
       if (xlsxResp.ok) {
         const blob = await xlsxResp.blob();
@@ -573,6 +606,7 @@ export async function render(container, ctx) {
   function loadMock() {
     usedMock = true;
     state.parsed.orders = buildMockOrders();
+    state.parsed.raw = null; // mock rows: no original file, no export
     state.parsed.tracker = buildMockTracker();
     state.heroDataAt = new Date().toISOString();
     state.files.csv = state.files.csv || { name: 'mock-orders.csv' };
@@ -694,6 +728,8 @@ export async function render(container, ctx) {
     // …and surface the ready-to-email per-lab 'Late & Due' Excel files right here,
     // so the exec never has to run a full report to reach them.
     paintLateLabs();
+    // …and the optional filtered-CSV download, right under it.
+    paintCsvExport();
   }
 
   /* ---------------------------------------------------------------- *
@@ -743,6 +779,50 @@ export async function render(container, ctx) {
   }
 
   /* ---------------------------------------------------------------- *
+   * Optional filtered-CSV download card — mounted beside the late-labs
+   * card and refreshed from the same paint(), so it appears the moment
+   * orders land and follows every new data load. Two deliberate
+   * departures from paintLateLabs:
+   *  • NOT rebuilt on every paint. paint() also runs for unrelated
+   *    reasons (a TAT saved in the unmatched panel, a bulk accept), and
+   *    rebuilding would wipe the labs / stages the user is mid-way
+   *    through ticking and re-collapse the card. It is rebuilt only when
+   *    its inputs change: the orders array, raw, or the file name.
+   *  • A failure is swallowed WITHOUT logging the error: this card is
+   *    the one place patient columns are in play, and the error object
+   *    is not worth the risk of a row value reaching the console.
+   * The section owns its own card chrome, title and collapsed default;
+   * it returns null when there are no orders (→ card absent). When the
+   * orders did not come from a CSV upload (raw null) it shows its own
+   * «needs an uploaded CSV» note instead of the controls.
+   * ---------------------------------------------------------------- */
+  function paintCsvExport() {
+    const orders = state.parsed.orders;
+    const raw = state.parsed.raw || null;
+    const name = (state.files.csv && state.files.csv.name) || '';
+    if (!orders || !orders.length) {
+      csvExportHost.innerHTML = '';
+      csvExportBuiltFor = null;
+      return;
+    }
+    const b = csvExportBuiltFor;
+    if (b && b.orders === orders && b.raw === raw && b.name === name && csvExportHost.firstChild) return;
+    let section = null;
+    try {
+      section = buildCsvExportSection(state);
+    } catch {
+      console.warn('[upload] filtered-CSV card unavailable'); // deliberately no error object
+      section = null;
+    }
+    csvExportHost.innerHTML = '';
+    csvExportBuiltFor = null;
+    if (section && section.nodeType === 1) {
+      csvExportHost.appendChild(section);
+      csvExportBuiltFor = { orders, raw, name };
+    }
+  }
+
+  /* ---------------------------------------------------------------- *
    * Intelligent suggestions for the unmatched-TAT panel. Dynamically
    * imports ../ingest/tat-suggest.js; when present it pre-fills each
    * row's days input with a computed value, drops a muted evidence line
@@ -763,7 +843,7 @@ export async function render(container, ctx) {
     const seq = ++unmatchedSeq;
     let mod;
     try {
-      mod = await import('../ingest/tat-suggest.js?v=v2026-10-05.1');
+      mod = await import('../ingest/tat-suggest.js?v=v2026-10-05.2');
     } catch { return; } // module not present yet — keep the plain panel behavior
     if (seq !== unmatchedSeq) return; // a newer paint superseded this run
     const fn = pickFn(mod, ['suggestTats']);
@@ -911,7 +991,7 @@ export async function render(container, ctx) {
     if (!orders || !orders.length) { heroHost.innerHTML = ''; return; }
     let out;
     try {
-      const mod = await import('../engine/engine.js?v=v2026-10-05.1');
+      const mod = await import('../engine/engine.js?v=v2026-10-05.2');
       if (seq !== heroSeq) return; // a newer run superseded this one
       const compute = pickFn(mod, ['compute', 'runEngine', 'run']);
       if (typeof compute !== 'function') { heroHost.innerHTML = ''; return; }
@@ -936,7 +1016,7 @@ export async function render(container, ctx) {
       let out = (state.engineOutput && state.engineOutput.totals) ? state.engineOutput : null;
       if (!out) {
         try {
-          const mod = await tryImport('../engine/engine.js?v=v2026-10-05.1');
+          const mod = await tryImport('../engine/engine.js?v=v2026-10-05.2');
           const compute = pickFn(mod, ['compute', 'runEngine', 'run']);
           if (compute) {
             out = compute(state.parsed.orders, (store.settings || {}).tatLookup, engineOpts());

@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>مسبار — منصة تنزيل CSV المُصفّى</title>
+<!--
+  DEV HARNESS for ui/csv-export-section.js — mounts buildCsvExportSection on its own,
+  without the sign-in gate, the router or the upload screen, so the lab / stage chips,
+  the contiguity rule, the noRaw note, the stale-data rebuild and the produced file can
+  be driven in a plain browser (serve the repo root, open /test/csv-export-harness.html).
+
+  SYNTHETIC BY CONSTRUCTION — it must never read real data: the CSV below is written
+  HERE, with obviously fake patients ('مريض تجريبي ١', 'Test Patient A', national ids
+  0000000001…, MRN-TEST-…), fake labs and fake ids, and parsed by the REAL
+  ingest/csv.js parseKamcCsv with the real vendor PapaParse — exactly the upload path.
+  Its 30 columns are the KAMC export's header (the public schema test/grafana.test.mjs
+  pins). It covers:
+    • every stage: not collected / not shipped / not received / not resulted / resulted,
+      a rejected line, a cancelled line (with dates — status wins), and an ANOMALOUS line
+      with a result but no receipt date (the last date wins → resulted);
+    • three labs — Latin, Arabic, and one whose NAME CONTAINS A COMMA;
+    • two blank facilities: one whose test runs at one lab only (inferred → counted under
+      that lab, exported with its blank cell), one whose test runs at two (uninferable →
+      only under «كل المختبرات»);
+    • a record with NO Order ID mid-file (dropped from the orders, kept in raw.records —
+      so every later order's lineNo must still index its own record);
+    • values with commas, double quotes, an embedded newline, edge spaces, Arabic, and
+      leading-zero ids — all must come back byte-for-byte.
+
+  THE DOWNLOAD IS INTERCEPTED, not wrapped: triggerDownload is an ES-module export (a
+  read-only binding), so the harness catches the Blob at URL.createObjectURL and the
+  click at HTMLAnchorElement.prototype.click. By default no file is saved («تنزيل فعلي»
+  lets one through). Each captured file is shown below the card with a ROUND-TRIP CHECK:
+  BOM present, header === raw.fields, and every output row byte-identical to an original
+  record, in the file's order.
+
+  BUTTONS: «إعادة البناء» rebuilds the card from state (selection reset) · «بدون raw»
+  replays the live pull / snapshot (raw = null → the noRaw note) · «raw قديم» pairs the
+  orders with a raw from a DIFFERENT file (the card must refuse: noRaw note) · «تغيير
+  البيانات» replaces state.parsed under the OPEN card (no rebuild) — the next download
+  click or re-open must rebuild and warn instead of exporting the old snapshot.
+  window.__csvHarness = { state, section, downloads, lastCsv, csvText, parsed } —
+  `section` is a getter (the card can replace itself); `lastCsv` is the last captured
+  file's text, for reading in the console.
+-->
+<link rel="stylesheet" href="../styles/fonts.css">
+<link rel="stylesheet" href="../styles/app.css">
+<style>
+  body { background:var(--bg-lighter); }
+  .harness-bar { position:sticky; top:0; z-index:30; display:flex; align-items:center; flex-wrap:wrap; gap:6px 10px;
+    background:var(--white); border-bottom:1px solid var(--border-dark); padding:8px 16px; font-size:.82rem; }
+  .harness-bar strong { color:var(--brand-ink); }
+  .harness-bar button { font:inherit; font-weight:700; cursor:pointer; border:1px solid var(--border-dark);
+    background:var(--bg-lighter); color:var(--brand-ink); border-radius:6px; padding:4px 10px; min-height:32px; }
+  .harness-bar label { display:inline-flex; align-items:center; gap:6px; font-weight:700; color:var(--slate-600); cursor:pointer; }
+  .harness-bar .sep { width:1px; align-self:stretch; background:var(--border-dark); }
+  #harness-status { color:var(--slate-600); overflow-wrap:anywhere; flex:1 1 100%; margin:0; }
+  #stage { max-width:880px; margin:0 auto; padding:16px; }
+  #out pre { direction:ltr; text-align:left; white-space:pre; overflow:auto; max-height:360px; margin:8px 0 0;
+    padding:10px; border-radius:6px; background:var(--bg-light); color:var(--text); font-size:.75rem; line-height:1.5; }
+  #out .ok { color:var(--green); font-weight:700; }
+  #out .bad { color:var(--red); font-weight:700; }
+</style>
+</head>
+<body>
+<div class="harness-bar">
+  <strong>منصة تنزيل CSV المُصفّى (بيانات اصطناعية)</strong>
+  <button id="h-rebuild" type="button">إعادة البناء</button>
+  <button id="h-noraw" type="button">بدون raw (سحب مباشر)</button>
+  <button id="h-wrongraw" type="button">raw قديم (ملف آخر)</button>
+  <button id="h-change" type="button">تغيير البيانات تحت البطاقة</button>
+  <span class="sep" aria-hidden="true"></span>
+  <label><input id="h-real" type="checkbox"> تنزيل فعلي</label>
+  <button id="h-theme" type="button">فاتح/داكن</button>
+  <p id="harness-status"></p>
+</div>
+<main id="stage">
+  <div id="host"></div>
+  <div id="out" class="card" style="text-align:right">
+    <div class="card__title">الملف الملتقط</div>
+    <p class="small muted" id="out-empty" style="margin:0">لم يُنزَّل شيء بعد — افتح البطاقة واضغط زر التنزيل.</p>
+  </div>
+</main>
+
+<script src="../vendor/papaparse.min.js"></script>
+<script type="module">
+  import { parseKamcCsv } from '../src/ingest/csv.js';
+  import { buildCsvExportSection } from '../src/ui/csv-export-section.js';
+
+  const host = document.getElementById('host');
+  const out = document.getElementById('out');
+  const statusEl = document.getElementById('harness-status');
+  const realDl = document.getElementById('h-real');
+
+  /* ---- the SYNTHETIC export ------------------------------------------------------ */
+  const FIELDS = [
+    'Patient Name', 'National Id', 'MRN ID', 'DOB', 'Gender', 'Order ID', 'Order date time',
+    'Performing facility name', 'Order Status', 'Specimen Id', 'Specimen Type',
+    'Specimen collected date time', 'Shipment ID', 'Shipment Created date time', 'Batch Id',
+    'Dispatch date time', 'Received date time', 'Result report date time', 'Test code', 'Test name',
+    'Ordering facility ID', 'Ordered By', 'Collected By', 'Shipment Created By', 'Received By',
+    'Result Entered By', 'Result Approved By', 'TAT - Days', 'TAT Due Date', 'Severity Label',
+  ];
+  const ALPHA = 'Test Lab Alpha';
+  const BETA = 'مختبر تجريبي باء';
+  const GAMMA = 'Test Lab Gamma, Ltd.';           // a comma INSIDE a lab name
+  const T_ALPHA = 'Synthetic Vitamin Panel';      // runs at Alpha only
+  const T_BETA = 'فحص تجريبي "خاص"';              // Arabic + quotes, Beta only
+  const T_SHARED = 'Synthetic Panel, Extended';   // Alpha AND Gamma → a blank is uninferable
+
+  /** One record. Dates: c/d/r/res = collected / dispatched / received / resulted. */
+  let seq = 0;
+  function rec({ lab = '', test = T_ALPHA, status = 'In Progress', c = '', d = '', r = '', res = '',
+    name, order, extra = {} }) {
+    seq += 1;
+    const n = String(seq).padStart(4, '0');
+    return {
+      'Patient Name': name || `Test Patient ${n}`,
+      'National Id': `000000${n}`,                 // leading zeros must survive
+      'MRN ID': `MRN-TEST-${n}`,
+      'DOB': '1990-01-01',
+      'Gender': seq % 2 ? 'M' : 'F',
+      'Order ID': order === undefined ? `TEST-ORD-${n}` : order,
+      'Order date time': '2026-09-11 08:00:00',
+      'Performing facility name': lab,
+      'Order Status': status,
+      'Specimen Id': `SPC-TEST-${n}`,
+      'Specimen Type': 'Serum',
+      'Specimen collected date time': c,
+      'Shipment ID': d ? `ELAB9${n}` : '',
+      'Shipment Created date time': d,
+      'Batch Id': d ? `BATCH-TEST-${n}` : '',
+      'Dispatch date time': d,
+      'Received date time': r,
+      'Result report date time': res,
+      'Test code': `TC-${n}`,
+      'Test name': test,
+      'Ordering facility ID': 'FAC-TEST-01',
+      'Ordered By': 'Test Staff 1',
+      'Collected By': c ? 'Test Staff 2' : '',
+      'Shipment Created By': d ? 'Test Staff 3' : '',
+      'Received By': r ? 'Test Staff 4' : '',
+      'Result Entered By': res ? 'Test Staff 5' : '',
+      'Result Approved By': res ? 'Test Staff 6' : '',
+      'TAT - Days': '3',
+      'TAT Due Date': '2026-09-16 00:00:00',
+      'Severity Label': 'Routine',
+      ...extra,
+    };
+  }
+  const C = '2026-09-11 09:00:00', D = '2026-09-12 10:00:00', R = '2026-09-14 11:00:00', RES = '2026-09-16 12:00:00';
+
+  function buildRecords(variant = 0) {
+    seq = 0;
+    const list = [
+      rec({ lab: ALPHA, status: 'Order Confirmed', name: 'مريض تجريبي ١' }),                  // notCollected
+      rec({ lab: ALPHA, c: C, name: 'مريض تجريبي ٢' }),                                       // notShipped
+      rec({ lab: ALPHA, c: C, d: D }),                                                         // notReceived
+      rec({ lab: ALPHA, c: C, d: D, r: R, order: 'TEST-ORD-SHARED' }),                          // notResulted
+      rec({ lab: ALPHA, c: C, d: D, r: R, res: RES, status: 'Result Approved' }),              // resulted
+      rec({ lab: BETA, test: T_BETA, c: C, d: D, r: R, res: RES, status: 'Result Approved' }), // resulted
+      rec({ lab: BETA, test: T_BETA, c: C, d: D, r: R }),                                      // notResulted
+      rec({ lab: BETA, test: T_BETA, c: C, d: D, r: R, res: RES, status: 'Result Rejected' }), // rejected
+      rec({ lab: BETA, test: T_BETA, c: C, status: 'Order Cancelled' }),                       // cancelled (dates lose)
+      rec({ lab: BETA, test: T_BETA, order: '' }),                                             // NO Order ID → not an order
+      rec({ lab: GAMMA, test: T_SHARED, c: C, d: D, name: 'Test Patient "Q", A' }),             // notReceived
+      rec({ lab: GAMMA, test: T_SHARED, c: C, d: D, res: RES, status: 'Result Approved' }),    // ANOMALY: result, no receipt → resulted
+      rec({ lab: '', test: T_ALPHA, c: C }),                                                   // blank → inferred Alpha; notShipped
+      rec({ lab: '', test: T_SHARED }),                                                        // blank, uninferable; notCollected
+      rec({ lab: GAMMA, test: T_SHARED, c: C, extra: { 'Ordered By': 'Dr. Test\nSecond line' } }), // embedded newline
+      rec({ lab: ALPHA, test: T_SHARED, c: C, d: D, r: R, order: 'TEST-ORD-SHARED' }),          // 2nd line of one order
+      rec({ lab: BETA, test: T_BETA, status: 'Order Confirmed', extra: { 'Severity Label': 'عاجل, تجريبي' } }),
+      rec({ lab: ALPHA, c: C, d: D, extra: { 'Specimen Type': ' Serum ' } }),                  // edge spaces
+    ];
+    // «تغيير البيانات»: a same-shape re-upload whose rows differ (one more line, and
+    // record 2 now resulted), so a stale card's counts would visibly be wrong.
+    if (variant) {
+      list[1] = { ...list[1], 'Dispatch date time': D, 'Received date time': R, 'Result report date time': RES };
+      list.push(rec({ lab: GAMMA, test: T_SHARED, c: C, d: D, r: R }));
+    }
+    return list;
+  }
+
+  /** RFC-4180 cell: quoted when it holds a comma, quote, CR/LF or edge space. Written by
+   *  hand (not Papa.unparse) so the INPUT exercises quoting independently of the output. */
+  const cell = (v) => (/[",\r\n]|^\s|\s$/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+  const toCsv = (records) => [FIELDS, ...records.map((r) => FIELDS.map((f) => r[f] ?? ''))]
+    .map((row) => row.map((v) => cell(String(v))).join(',')).join('\r\n') + '\r\n';
+
+  const parse = (variant) => {
+    const text = toCsv(buildRecords(variant));
+    return { text, res: parseKamcCsv(text, window.Papa) };
+  };
+
+  /* ---- state, shaped like src/state.js ------------------------------------------ */
+  let { text: csvText, res: parsed } = parse(0);
+  const state = {
+    files: { csv: { name: 'KAMC Order details (synthetic).csv' }, tracker: null },
+    parsed: { orders: parsed.rows, tracker: null, summary: parsed.summary, raw: parsed.raw },
+  };
+
+  function mount() {
+    host.innerHTML = '';
+    const section = buildCsvExportSection(state);
+    if (section) host.appendChild(section);
+    else host.appendChild(Object.assign(document.createElement('p'), { className: 'small muted', textContent: 'buildCsvExportSection → null (no orders)' }));
+    return section;
+  }
+  const say = (msg) => { statusEl.textContent = msg; };
+
+  /* ---- download interception ------------------------------------------------------ */
+  const blobs = new Map();
+  const realCreate = URL.createObjectURL.bind(URL);
+  URL.createObjectURL = (obj) => {
+    const url = realCreate(obj);
+    if (obj instanceof Blob) blobs.set(url, obj);
+    return url;
+  };
+  const realClick = HTMLAnchorElement.prototype.click;
+  HTMLAnchorElement.prototype.click = function click() {
+    const blob = blobs.get(this.href);
+    if (blob && this.hasAttribute('download')) {
+      capture(this.getAttribute('download'), blob);
+      if (!realDl.checked) return undefined; // swallowed: nothing is saved to disk
+    }
+    return realClick.call(this);
+  };
+
+  const downloads = [];
+  const sameRow = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
+
+  /** Re-parse the produced file and compare it with the ORIGINAL records. */
+  function verify(text, bytes) {
+    const checks = [];
+    const bom = bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF;
+    checks.push([bom, 'BOM (EF BB BF) في أول الملف']);
+    const crlf = !/[^\r]\n/.test(text.replace(/"[^"]*"/g, '')); // line ends outside quoted cells
+    checks.push([crlf, 'نهايات الأسطر CRLF']);
+    const back = window.Papa.parse(text, { header: true, skipEmptyLines: 'greedy' });
+    const raw = state.parsed.raw;
+    const fields = (back.meta && back.meta.fields) || [];
+    checks.push([raw && sameRow(fields, raw.fields), `الترويسة مطابقة لأعمدة الملف الأصلي (${fields.length} عمودًا)`]);
+    let last = -1; let ok = !!raw; let unmatched = 0;
+    for (const r of back.data) {
+      const vals = fields.map((f) => r[f] ?? '');
+      let j = -1;
+      if (raw) for (let k = last + 1; k < raw.records.length; k++) {
+        if (sameRow(vals, raw.fields.map((f) => raw.records[k][f] ?? ''))) { j = k; break; }
+      }
+      if (j < 0) { ok = false; unmatched++; } else last = j;
+    }
+    checks.push([ok, `كل سطر (${back.data.length}) مطابق حرفيًا لسطر أصلي وبترتيب الملف${unmatched ? ` — ${unmatched} غير مطابق` : ''}`]);
+    return checks;
+  }
+
+  async function capture(name, blob) {
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    const text = new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes); // keep the BOM visible to the check
+    const body = text.charCodeAt(0) === 0xFEFF ? text.slice(1) : text;
+    const entry = { name, type: blob.type, text, checks: verify(body, bytes) };
+    downloads.push(entry);
+    window.__csvHarness.lastCsv = text;
+    renderOut(entry);
+    say(`التُقط: ${name} (${blob.type}) — ${entry.checks.every(([v]) => v) ? 'كل الفحوص ناجحة' : 'فحص فاشل!'}`);
+  }
+
+  function renderOut(entry) {
+    out.querySelectorAll('.cap').forEach((n) => n.remove());
+    document.getElementById('out-empty').style.display = 'none';
+    const wrap = document.createElement('div');
+    wrap.className = 'cap';
+    // Name and MIME type in their own isolates: the name mixes Latin, Arabic and digits,
+    // and one shared run let the type's '.' and ';' reorder into the name.
+    const nameEl = document.createElement('div');
+    nameEl.className = 'small';
+    nameEl.style.cssText = 'font-weight:700;display:flex;flex-wrap:wrap;gap:4px 10px';
+    for (const [text, dir] of [[entry.name, 'auto'], [entry.type, 'ltr']]) {
+      const s = document.createElement('span');
+      s.dir = dir;
+      s.style.unicodeBidi = 'isolate';
+      s.textContent = text;
+      nameEl.appendChild(s);
+    }
+    const list = document.createElement('ul');
+    list.className = 'small';
+    list.style.cssText = 'margin:6px 0 0;padding-inline-start:18px';
+    for (const [pass, label] of entry.checks) {
+      const li = document.createElement('li');
+      li.className = pass ? 'ok' : 'bad';
+      li.textContent = `${pass ? '✓' : '✗'} ${label}`;
+      list.appendChild(li);
+    }
+    const pre = document.createElement('pre');
+    pre.textContent = entry.text.replace(/^﻿/, '<BOM>');
+    wrap.append(nameEl, list, pre);
+    out.appendChild(wrap);
+  }
+
+  /* ---- buttons -------------------------------------------------------------------- */
+  document.getElementById('h-rebuild').addEventListener('click', () => {
+    ({ text: csvText, res: parsed } = parse(0));
+    state.files.csv = { name: 'KAMC Order details (synthetic).csv' };
+    state.parsed = { orders: parsed.rows, tracker: null, summary: parsed.summary, raw: parsed.raw };
+    window.__csvHarness.csvText = csvText; window.__csvHarness.parsed = parsed;
+    mount(); say('أُعيد البناء من ملف CSV الاصطناعي.');
+  });
+  document.getElementById('h-noraw').addEventListener('click', () => {
+    state.parsed = { ...state.parsed, raw: null };
+    state.files.csv = { name: 'Grafana (مباشر) 05/10/2026' };
+    mount(); say('raw = null (كالسحب المباشر) — يجب أن تظهر ملاحظة noRaw فقط.');
+  });
+  document.getElementById('h-wrongraw').addEventListener('click', () => {
+    // The orders of THIS file next to the raw of ANOTHER (records shifted by one): what
+    // a missed reset would leave behind. The card must not offer a download at all.
+    const other = parseKamcCsv(toCsv(buildRecords(0).slice(1)), window.Papa);
+    state.parsed = { ...state.parsed, raw: other.raw };
+    mount(); say('raw من ملف آخر — يجب أن ترفض البطاقة (ملاحظة noRaw).');
+  });
+  document.getElementById('h-change').addEventListener('click', () => {
+    const next = parse(1);
+    state.parsed = { orders: next.res.rows, tracker: null, summary: next.res.summary, raw: next.res.raw };
+    window.__csvHarness.csvText = next.text; window.__csvHarness.parsed = next.res;
+    say('تغيّرت البيانات دون إعادة بناء — زر التنزيل أو إعادة فتح البطاقة يجب أن يعيد البناء وينبّه.');
+  });
+  document.getElementById('h-theme').addEventListener('click', () => {
+    const root = document.documentElement;
+    root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark';
+  });
+
+  window.__csvHarness = {
+    state, downloads, lastCsv: null, csvText, parsed,
+    get section() { return document.querySelector('.csv-export-card'); },
+  };
+  mount();
+  say(`حُلّل الملف الاصطناعي: ${parsed.raw.records.length} سجلًا، ${parsed.rows.length} سطر طلب، ${parsed.errors.length} خطأ.`);
+</script>
+</body>
+</html>
