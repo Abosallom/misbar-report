@@ -42,18 +42,18 @@
 //
 // Collapsed by default: the daily flow is the report, this is an occasional tool.
 // Strings come ONLY from STR.upload.csvExport.
-import { el, toast } from './components.js?v=v2026-10-05.2';
-import { STR, todayISO } from '../i18n/ar.js?v=v2026-10-05.2';
+import { el, toast } from './components.js?v=v2026-10-07.1';
+import { STR, todayISO } from '../i18n/ar.js?v=v2026-10-07.1';
 // The ONE sanitized download helper (filesystem-illegal characters stripped from the
 // name) — shared with the late-labs and generate screens rather than re-implemented.
-import { triggerDownload } from './late-labs-section.js?v=v2026-10-05.2';
+import { triggerDownload } from './late-labs-section.js?v=v2026-10-07.1';
 // Papa the way the upload screen gets it: the eager <script> tag's window.Papa, with
 // getPapa's one-tick fallback. Never imported from vendor/ any other way.
-import { getPapa } from '../vendor-loader.js?v=v2026-10-05.2';
+import { getPapa } from '../vendor-loader.js?v=v2026-10-07.1';
 import {
   LADDER, STATUS_STAGES, canToggle, stageCounts, labCounts, filterOrders,
   buildFilteredCsv, filteredFileName,
-} from '../model/csv-filter.js?v=v2026-10-05.2';
+} from '../model/csv-filter.js?v=v2026-10-07.1';
 
 const S = STR.upload.csvExport;
 

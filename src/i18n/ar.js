@@ -5,10 +5,13 @@
 // build-spec reads from the very same predicate. A local re-derivation here is exactly
 // how a filename would one day say «مخصص» while the cover says nothing (or the reverse).
 // scope.js is pure (no DOM, no vendor, no ar.js back-edge), so this adds no cycle.
-import { isScoped, normalizeScope } from '../model/scope.js?v=v2026-10-05.2';
+import { isScoped, normalizeScope } from '../model/scope.js?v=v2026-10-07.1';
 
 /** Join ids for a sentence: Arabic comma, tolerant of a bare string or a missing list. */
 const joinIds = (ids) => [].concat(ids == null ? [] : ids).map(String).join('، ');
+
+/** A feed-spelled name on one line: every whitespace run → one space, trimmed ('—' if empty). */
+const oneLine = (s) => String(s == null ? '' : s).replace(/\s+/g, ' ').trim() || '—';
 
 /** All UI strings, grouped by screen/area. */
 export const STR = {
@@ -117,12 +120,28 @@ export const STR = {
       failed: 'تعذّر إنشاء الملف المُصفّى.',
       stale: 'تغيّرت بيانات الطلبات فأُعيد ضبط الاختيار — راجعه ثم نزّل الملف.',
     },
+    // A SECOND HOSPITAL in the feed (2026-10-07). Until the user decides how to treat
+    // it, only the current hospital's orders count: every other hospital's rows are
+    // dropped on the way in (model/hospital.js splitByHospital → state.parsed
+    // .excludedHospitals) and this line says so, once per excluded hospital, beside the
+    // data summary. APP SCREENS ONLY — no slide may ever carry a hospital name (the repo
+    // is public), and these strings deliberately never name the CURRENT hospital either:
+    // «المستشفى الحالي» is enough for the operator. `name` arrives as the feed spells
+    // it (the source has doubled spaces) and is printed whitespace-collapsed; a caller
+    // with no name passes the facility id instead. The pipeline's pull-step message
+    // uses the short form.
+    hospitalExcluded: (n, name) => `استُبعد ${n} طلبًا من «${oneLine(name)}» من جميع الأرقام حتى إشعار آخر — تُحتسب طلبات المستشفى الحالي فقط.`,
+    hospitalExcludedShort: (n, name) => `استُبعد ${n} طلبًا من «${oneLine(name)}»`,
   },
   review: {
     title: 'مراجعة وتحرير التقرير',
     subtitle: 'راجع الأرقام وحرّر النصوص، ثم انتقل للتوليد.',
     reportDate: 'تاريخ التقرير',
     variantsNote: 'سيتم توليد النسختين (الداخلية ونوبكو) معًا.',
+    // The muted line under the title: the same fact as STR.upload.hospitalExcluded,
+    // repeated here because this is the last screen before the deck is generated. App
+    // screen only — never on a slide; never names the current hospital.
+    hospitalExcluded: (n, name) => `لا تشمل أرقام هذا التقرير ${n} طلبًا من «${oneLine(name)}» — تُحتسب طلبات المستشفى الحالي فقط.`,
     panelsTitle: 'نقاط الشريحة الثانية',
     panelSupport: 'الدعم المطلوب',
     panelCompleted: 'المهام المنجزة',

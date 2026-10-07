@@ -3,8 +3,11 @@
 // as ingest/csv.js. No auth (public dashboard, server-side-masked data). Pure module:
 // fetch is injectable (fetchImpl) and there are NO vendor/ or DOM imports.
 // PII (patient/staff fields) is read but NEVER copied into OrderRow or persisted.
-import { normFacility } from '../contracts.js?v=v2026-10-05.2';
-import { MAPPED_COLUMNS } from './csv.js?v=v2026-10-05.2';
+// Rows of EVERY ordering hospital are returned (and so encrypted into the snapshot by
+// scripts/fetch-kamc.mjs): the KAMC-only cut is model/hospital.js splitByHospital,
+// applied where the app consumes rows, so the ignored hospital's history is kept.
+import { normFacility } from '../contracts.js?v=v2026-10-07.1';
+import { MAPPED_COLUMNS, findHospitalColumns } from './csv.js?v=v2026-10-07.1';
 
 // ---- cell coercers (mirror csv.js semantics; Grafana cells may be null/number/string) ----
 const clean = (v) => {
@@ -245,6 +248,10 @@ export async function fetchKamcOrders(grafanaCfg, { fromMs, toMs, fetchImpl = fe
     if (!fieldNames.has(col)) errors.push(`Missing column: ${col}`);
   }
 
+  // ---- the ordering-hospital columns ('facility_name' / 'facility_id' here) — found by
+  // csv.js's rule, so both paths agree; optional, never reported as missing ----
+  const { nameCol: hospitalCol, idCol: facilityIdCol } = findHospitalColumns(fieldNames);
+
   // ---- map to OrderRow (mirror csv.js exactly; datetimes go through toRiyadh) ----
   const rows = [];
   for (let i = 0; i < rowObjects.length; i++) {
@@ -269,8 +276,13 @@ export async function fetchKamcOrders(grafanaCfg, { fromMs, toMs, fetchImpl = fe
       // Not patient data. Absent Grafana columns coerce to null via clean().
       specimenNo: clean(r['Specimen Id']),
       shipmentId: clean(r['Shipment ID']),
-      orderingFacilityId: clean(r['Ordering facility ID']),
+      // Same id as facility_id; that column fills in when this one is absent/blank (csv.js).
+      orderingFacilityId:
+        clean(r['Ordering facility ID']) ?? (facilityIdCol ? clean(r[facilityIdCol]) : null),
       performingFacilityId: clean(r['Performing facility id']),
+      // Ordering HOSPITAL name, whitespace-collapsed (mirror csv.js). An organisation,
+      // not patient data — safe in the encrypted snapshot.
+      hospital: hospitalCol ? normFacility(clean(r[hospitalCol])) : null,
     });
   }
 

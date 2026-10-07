@@ -41,9 +41,9 @@
 // the cover's period/scope lines, the 'تقرير مخصص' pill on the cover and in every content
 // slide's footer strip (buildCover + buildSpec's post-pass, see scopeTag) and the opt-out
 // 'تفاصيل الشحنات' slide.
-import { COLORS as C, GEOM } from '../theme.js?v=v2026-10-05.2';
-import { AR_COUNTRY, AR_COUNTRY_SHORT, reflabShort } from '../model/sendout.js?v=v2026-10-05.2';
-import { isScoped, hasRange } from '../model/scope.js?v=v2026-10-05.2';
+import { COLORS as C, GEOM } from '../theme.js?v=v2026-10-07.1';
+import { AR_COUNTRY, AR_COUNTRY_SHORT, reflabShort } from '../model/sendout.js?v=v2026-10-07.1';
+import { isScoped, hasRange } from '../model/scope.js?v=v2026-10-07.1';
 
 // EXPLICIT-TRUE kpiCards KEYS. reportOptions.kpiCards normally reads "on unless === false"
 // (see buildExec's cardDefs filter). The keys in this set INVERT that: they render only

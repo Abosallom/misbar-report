@@ -3,7 +3,11 @@
 
 /**
  * Normalized order line (grain = one test on one order). Produced by ingest/csv.js
- * from the 30-col KAMC export, and mirrored by test/fixtures/golden-orders.js.
+ * from the 30-col KAMC export (plus the optional ordering-hospital columns since
+ * 2026-09-28) and by ingest/grafana.js, and mirrored by test/fixtures/golden-orders.js.
+ * Ingest returns rows of EVERY ordering hospital; only KAMC rows count (user
+ * instruction 2026-10-07) — model/hospital.js splitByHospital makes that cut where
+ * the app consumes rows, keyed on `orderingFacilityId` / `hospital` below.
  * All dates are 'YYYY-MM-DD' or 'YYYY-MM-DD HH:MM:SS' strings or null.
  * @typedef {Object} OrderRow
  * @property {string}      orderDate   - Order date (date-only)
@@ -20,8 +24,17 @@
  * @property {number|null} tatDaysCsv  - CSV "TAT - Days" (fallback only)
  * @property {string|null} [specimenNo]           - Specimen identifier ('Specimen Id' col; export header 'Specimen no'). Operational id, not PHI.
  * @property {string|null} [shipmentId]           - Shipment identifier ('Shipment ID'). Operational id, not PHI.
- * @property {string|null} [orderingFacilityId]   - Ordering facility id ('Ordering facility ID'). Operational id, not PHI.
+ * @property {string|null} [orderingFacilityId]   - Ordering facility id ('Ordering facility ID'; when that column
+ *   is absent or blank, the hospital id column 'facility_id' / 'Facility ID', which carries the same id).
+ *   Operational id, not PHI. It is the ORDERING HOSPITAL's id — model/hospital.js isKamcRow decides
+ *   KAMC vs not on it (KAMC_FACILITY_ID '31763'; SGH is '1037').
  * @property {string|null} [performingFacilityId] - Performing facility id ('Performing facility id'); absent from the CSV export → null.
+ * @property {string|null} [hospital] - Ordering HOSPITAL name ('facility_name' on Grafana, 'Facility Name'
+ *   in the CSV; header matched ignoring case, spaces and underscores — ingest/csv.js
+ *   findHospitalColumns), whitespace-collapsed. NOT the lab: that is `facility` ('Performing
+ *   facility name'). An organisation name, not patient data. null/absent on files and snapshots
+ *   that predate the column — those rows are all KAMC. Used ONLY to tell hospitals apart
+ *   (model/hospital.js) and for an app-screen notice; a hospital name never goes on a slide.
  * @property {string|null} [dob] - Patient date of birth ('DOB', 'YYYY-MM-DD HH:MM:SS').
  *   THE ONE PATIENT FIELD THIS SHAPE CARRIES, and only on ONE path: ingest/csv.js
  *   (the manual «ملف الطلبات (CSV)» upload) sets it so the per-lab late-tests Excel
@@ -56,11 +69,11 @@
  * @typedef {Object} EngineOutput
  * @property {{lines:number, cancelledInData:number, total:number}} totals - total = lines - cancelledInData
  * @property {{created:number, collected:number, dispatched:number, received:number, resulted:number, completed:number}} funnel - all excl. cancelled. FINAL STAGE = COMPLETED (user decision 2026-07-28: a result date OR a rejection, both terminal lab outcomes). `completed` is the canonical field; `resulted` is a LEGACY ALIAS carrying the SAME number (the long-lived override key 'funnel.resulted' reads it), NOT the dated-only count — never add the two
- * @property {{awaitingDispatch:number, shippedNotReceived:number, awaitingResults:number, completed:number, rejected:number, lateNoResult:number, latePct:number}} buckets - PARTITION: totals.total = awaitingDispatch + shippedNotReceived + awaitingResults + completed; completed follows the COMPLETED rule (result date OR rejected); `rejected` is still published as its own value but is a SUBSET of completed — never added alongside it; lateNoResult is a subset of awaitingResults
+ * @property {{awaitingDispatch:number, shippedNotReceived:number, awaitingResults:number, completed:number, rejected:number, lateNoResult:number, latePct:number}} buckets - PARTITION: totals.total = awaitingDispatch + shippedNotReceived + awaitingResults + completed — each line is counted in exactly ONE bucket, the furthest milestone it reached (engine.js ladderStage), so the identity holds even for a skipped-step line (a result with no dispatch / receipt scan; the 2026-10-07 "cards sum to total + 2" fix); completed follows the COMPLETED rule (result date OR rejected); `rejected` is still published as its own value but is a SUBSET of completed — never added alongside it; lateNoResult is a subset of awaitingResults
  * @property {{month:string, orders:number, results:number, rejected:number, pending:number, incomplete:number, completionPct:number|null, cancelled:number}[]} monthly - month='YYYY-MM'; includes historical months merged from settings. PARTITION: orders = results + pending; `results` follows the COMPLETED rule (result date OR rejected) since 2026-07-28, so `rejected` is a SUBSET of results and NOT a partition term; pending === incomplete (both = orders − results) — `incomplete` is kept only as the legacy key name
  * @property {number} cancelledNote - sum of merged cancelledByMonth (the "* N طلب ملغي" note)
  * @property {{overallActual:number, overallExpected:number, perMonth:{month:string, actual:number|null, expected:number|null}[]}} turnaround - days, 1-decimal semantics per report
- * @property {{lab:string, total:number, pipeline:number, awaitingResult:number, completed:number, onTime:number, resulted:number, resultedLate:number, rejected:number, late:number, latePct:number}[]} byLab - HEADLINE PARTITION: total = pipeline + awaitingResult + completed, with completed = onTime + resultedLate + rejected = resulted + rejected as the finer split beneath it (those four are all SUBSETS of completed — never added alongside it); pipeline = no received date (and not rejected); awaitingResult = received, no result yet, not rejected; onTime = resulted within due (day-granular); resultedLate = resulted−onTime (incl. No-Match resulted); resulted = onTime+resultedLate subtotal (non-rejected rows WITH a result date); late (late-no-result) is a subset of awaitingResult
+ * @property {{lab:string, total:number, pipeline:number, awaitingResult:number, completed:number, onTime:number, resulted:number, resultedLate:number, rejected:number, late:number, latePct:number}[]} byLab - HEADLINE PARTITION: total = pipeline + awaitingResult + completed, with completed = onTime + resultedLate + rejected = resulted + rejected as the finer split beneath it (those four are all SUBSETS of completed — never added alongside it); pipeline = the two pre-receipt ladder rungs (engine.js ladderStage awaitingDispatch + shippedNotReceived): no received date AND not completed (no result date, not rejected) — Σ over labs = buckets.awaitingDispatch + buckets.shippedNotReceived (until 2026-10-07 it was "no received date, not rejected" alone, so a line resulted with no receipt date sat in pipeline AND completed); awaitingResult = received, no result yet, not rejected; onTime = resulted within due (day-granular); resultedLate = resulted−onTime (incl. No-Match resulted); resulted = onTime+resultedLate subtotal (non-rejected rows WITH a result date); late (late-no-result) is a subset of awaitingResult
  * @property {{testName:string, late:number, onTime:number}[]} byTest - catalog tests with late>0 OR onTime>0; late = late-no-result, onTime = resulted within due (day-granular); sorted late asc, catalog-idx desc
  * @property {string[]} unmatchedTests - test names absent from TAT lookup
  * @property {number} excludedNoTat - rows dropped by opts.excludeNoTat (0 when option off)

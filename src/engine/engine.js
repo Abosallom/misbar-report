@@ -25,13 +25,13 @@
 // Both changes make the golden workbook's _cachedDue/_cachedDelay/_cachedStatus
 // an OUT-OF-DATE external oracle for due-derived fields — deliberately.
 
-import { normTest, normFacility } from '../contracts.js?v=v2026-10-05.2';
+import { normTest, normFacility } from '../contracts.js?v=v2026-10-07.1';
 import {
   parseDateTime, toEpochDay, workday, dayDiff, calDaysBetween, monthKey,
-} from './workday.js?v=v2026-10-05.2';
-import { buildTatIndex, resolveTat, CHART_TEST_CATALOG } from './tat.js?v=v2026-10-05.2';
-import { dedupeRows } from './dedupe.js?v=v2026-10-05.2';
-import { fillBlankFacilities } from './infer-facility.js?v=v2026-10-05.2';
+} from './workday.js?v=v2026-10-07.1';
+import { buildTatIndex, resolveTat, CHART_TEST_CATALOG } from './tat.js?v=v2026-10-07.1';
+import { dedupeRows } from './dedupe.js?v=v2026-10-07.1';
+import { fillBlankFacilities } from './infer-facility.js?v=v2026-10-07.1';
 
 export const STATUS = Object.freeze({
   CANCELLED: 'Cancelled',
@@ -133,6 +133,39 @@ function isCompleted(e) {
 }
 
 /**
+ * THE LADDER — the ONE stage a non-cancelled line sits in: the FURTHEST milestone it
+ * has reached (the user's rule: the procedure is a ladder, an order cannot skip a rung,
+ * so each order belongs to exactly one stage). Top rung first, so a later milestone
+ * WINS over an earlier blank:
+ *   completed          isCompleted(): a result date OR rejected
+ *   awaitingResults    received, and not completed
+ *   shippedNotReceived dispatched, not received, and not completed
+ *   awaitingDispatch   everything else — no dispatch, no receipt, not completed.
+ *                      NO date is required here, not even an order date: totals.total
+ *                      is EVERY non-cancelled line, so the bottom rung must be the
+ *                      plain remainder or a dateless line would fall out of all four.
+ * A line the source system carried with a LATER date but a blank EARLIER one (a result
+ * with no dispatch / receipt scan) did pass the blank rung — the lab cannot result a
+ * sample it never received; the scan is what is missing — so it is filed at the rung
+ * its latest date proves. model/csv-filter.js stageOf reads the same ladder for the
+ * download tool (its notCollected + notShipped = awaitingDispatch here, its resulted +
+ * rejected = completed).
+ *
+ * Exclusive by CONSTRUCTION: a function returns one value, so buildBuckets and
+ * buildByLab (which both classify through this) can never count a line twice or drop
+ * it — the identity total = Σ stages holds for any data, not just clean data.
+ * @param {{resultedMs:number|null, rejected:boolean, receivedMs:number|null,
+ *   dispatchedMs:number|null}} e enriched, already non-cancelled
+ * @returns {'completed'|'awaitingResults'|'shippedNotReceived'|'awaitingDispatch'}
+ */
+function ladderStage(e) {
+  if (isCompleted(e)) return 'completed';
+  if (e.receivedMs != null) return 'awaitingResults';
+  if (e.dispatchedMs != null) return 'shippedNotReceived';
+  return 'awaitingDispatch';
+}
+
+/**
  * Slide-3 funnel — all counts exclude cancelled.
  * FINAL STAGE (user decision 2026-07-28): the funnel ends at COMPLETED, i.e.
  * isCompleted() — a result date OR a rejection, because both are terminal lab
@@ -140,6 +173,17 @@ function isCompleted(e) {
  * carrying the SAME number so the long-lived override key 'funnel.resulted'
  * (contracts.js, i18n, screen-review) and the slide that reads it can never show a
  * different figure from the exec KPI card. It is NOT the dated-only count anymore.
+ *
+ * NOT THE LADDER, AND NOT GUARANTEED MONOTONE. Each funnel stage is a CUMULATIVE DATE
+ * COUNT — the lines that CARRY that timestamp — not the lines that reached that rung.
+ * A skipped-step line (a result recorded with no dispatch / receipt scan, two live KAMC
+ * orders on 2026-10-07) is counted at `completed` but at neither `dispatched` nor
+ * `received`, so a stage CAN legitimately read below the stage after it (received <
+ * completed once enough lines skip the receipt scan). That is the funnel reporting the
+ * timestamps the source system actually holds. The four stage cards cannot do this:
+ * buildBuckets files every line ONCE, at its furthest rung (ladderStage), so they always
+ * sum to total. The golden fixture has no skipped-step rows, so its funnel happens to be
+ * monotone — a property of that data, not of this function.
  */
 function buildFunnel(nonCancelled) {
   const completed = nonCancelled.filter(isCompleted).length;
@@ -155,29 +199,32 @@ function buildFunnel(nonCancelled) {
 
 /**
  * Slide-2 status buckets.
- * PARTITION (user decision 2026-07-28):
+ * PARTITION (user decision 2026-07-28; made exclusive by construction 2026-10-07):
  *   total = awaitingDispatch + shippedNotReceived + awaitingResults + completed
+ * where total is EVERY non-cancelled line (totals.total) and each line is counted in
+ * exactly ONE of the four — its ladderStage(), the furthest milestone it reached.
  * completed follows isCompleted() (result date OR rejected). `rejected` is still
  * reported as its own value but is a SUBSET of completed — it must never be added
  * alongside completed, or the rejected lines get counted twice.
  *
- * Every pre-completion bucket therefore carries the SAME `!e.rejected` guard that
- * buildByLab's `pipeline` / `awaitingResult` terms carry: once a rejection counts as
- * completed, a rejected line that never reached 'received' would otherwise be counted
- * a second time in awaitingDispatch or shippedNotReceived and break the identity
- * (and contradict the compliance table's split of the very same total).
+ * WHY THE LADDER (2026-10-07, "the four cards always sum to total + 2"). Each bucket
+ * used to test only its OWN rung — awaitingDispatch was "no dispatch date",
+ * shippedNotReceived "dispatched, not received" — and nothing excluded the rungs ABOVE.
+ * Two live KAMC orders carry order + collected + RESULT dates with no dispatch and no
+ * receipt date (status 'Result Approved'), so each sat in awaitingDispatch AND
+ * completed. The same hole existed one rung up (dispatched + resulted, no receipt →
+ * shippedNotReceived AND completed), and awaitingDispatch also swallowed a line
+ * RECEIVED with no dispatch date (→ awaitingDispatch AND awaitingResults). The old
+ * `!e.rejected` guards (rejected = completed since 2026-07-28) were the same fix for
+ * ONE shape of the problem; ladderStage generalises it to every shape. awaitingDispatch
+ * also dropped its order-date requirement (`hasCreated`): total never had one, so a
+ * dateless line used to fall out of all four. The golden fixture has no skipped-step
+ * and no dateless rows — none of its numbers moved.
  */
 function buildBuckets(nonCancelled) {
-  const awaitingDispatch = nonCancelled.filter(
-    (e) => e.dispatchedMs == null && e.hasCreated && !e.rejected,
-  ).length;
-  const shippedNotReceived = nonCancelled.filter(
-    (e) => e.dispatchedMs != null && e.receivedMs == null && !e.rejected,
-  ).length;
-  const awaitingResults = nonCancelled.filter(
-    (e) => e.receivedMs != null && e.resultedMs == null && !e.rejected,
-  ).length;
-  const completed = nonCancelled.filter(isCompleted).length;
+  const stages = { awaitingDispatch: 0, shippedNotReceived: 0, awaitingResults: 0, completed: 0 };
+  for (const e of nonCancelled) stages[ladderStage(e)]++;
+  const { awaitingDispatch, shippedNotReceived, awaitingResults, completed } = stages;
   // rejected surfaced as its own value (user decision 2026-07-19): non-cancelled
   // rows whose Order Status was 'Result Rejected'. Since 2026-07-28 it is a SUBSET
   // of completed above (rejection = a terminal outcome), NOT a sibling of it.
@@ -302,12 +349,21 @@ function buildTurnaround(nonCancelled) {
 /**
  * Slide-5 by-lab table (facility-normalized, excl. cancelled), total-desc.
  *
- * HEADLINE PARTITION (user decision 2026-07-28) — three disjoint states:
+ * HEADLINE PARTITION (user decision 2026-07-28) — three disjoint states, read off the
+ * SAME ladderStage() buildBuckets uses, so each lab's total splits exactly as the exec
+ * cards split theirs:
  *   total = pipeline + awaitingResult + completed
- *   • pipeline       = NO received date yet (pre-receipt: awaiting dispatch / in transit)
- *   • awaitingResult = received, no result yet, not rejected
- *   • completed      = isCompleted(): a result date OR rejected (= resulted + rejected)
- * This is the identity the compliance table's columns must add up to.
+ *   • pipeline       = ladder rung awaitingDispatch OR shippedNotReceived: no received
+ *                      date AND not completed (pre-receipt: awaiting dispatch / in
+ *                      transit). Σ over labs = buckets.awaitingDispatch +
+ *                      buckets.shippedNotReceived.
+ *   • awaitingResult = rung awaitingResults: received, no result yet, not rejected
+ *   • completed      = rung completed — isCompleted(): a result date OR rejected
+ *                      (= resulted + rejected)
+ * This is the identity the compliance table's columns must add up to. Until 2026-10-07
+ * pipeline was "no received date, not rejected" alone, so a line RESULTED with no
+ * receipt date (see buildBuckets' WHY THE LADDER) counted in pipeline AND completed and
+ * the lab's columns overshot its total.
  *
  * FINER BREAKDOWN of `completed`, all still published, all SUBSETS of it — never
  * add any of them alongside `completed`:
@@ -339,12 +395,13 @@ function buildByLab(nonCancelled) {
     // stay visible rather than be folded into somebody else's row.
     const L = get(e.facility ?? 'غير محدد');
     L.total++;
-    // pipeline: no received date (and not rejected) — pre-receipt lines.
-    if (!e.rejected && e.receivedMs == null) L.pipeline++;
-    if (e.receivedMs != null && e.resultedMs == null && !e.rejected) L.awaitingResult++;
+    // The headline terms: ONE ladder rung per line, so exactly one of the three moves.
+    const stage = ladderStage(e);
+    if (stage === 'completed') L.completed++; // result date OR rejected
+    else if (stage === 'awaitingResults') L.awaitingResult++;
+    else L.pipeline++; // awaitingDispatch or shippedNotReceived — pre-receipt lines
     // resulted: parent of the onTime / resultedLate split (non-rejected, has a result).
     if (!e.rejected && e.resultedMs != null) L.resulted++;
-    if (isCompleted(e)) L.completed++; // result date OR rejected — the headline term
     if (e.onTime) L.onTime++; // resulted within TAT (day-granular "success")
     if (e.rejected) L.rejected++; // rejected count per lab (own value, ⊂ completed)
     // late = COUNTIFS(D=lab, T="Late", N="") — "Late" already excludes cancelled/rejected

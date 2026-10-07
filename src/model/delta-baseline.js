@@ -70,6 +70,20 @@ export const COMPLETED_DEF_SINCE = '2026-07-28';
  */
 export const LATE_DEF_SINCE = '2026-08-05';
 
+/**
+ * First report date produced under the 2026-10-07 rules: (1) only the current
+ * hospital's orders count (model/hospital.js — the feed carried a second hospital's
+ * orders from 2026-09-28 and they were counted), and (2) the four stage counts are an
+ * exact partition of the total — each order line sits in ONE stage, its furthest
+ * milestone (engine.js ladderStage). Before it, a line with a later milestone but a
+ * missing earlier date could be counted in two stages, so the stages summed past the
+ * total. Snapshots published before this date may speak either old rule. The boundary
+ * is the day AFTER the fix shipped: a report dated 2026-10-07 may have been published
+ * under either rule, and restating that day costs nothing — the computed row already
+ * speaks the current rules. Stored history is never rewritten.
+ */
+export const PARTITION_DEF_SINCE = '2026-10-08';
+
 /** The two valid reportOptions.deltaMode values, in UI order. */
 export const DELTA_MODES = ['daily', 'week'];
 

@@ -1,19 +1,26 @@
 // ui/screen-upload.js — file upload + parse + engine kickoff (Track E).
-import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-10-05.2';
-import { el, dropZone, fileSummaryCard, toast } from './components.js?v=v2026-10-05.2';
-import { normTest } from '../contracts.js?v=v2026-10-05.2';
-import { getPapa, getXLSX } from '../vendor-loader.js?v=v2026-10-05.2';
-import { TAT_LOINC } from '../seeds/tat-lookup.js?v=v2026-10-05.2';
-import { buildLateLabsSection } from './late-labs-section.js?v=v2026-10-05.2';
-import { buildAutomationPanel } from './automation-panel.js?v=v2026-10-05.2';
+import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-10-07.1';
+import { el, dropZone, fileSummaryCard, toast } from './components.js?v=v2026-10-07.1';
+import { normTest } from '../contracts.js?v=v2026-10-07.1';
+import { getPapa, getXLSX } from '../vendor-loader.js?v=v2026-10-07.1';
+import { TAT_LOINC } from '../seeds/tat-lookup.js?v=v2026-10-07.1';
+import { buildLateLabsSection } from './late-labs-section.js?v=v2026-10-07.1';
+import { buildAutomationPanel } from './automation-panel.js?v=v2026-10-07.1';
 // Optional filtered-CSV download (labs × order stages → the uploaded file's own rows).
 // It reads state.parsed.raw — PATIENT DATA, memory-only; see state.js for the pairing
 // rule this screen upholds at every site that writes state.parsed.orders.
-import { buildCsvExportSection } from './csv-export-section.js?v=v2026-10-05.2';
+import { buildCsvExportSection } from './csv-export-section.js?v=v2026-10-07.1';
+// ONE HOSPITAL ONLY (2026-10-07): the feed now carries a second hospital's orders, and
+// until the user decides how to treat them only the current hospital's count. Every
+// site below that writes state.parsed.orders goes through takeKamcOrders(). STATIC, not a
+// guarded tryImport like the ingest modules: there is no safe degraded answer — a build
+// that silently skipped the split would put the other hospital's orders into every
+// number. hospital.js is pure (no DOM, no vendor bundle), so this adds no failure mode.
+import { takeKamcOrders } from '../model/hospital.js?v=v2026-10-07.1';
 
 /** The SAME specifier main.js and ui/automation-panel.js import — resolving to
  *  the identical URL means the probe below hits the already-cached module. */
-const AUTOMATION_PIPELINE_URL = '../automation/pipeline.js?v=v2026-10-05.2';
+const AUTOMATION_PIPELINE_URL = '../automation/pipeline.js?v=v2026-10-07.1';
 
 /** Format an ISO timestamp as local 'HH:MM' for snapshot-freshness labels. */
 function fmtHHMM(iso) {
@@ -230,7 +237,7 @@ function normalizeTracker(res) {
 
 async function ingestCsv(file) {
   const Papa = await getPapa();
-  const mod = await tryImport('../ingest/csv.js?v=v2026-10-05.2');
+  const mod = await tryImport('../ingest/csv.js?v=v2026-10-07.1');
   const fn = pickFn(mod, ['parseKamcCsv', 'parseCsv', 'ingestCsv', 'parseOrders', 'parse']);
   if (fn) {
     const text = await file.text();
@@ -243,7 +250,7 @@ async function ingestCsv(file) {
 
 async function ingestTracker(file) {
   const XLSX = await getXLSX();
-  const mod = await tryImport('../ingest/xlsx.js?v=v2026-10-05.2');
+  const mod = await tryImport('../ingest/xlsx.js?v=v2026-10-07.1');
   const fn = pickFn(mod, ['parseTracker', 'ingestXlsx', 'parseXlsx', 'parse']);
   if (fn) {
     const buf = await file.arrayBuffer();
@@ -398,7 +405,7 @@ export async function render(container, ctx) {
   /** True when an automation run owns the live pull — either the ?auto= URL
    *  trigger (main.js) or the automation card's own on-render auto-pull. Both
    *  reach the pipeline's pull step, which writes exactly what fetchLive()
-   *  writes (state.parsed.orders / heroDataAt / files.csv). */
+   *  writes (state.parsed.orders + excludedHospitals / heroDataAt / files.csv). */
   function automationWillPull() {
     const mode = urlAutoMode();
     if (mode === 'full') return true; // ?auto=full forces every boolean on for that run
@@ -465,7 +472,7 @@ export async function render(container, ctx) {
     const gcfg = (store.settings && store.settings.grafana) || {};
     const dataKey = (gcfg.dataKey || '').trim();
     try {
-      const mod = await import('../ingest/grafana.js?v=v2026-10-05.2');
+      const mod = await import('../ingest/grafana.js?v=v2026-10-07.1');
       const asOf = state.reportDate || todayISO();
       const directConfigured = !!(gcfg.baseUrl && gcfg.accessToken);
       try {
@@ -474,7 +481,9 @@ export async function render(container, ctx) {
         const res = await mod.fetchKamcOrders(gcfg, {
           fromMs: mod.yearStartMs(asOf), toMs: Date.now(),
         });
-        state.parsed.orders = res.rows;
+        // The toast counts the KEPT rows — the same number the summary card shows; the
+        // other hospital's are announced by the notice in paint(), not hidden in here.
+        const kept = takeKamcOrders(state.parsed, res.rows);
         // Live rows carry no patient columns, and an earlier upload's raw must never
         // pair with them (state.js) — the accessor already drops it; stated for intent.
         state.parsed.raw = null;
@@ -482,13 +491,15 @@ export async function render(container, ctx) {
         errorsByKind.csv = res.errors || [];
         state.files.csv = { name: `${STR.upload.grafanaSourceName} ${new Date().toLocaleString('en-GB')}` };
         csvZone.setLoaded(state.files.csv.name);
-        toast(STR.upload.grafanaOk.replace('{n}', String(res.rows.length)), 'ok');
+        toast(STR.upload.grafanaOk.replace('{n}', String(kept.length)), 'ok');
       } catch (direct) {
         // A CORS/network failure surfaces as TypeError. If a data key is set, fall
         // back to the encrypted snapshot the GitHub Action publishes server-side.
         if (direct instanceof TypeError && dataKey) {
           const snap = await mod.fetchKamcSnapshot(dataKey);
-          state.parsed.orders = snap.rows;
+          // The snapshot keeps EVERY hospital's rows (scripts/fetch-kamc.mjs does not
+          // filter, so they are there when the user decides) — the split happens here.
+          const kept = takeKamcOrders(state.parsed, snap.rows);
           state.parsed.raw = null; // the encrypted snapshot has no patient columns either
           state.heroDataAt = snap.fetchedAt; // snapshot's real age, not load time
           errorsByKind.csv = snap.errors || [];
@@ -497,7 +508,7 @@ export async function render(container, ctx) {
           csvZone.setLoaded(state.files.csv.name);
           toast(
             STR.upload.grafanaSnapshotOk
-              .replace('{n}', String(snap.rows.length))
+              .replace('{n}', String(kept.length))
               .replace('{t}', t),
             'ok', 9000,
           );
@@ -530,14 +541,20 @@ export async function render(container, ctx) {
         const res = await ingestCsv(file);
         if (res._missing || !res.orders) {
           usedMock = true;
-          state.parsed.orders = buildMockOrders();
+          takeKamcOrders(state.parsed, buildMockOrders()); // same door as real rows
           state.parsed.raw = null; // mock rows have no original file behind them
           toast(STR.upload.ingestMissing, 'warn');
         } else {
           // ORDER MATTERS: orders first, then raw — assigning orders drops any raw
           // (state.js accessor), so the reverse would silently lose this upload's.
           // The ONLY place in the app raw is set to a value.
-          state.parsed.orders = res.orders;
+          // Orders are the current hospital's rows only (takeKamcOrders); raw stays the WHOLE
+          // file, the other hospital's lines included, and still pairs correctly: raw
+          // .records is indexed by each row's own lineNo (its index in the parse, set by
+          // ingest/csv.js), not by its position in orders, so dropping rows never shifts
+          // a kept row's record — and the filtered-CSV download walks orders, so an
+          // excluded line is never handed back.
+          takeKamcOrders(state.parsed, res.orders);
           // The file NAME travels inside raw, captured from THIS upload. state.files.csv
           // is reassigned before a new parse resolves, so a download that read it at
           // click time could carry the NEW file's name over the OLD file's rows.
@@ -605,7 +622,7 @@ export async function render(container, ctx) {
 
   function loadMock() {
     usedMock = true;
-    state.parsed.orders = buildMockOrders();
+    takeKamcOrders(state.parsed, buildMockOrders());
     state.parsed.raw = null; // mock rows: no original file, no export
     state.parsed.tracker = buildMockTracker();
     state.heroDataAt = new Date().toISOString();
@@ -640,6 +657,16 @@ export async function render(container, ctx) {
           { label: STR.upload.dateRange, value: s.range, small: true },
         ],
       }));
+      // Other hospitals' orders left out on the way in (takeKamcOrders) — said directly
+      // under the summary whose counts they are missing from, one line per hospital, so
+      // a total that looks short of the source file is explained where it is read.
+      const excluded = state.parsed.excludedHospitals || [];
+      if (excluded.length) {
+        summaryHost.appendChild(el('div', { class: 'panel-warn', role: 'status' }, excluded.map((h) => el('div', {
+          class: 'small', style: 'color:var(--warn-text,#92400E);font-weight:600',
+          text: `⚠ ${STR.upload.hospitalExcluded(h.count, h.name || h.id)}`,
+        }))));
+      }
     }
     if (state.parsed.tracker) {
       const t = state.parsed.tracker;
@@ -843,7 +870,7 @@ export async function render(container, ctx) {
     const seq = ++unmatchedSeq;
     let mod;
     try {
-      mod = await import('../ingest/tat-suggest.js?v=v2026-10-05.2');
+      mod = await import('../ingest/tat-suggest.js?v=v2026-10-07.1');
     } catch { return; } // module not present yet — keep the plain panel behavior
     if (seq !== unmatchedSeq) return; // a newer paint superseded this run
     const fn = pickFn(mod, ['suggestTats']);
@@ -991,7 +1018,7 @@ export async function render(container, ctx) {
     if (!orders || !orders.length) { heroHost.innerHTML = ''; return; }
     let out;
     try {
-      const mod = await import('../engine/engine.js?v=v2026-10-05.2');
+      const mod = await import('../engine/engine.js?v=v2026-10-07.1');
       if (seq !== heroSeq) return; // a newer run superseded this one
       const compute = pickFn(mod, ['compute', 'runEngine', 'run']);
       if (typeof compute !== 'function') { heroHost.innerHTML = ''; return; }
@@ -1016,7 +1043,7 @@ export async function render(container, ctx) {
       let out = (state.engineOutput && state.engineOutput.totals) ? state.engineOutput : null;
       if (!out) {
         try {
-          const mod = await tryImport('../engine/engine.js?v=v2026-10-05.2');
+          const mod = await tryImport('../engine/engine.js?v=v2026-10-07.1');
           const compute = pickFn(mod, ['compute', 'runEngine', 'run']);
           if (compute) {
             out = compute(state.parsed.orders, (store.settings || {}).tatLookup, engineOpts());

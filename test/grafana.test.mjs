@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { webcrypto } from 'node:crypto';
 
 import { fetchKamcOrders, fetchKamcSnapshot, yearStartMs } from '../src/ingest/grafana.js';
+import { splitByHospital } from '../src/model/hospital.js';
 
 // ---- 30-field schema, EXACT names/types matching the real public-dashboard panel ----
 const FIELDS = [
@@ -42,10 +43,10 @@ const FIELDS = [
 ];
 
 // Pivot masked row-objects into a Grafana columnar frame (values[] per field).
-function makeFrame(rowObjs) {
+function makeFrame(rowObjs, fields = FIELDS) {
   return {
-    schema: { fields: FIELDS },
-    data: { values: FIELDS.map((f) => rowObjs.map((o) => (f.name in o ? o[f.name] : null))) },
+    schema: { fields },
+    data: { values: fields.map((f) => rowObjs.map((o) => (f.name in o ? o[f.name] : null))) },
   };
 }
 
@@ -196,6 +197,62 @@ test('fetchKamcOrders — maps frames → OrderRow[] and summary (mirrors csv.js
   assert.deepEqual(sent.timeRange, { from: '1767214800000', to: '1776999999000' });
 });
 
+test('fetchKamcOrders — a panel WITHOUT the hospital columns: hospital null, no error (legacy = KAMC)', async () => {
+  const { rows, errors } = await fetchKamcOrders(CFG, { fromMs: 1, toMs: 2, fetchImpl: stubFetch(PAYLOAD) });
+  assert.deepEqual(errors, []);
+  for (const r of rows) {
+    assert.equal(r.hospital, null);
+    assert.equal(r.orderingFacilityId, null); // the fixture carries no ordering id either
+  }
+  assert.equal(splitByHospital(rows).kept.length, rows.length, 'all rows count');
+});
+
+// The panel since 2026-09-28: the SAME 30 fields plus the ordering hospital as
+// 'facility_name' / 'facility_id' (the live names). KAMC 31763 'King Abdul ah Medical
+// City' (sic) and SGH 1037 with the source's double space. facility_id is typed as a
+// number here so the string coercion is exercised as well.
+const HOSPITAL_FIELDS = [
+  ...FIELDS,
+  { name: 'facility_name', type: 'string' },
+  { name: 'facility_id', type: 'number' },
+];
+
+test('fetchKamcOrders — maps facility_name → hospital and facility_id → orderingFacilityId fallback', async () => {
+  const kamc = { ...A1, 'Ordering facility ID': '31763', facility_name: 'King Abdul ah Medical City', facility_id: 31763 };
+  const sgh = {
+    ...A2, 'Order ID': '00990000001001', 'Ordering facility ID': '1037',
+    facility_name: 'Saudi German Hospital  Alzahraa Branch', facility_id: 1037,
+  };
+  // 'Ordering facility ID' cell empty → the hospital id column fills in.
+  const sghNoOrdering = {
+    ...B1, 'Order ID': '00990000001002', 'Ordering facility ID': null,
+    facility_name: 'Saudi German Hospital  Alzahraa Branch', facility_id: 1037,
+  };
+  const payload = { results: { A: { frames: [makeFrame([kamc, sgh, sghNoOrdering], HOSPITAL_FIELDS)] } } };
+  const { rows, errors } = await fetchKamcOrders(CFG, { fromMs: 1, toMs: 2, fetchImpl: stubFetch(payload) });
+
+  assert.deepEqual(errors, [], 'the new columns are not required and add no error');
+  assert.equal(rows.length, 3);
+  assert.equal(rows[0].hospital, 'King Abdul ah Medical City');
+  assert.equal(rows[0].orderingFacilityId, '31763');
+  assert.equal(rows[0].facility, 'KAMC Lab', 'the LAB is untouched by the hospital column');
+  assert.equal(rows[1].hospital, 'Saudi German Hospital Alzahraa Branch', 'double space collapsed');
+  assert.equal(rows[1].orderingFacilityId, '1037');
+  assert.equal(rows[2].orderingFacilityId, '1037', 'numeric facility_id → string, used as fallback');
+
+  // The new key is an organisation, not a patient field: the PII guard still holds.
+  for (const r of rows) {
+    for (const k of Object.keys(r)) {
+      assert.ok(!/patient|national|mrn|dob|gender|by$/i.test(k), `unexpected PII-ish key: ${k}`);
+    }
+  }
+
+  // Ingest keeps EVERY hospital (the snapshot must hold SGH for later); the cut is the app's.
+  const { kept, excluded } = splitByHospital(rows);
+  assert.deepEqual(kept, [rows[0]]);
+  assert.deepEqual(excluded, [{ id: '1037', name: 'Saudi German Hospital Alzahraa Branch', count: 2 }]);
+});
+
 test('fetchKamcOrders — reports missing expected fields (fail-soft)', async () => {
   // Drop 'Test name' and 'Order Status' from the schema/columns entirely.
   const trimmed = FIELDS.filter((f) => f.name !== 'Test name' && f.name !== 'Order Status');
@@ -334,6 +391,15 @@ test('fetchKamcSnapshot — happy path: rows + fetchedAt round-trip, snapshot su
   assert.equal(fetchImpl.calls.length, 1);
   assert.equal(fetchImpl.calls[0].url, 'data/kamc-live.enc');
   assert.equal(fetchImpl.calls[0].init.cache, 'no-store');
+});
+
+test('fetchKamcSnapshot — a snapshot from BEFORE the hospital columns is all KAMC', async () => {
+  // SNAP_ROWS carry neither orderingFacilityId nor hospital (an older committed file):
+  // every row must keep counting, exactly as before the KAMC-only cut existed.
+  const out = await fetchKamcSnapshot(KEY_HEX, { fetchImpl: stubTextFetch(await makeEncFile(SNAP_PAYLOAD)) });
+  const { kept, excluded } = splitByHospital(out.rows);
+  assert.equal(kept.length, SNAP_ROWS.length);
+  assert.deepEqual(excluded, []);
 });
 
 test('fetchKamcSnapshot — custom url is honored', async () => {

@@ -9,6 +9,9 @@ import { runGoldenAssertions, goldenOpts } from './assertions.js';
 import { GOLDEN_ORDERS } from './fixtures/golden-orders.js';
 import { TAT_LOOKUP } from '../src/seeds/tat-lookup.js';
 import { GOLDEN_EXPECTED } from './fixtures/golden-expected.js';
+// The download tool's own ladder classifier — a SECOND implementation of the same rule,
+// used below as a per-line cross-check of the engine's buckets (never by the engine).
+import { stageOf } from '../src/model/csv-filter.js';
 
 const ZERO_DELTAS = {
   total: 0, collected: 0, dispatched: 0, received: 0, completed: 0, rejected: 0,
@@ -494,4 +497,141 @@ test('manual-only cancelled month surfaces (orders 0, cancelled = manual)', () =
   assert.equal(jan.cancelled, 8);
   assert.equal(jan.orders, 0);
   assert.equal(jan.results, 0);
+});
+
+// ---- THE LADDER (2026-10-07: "the four stage cards always sum to total + 2") --------
+// Each order sits on exactly ONE rung — the FURTHEST milestone it reached — so the four
+// exec cards (في انتظار شحن العينة / شُحنت ولم تُستلم / تحت الإجراء / مكتملة) partition
+// total. The bug: awaitingDispatch tested only "no dispatch date" and shippedNotReceived
+// only "dispatched, not received", so a line RESULTED with a blank dispatch / receipt
+// scan (two live KAMC orders, status 'Result Approved') was counted in a pipeline card
+// AND in completed. Every skipped-step shape below, one SYNTHETIC line each (no real
+// order ever appears in a test), beside the four clean rungs. Calendar: Mon 2026-09-28
+// order + collection, Tue 09-29 dispatch, Wed 09-30 receipt, Fri 10-02 result; asOf
+// Wed 10-07 is after every timestamp. 'LADDER TEST' is in no lookup, so its TAT comes
+// from the CSV fallback (3) and no line is ever 'No Match'.
+const LADDER_ASOF = '2026-10-07';
+function ladderCases() {
+  const D = '2026-09-29 09:00:00';
+  const RCV = '2026-09-30 10:00:00';
+  const RES = '2026-10-02 11:00:00';
+  const r = (orderId, facility, o) => ({
+    orderDate: '2026-09-28', facility, orderId, lineNo: 1, loinc: null, testName: 'LADDER TEST',
+    collected: '2026-09-28 08:00:00', dispatched: null, received: null, resulted: null,
+    rawStatus: 'In Progress', tatDaysCsv: 3, ...o,
+  });
+  // [line, the ONE bucket it must land in (null = none: cancelled)]
+  return [
+    [r('AD', 'Lab A', {}), 'awaitingDispatch'],
+    [r('SNR', 'Lab A', { dispatched: D }), 'shippedNotReceived'],
+    [r('AR', 'Lab A', { dispatched: D, received: RCV }), 'awaitingResults'],
+    [r('DONE', 'Lab A', { dispatched: D, received: RCV, resulted: RES, rawStatus: 'Result Approved' }), 'completed'],
+    // THE LIVE CASE: order + collected + RESULT, no dispatch, no receipt (was AD + completed).
+    [r('RES_ONLY', 'Lab B', { resulted: RES, rawStatus: 'Result Approved' }), 'completed'],
+    // Dispatched + resulted, no receipt (was shippedNotReceived + completed).
+    [r('DISP_RES', 'Lab B', { dispatched: D, resulted: RES, rawStatus: 'Result Approved' }), 'completed'],
+    // Received with no dispatch date (was awaitingDispatch + awaitingResults).
+    [r('RCV_ONLY', 'Lab B', { received: RCV }), 'awaitingResults'],
+    [r('RCV_RES', 'Lab B', { received: RCV, resulted: RES, rawStatus: 'Result Approved' }), 'completed'],
+    // Rejected with no milestone dates at all, and rejected after dispatch only.
+    [r('REJ_BARE', 'Lab B', { collected: null, rawStatus: 'Result Rejected' }), 'completed'],
+    [r('REJ_DISP', 'Lab B', { dispatched: D, rawStatus: 'Result Rejected' }), 'completed'],
+    // No order date at all: total counts EVERY non-cancelled line, so the bottom rung
+    // must too (it used to require an order date and the line fell out of all four).
+    [r('NO_DATES', 'Lab A', { orderDate: null, collected: null }), 'awaitingDispatch'],
+    // Cancelled outranks any date: in no bucket and not in total.
+    [r('CANC', 'Lab A', { resulted: RES, rawStatus: 'Order Cancelled' }), null],
+  ];
+}
+const LADDER_KEYS = ['awaitingDispatch', 'shippedNotReceived', 'awaitingResults', 'completed'];
+const stagesOf = (out) => Object.fromEntries(LADDER_KEYS.map((k) => [k, out.buckets[k]]));
+/** model/csv-filter.js stages → the engine bucket each one belongs to. */
+const DOWNLOAD_TO_BUCKET = {
+  notCollected: 'awaitingDispatch', notShipped: 'awaitingDispatch',
+  notReceived: 'shippedNotReceived', notResulted: 'awaitingResults',
+  resulted: 'completed', rejected: 'completed', cancelled: null,
+};
+
+test('LADDER: every skipped-step line lands in exactly ONE bucket — its furthest rung', () => {
+  for (const [line, want] of ladderCases()) {
+    const out = compute([line], {}, { asOf: LADDER_ASOF });
+    const oneHot = Object.fromEntries(LADDER_KEYS.map((k) => [k, k === want ? 1 : 0]));
+    assert.deepEqual(stagesOf(out), oneHot, `${line.orderId} must sit in ${want} and nowhere else`);
+    assert.equal(out.totals.total, want ? 1 : 0, `${line.orderId}: total`);
+    // The compliance table classifies through the same rung: one headline column each.
+    if (want) {
+      const [L] = out.byLab;
+      const pre = want === 'awaitingDispatch' || want === 'shippedNotReceived';
+      assert.deepEqual(
+        { pipeline: L.pipeline, awaitingResult: L.awaitingResult, completed: L.completed },
+        { pipeline: pre ? 1 : 0, awaitingResult: want === 'awaitingResults' ? 1 : 0, completed: want === 'completed' ? 1 : 0 },
+        `${line.orderId}: one byLab headline column`,
+      );
+    } else {
+      assert.deepEqual(out.byLab, [], `${line.orderId}: a cancelled line has no lab row`);
+    }
+    // And the download tool's ladder files the line on the SAME rung.
+    assert.equal(DOWNLOAD_TO_BUCKET[stageOf(line)], want, `${line.orderId}: csv-filter stageOf agrees`);
+  }
+});
+
+test('LADDER: Σ the four cards === total, and every lab\'s columns === its total (the "total + 2" regression)', () => {
+  const out = compute(ladderCases().map(([line]) => line), {}, { asOf: LADDER_ASOF });
+  const b = out.buckets;
+  assert.deepEqual(stagesOf(out), {
+    awaitingDispatch: 2, shippedNotReceived: 1, awaitingResults: 2, completed: 6,
+  }); // the pre-fix engine gave 4 / 2 / 2 / 6 = 14 against a total of 11
+  assert.equal(out.totals.total, 11);
+  assert.equal(b.awaitingDispatch + b.shippedNotReceived + b.awaitingResults + b.completed, out.totals.total,
+    'total = awaitingDispatch + shippedNotReceived + awaitingResults + completed');
+  assert.equal(b.rejected, 2, 'rejected stays its own value, inside completed');
+  assert.ok(b.lateNoResult <= b.awaitingResults, 'late ⊆ awaitingResults');
+  assert.equal(b.lateNoResult, 2, 'AR + RCV_ONLY: received Wed 09-30 + 3 business days = Mon 10-05 ≤ asOf');
+
+  const lab = (name) => out.byLab.find((l) => l.lab === name);
+  const head = (l) => ({ total: l.total, pipeline: l.pipeline, awaitingResult: l.awaitingResult, completed: l.completed });
+  assert.deepEqual(head(lab('Lab A')), { total: 5, pipeline: 3, awaitingResult: 1, completed: 1 });
+  // Lab B carries every skipped-step line: the pre-fix pipeline was 2 (RES_ONLY and
+  // DISP_RES counted pre-receipt AND completed) and its columns summed to 8 of 6.
+  assert.deepEqual(head(lab('Lab B')), { total: 6, pipeline: 0, awaitingResult: 1, completed: 5 });
+  for (const l of out.byLab) {
+    assert.equal(l.pipeline + l.awaitingResult + l.completed, l.total, `headline partition for ${l.lab}`);
+    assert.equal(l.pipeline + l.awaitingResult + l.onTime + l.resultedLate + l.rejected, l.total,
+      `finer partition for ${l.lab}`);
+  }
+  // pipeline IS the two pre-receipt cards, lab by lab summed.
+  const pipe = out.byLab.reduce((s, l) => s + l.pipeline, 0);
+  assert.equal(pipe, b.awaitingDispatch + b.shippedNotReceived, 'Σ byLab pipeline = AD + SNR');
+  assert.equal(out.byLab.reduce((s, l) => s + l.awaitingResult, 0), b.awaitingResults);
+  assert.equal(out.byLab.reduce((s, l) => s + l.completed, 0), b.completed);
+});
+
+test('LADDER on the golden data: the engine\'s cards equal the download tool\'s ladder, line by line summed', () => {
+  // A second, independent ladder (csv-filter stageOf) over all 628 golden lines must
+  // reproduce the published cards exactly — and the golden numbers are the published
+  // ones (the fixture has no skipped-step rows, so the 2026-10-07 change moved none).
+  const out = compute(GOLDEN_ORDERS, TAT_LOOKUP, goldenOpts());
+  const viaDownload = Object.fromEntries(LADDER_KEYS.map((k) => [k, 0]));
+  for (const r of GOLDEN_ORDERS) {
+    const k = DOWNLOAD_TO_BUCKET[stageOf(r)];
+    if (k) viaDownload[k]++;
+  }
+  assert.deepEqual(stagesOf(out), viaDownload);
+  assert.deepEqual(out.buckets, GOLDEN_EXPECTED.buckets);
+});
+
+test('FUNNEL is a DATE count, not the ladder: a skipped-step line can put a stage BELOW the next one', () => {
+  // Deliberately unchanged on 2026-10-07: each funnel stage counts the lines CARRYING
+  // that timestamp. RES_ONLY / DISP_RES / RCV_RES / REJ_* reach completed without a
+  // receipt date, so received (4) reads BELOW completed (6) — while the four cards over
+  // the very same lines still sum exactly to total.
+  const out = compute(ladderCases().map(([line]) => line), {}, { asOf: LADDER_ASOF });
+  assert.deepEqual(out.funnel, {
+    created: 10, // NO_DATES has no order date; total (11) counts it anyway
+    collected: 9, dispatched: 5, received: 4, resulted: 6, completed: 6,
+  });
+  assert.ok(out.funnel.received < out.funnel.completed, 'a funnel stage may undercut the next');
+  const b = out.buckets;
+  assert.equal(b.awaitingDispatch + b.shippedNotReceived + b.awaitingResults + b.completed, out.totals.total,
+    'the partition cannot');
 });

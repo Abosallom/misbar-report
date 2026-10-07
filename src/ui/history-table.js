@@ -30,9 +30,9 @@
 // نسبة الاكتمال nonsense). The published entry is still shown when nothing can be
 // computed, marked `staleDef` so the footnote says the number is old-definition.
 // Stored history itself is NEVER rewritten here — this module only reads it.
-import { el } from './components.js?v=v2026-10-05.2';
-import { formatDateAr } from '../i18n/ar.js?v=v2026-10-05.2';
-import { COMPLETED_DEF_SINCE, LATE_DEF_SINCE } from '../model/delta-baseline.js?v=v2026-10-05.2';
+import { el } from './components.js?v=v2026-10-07.1';
+import { formatDateAr } from '../i18n/ar.js?v=v2026-10-07.1';
+import { COMPLETED_DEF_SINCE, LATE_DEF_SINCE, PARTITION_DEF_SINCE } from '../model/delta-baseline.js?v=v2026-10-07.1';
 
 // Every relative specifier in this file — static AND the two guarded dynamic ones below —
 // carries its ?v= INLINE so scripts/stamp-version.mjs owns the whole literal (its SPEC_RE
@@ -127,8 +127,8 @@ const monthNote = (anchor) => (anchor
 // `restated` = those rows were recomputed under the new rule (the normal case, engine
 // present); `stale` = a published pre-change row is still on screen under the OLD rule
 // because nothing could be computed for it.
-const DEF_NOTE_RESTATED = (d) => `أرقام «مكتملة» و«متأخرة بلا نتيجة» للتواريخ السابقة لـ ${d} معروضة وفق التعريفات الجديدة (المكتملة تشمل المرفوضة؛ عطلة الأسبوع الجمعة والسبت والمتأخر يشمل المستحق اليوم) لتكون السلسلة قابلة للمقارنة، وقد تختلف عن الرقم المنشور حينها.`;
-const DEF_NOTE_STALE = (d) => `تغيّرت تعريفات «مكتملة» و«متأخرة بلا نتيجة» قبل ${d}؛ الصفوف المنشورة قبل هذا التاريخ ما زالت بالتعريفات القديمة، فلا تُقارن مباشرة بما بعدها.`;
+const DEF_NOTE_RESTATED = (d) => `أرقام التواريخ السابقة لـ ${d} معروضة وفق التعريفات الحالية (طلبات المستشفى الحالي فقط؛ كل طلب في مرحلة واحدة؛ المكتملة تشمل المرفوضة؛ عطلة الأسبوع الجمعة والسبت والمتأخر يشمل المستحق اليوم) لتكون السلسلة قابلة للمقارنة، وقد تختلف عن الرقم المنشور حينها.`;
+const DEF_NOTE_STALE = (d) => `تغيّرت تعريفات الأرقام قبل ${d} (احتساب طلبات المستشفى الحالي فقط، وكل طلب في مرحلة واحدة، وتعريفا «مكتملة» و«متأخرة بلا نتيجة»)؛ الصفوف المنشورة قبل هذا التاريخ ما زالت بالتعريفات القديمة، فلا تُقارن مباشرة بما بعدها.`;
 // مرفوضة sits next to مكتملة and is a SUBSET of it — say so under every table so the
 // two columns can never be read as two separate quantities to be added together.
 const SUBSET_NOTE = 'الرفض نتيجة نهائية للمختبر، لذلك عمود «مرفوضة» محتسب ضمن «مكتملة» ومعروض للتفصيل فقط — لا يُضاف فوقها.';
@@ -290,11 +290,12 @@ function computeFirstDay(rows, history, endDay, parseFn, toDayFn) {
   return Math.min(min, endDay);
 }
 /** True for a sample date recorded before مكتملة changed meaning (see file header). */
-// The LATER of the two definition boundaries governs: rows published before it may
-// speak an old rule for at least one column (مكتملة before COMPLETED_DEF_SINCE;
-// متأخرة بلا نتيجة — weekend + due-today boundary — before LATE_DEF_SINCE), so the
-// COMPUTED row wins there and is marked `restated`. One boundary check, no zigzag.
-const DEF_SINCE_LATEST = LATE_DEF_SINCE > COMPLETED_DEF_SINCE ? LATE_DEF_SINCE : COMPLETED_DEF_SINCE;
+// The LATEST definition boundary governs: rows published before it may speak an old
+// rule for at least one column (مكتملة before COMPLETED_DEF_SINCE; متأخرة بلا نتيجة —
+// weekend + due-today boundary — before LATE_DEF_SINCE; every column — other
+// hospital's orders, stages summing past the total — before PARTITION_DEF_SINCE), so
+// the COMPUTED row wins there and is marked `restated`. One boundary check, no zigzag.
+const DEF_SINCE_LATEST = [COMPLETED_DEF_SINCE, LATE_DEF_SINCE, PARTITION_DEF_SINCE].sort().pop();
 const isPreDefChange = (date) => isIso(date) && date < DEF_SINCE_LATEST;
 
 // One sample. A published snapshot is preferred — EXCEPT for a date before
@@ -482,8 +483,9 @@ function renderRangeContent(bundle, range) {
     frag.appendChild(el('p', { class: 'small muted', style: 'margin:0', text: 'لا توجد بيانات ضمن هذا النطاق.' }));
     return frag;
   }
-  // The definitions changed twice (مكتملة on COMPLETED_DEF_SINCE, متأخرة بلا نتيجة on
-  // LATE_DEF_SINCE). Whenever a rendered sample predates the LATER boundary, say which
+  // The definitions changed three times (مكتملة on COMPLETED_DEF_SINCE, متأخرة بلا نتيجة
+  // on LATE_DEF_SINCE, hospital + stage partition on PARTITION_DEF_SINCE). Whenever a
+  // rendered sample predates the LATEST boundary, say which
   // definitions the columns speak — above the chart and the table, because it governs
   // how every value below is to be read. The displayed date MUST be DEF_SINCE_LATEST,
   // the same boundary isPreDefChange restates by, or the note misdates its own scope.
@@ -549,8 +551,8 @@ export function buildHistoryPanel({ rows, tatTests, history, endIso, deltaMode, 
 
   (async () => {
     const [asofMod, wdMod] = await Promise.all([
-      tryImport('../engine/asof.js?v=v2026-10-05.2'),
-      tryImport('../engine/workday.js?v=v2026-10-05.2'),
+      tryImport('../engine/asof.js?v=v2026-10-07.1'),
+      tryImport('../engine/workday.js?v=v2026-10-07.1'),
     ]);
     const computeAsOf = asofMod && typeof asofMod.computeNumbersAsOf === 'function' ? asofMod.computeNumbersAsOf : null;
     const degraded = !computeAsOf;

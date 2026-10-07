@@ -53,12 +53,28 @@
 //                      dated day = resulted day when present, else the LAST
 //                      milestone the row is known to have reached: received, else
 //                      dispatched, else orderDate
-//   awaitingDispatch   orderDate ≤ asOf AND NOT dispatched ≤ asOf
-//   shippedNotReceived dispatched ≤ asOf AND NOT received ≤ asOf
-//   awaitingResults    received ≤ asOf AND NOT resulted ≤ asOf AND NOT rejected
+// The four STAGE keys are the engine's LADDER (engine.js ladderStage) time-shifted:
+// the ONE rung a row stood on at the as-of day, the furthest milestone reached BY then.
+// "rejected-by-asOf" below is the rejected key's dated test.
+//   awaitingDispatch   orderDate ≤ asOf AND NOT (dispatched OR received OR resulted)
+//                      ≤ asOf AND NOT rejected-by-asOf
+//   shippedNotReceived dispatched ≤ asOf AND NOT (received OR resulted) ≤ asOf
+//                      AND NOT rejected-by-asOf
+//   awaitingResults    received ≤ asOf AND NOT resulted ≤ asOf AND NOT rejected-by-asOf
+//   (completed, above, is the top rung)
 //   lateNoResult       awaitingResults ∩ StdTAT resolved ∩ due day ≤ asOf day
 //                      (2026-08-05: was `due day < asOf day`; due TODAY with no
 //                      result is now late — see the LATE rule note above)
+// So on every as-of day, over rows whose milestones do not precede their own order
+// date: total = awaitingDispatch + shippedNotReceived + awaitingResults + completed.
+// Until 2026-10-07 the two lower rungs tested only their own edge (awaitingDispatch
+// "not dispatched", shippedNotReceived "not received"), so a row RESULTED with no
+// dispatch / receipt date sat in a pipeline rung AND completed — the engine's
+// "four cards sum to total + 2" bug, mirrored here; see engine.js buildBuckets.
+// The one row the engine places and this file cannot: a line with NO order date.
+// The engine counts it in total and (dateless) awaitingDispatch; here it is outside
+// every as-of day's universe, in total and awaitingDispatch alike. That is the same
+// precondition the CROWN identity always had on `total` — not a new one.
 // completed and rejected share ONE dated-day computation per row (below), so the
 // two can never disagree about when a rejected row entered the picture, and a
 // rejected row that DOES carry a result date is counted once, not twice.
@@ -66,7 +82,7 @@
 // WHY THE LAST MILESTONE, NOT THE FIRST — a rejection cannot precede receipt.
 // Dating an undated rejection by its ORDER day reported the row as finished while
 // the very same row was still counted in awaitingDispatch or shippedNotReceived
-// (neither excludes rejected, mirroring the engine), breaking the stage partition
+// (neither excluded rejected at the time, mirroring the engine), breaking the stage partition
 //   total = awaitingDispatch + shippedNotReceived + awaitingResults + completed
 // on 6 days of the golden range (e.g. 2026-05-19: completed 14 for rows received
 // only on 2026-05-20). Harmless while `rejected` was a key no surface summed;
@@ -101,6 +117,12 @@
 // day: once an exit test is true it stays true as asOf moves forward, so a row inside the
 // queue AT THE END was inside it continuously since its entry day. Therefore
 //   membership-at-end ∩ entered-in-window  ==  the window's SURVIVING entrants.
+// The 2026-10-07 ladder ADDED exits — awaitingDispatch now also leaves on received-by-
+// asOf or resulted-by-asOf, shippedNotReceived on resulted-by-asOf — and every one of
+// them is the same "<field> day ≤ asOf" shape, so monotone too: the argument and the
+// entry days above are unchanged. (It is the ladder that makes the skipped-step row
+// LEAVE the pre-dispatch queue when its result lands; before, it never left, and the
+// gate counted it as a surviving entrant of a queue it had already finished.)
 // CONSEQUENCE the reader must accept: a queue whose TOTAL fell over the window can still
 // show a POSITIVE gated value (many exits, a few entrants). That is the intended reading
 // of the chip, not a contradiction with the big cumulative number beside it.
@@ -108,8 +130,8 @@
 // the ungated function — which is what leaves the CROWN identity above, buildWeekNumbers
 // and every existing caller exactly as they were.
 
-import { parseDateTime, toEpochDay, workday, MS_PER_DAY } from './workday.js?v=v2026-10-05.2';
-import { buildTatIndex, resolveTat } from './tat.js?v=v2026-10-05.2';
+import { parseDateTime, toEpochDay, workday, MS_PER_DAY } from './workday.js?v=v2026-10-07.1';
+import { buildTatIndex, resolveTat } from './tat.js?v=v2026-10-07.1';
 
 // engine.js's cascade keys off these exact rawStatus literals (not exported).
 const RAW_CANCELLED = 'Order Cancelled';
@@ -284,39 +306,44 @@ export function computeNumbersAsOf({ rows, tatTests, asOfIso, sinceIso, opts = {
     // rejected is a SUBSET of completed here, never an addition on top of it.
     if (resultedByAsOf || rejectedByAsOf) completed++;
 
-    // awaitingDispatch / shippedNotReceived — the pre-completion buckets. The engine
-    // guards both with !rejected (a rejection is completed work, so it must leave the
-    // pipeline), and the identity total = awaitingDispatch + shippedNotReceived +
-    // awaitingResults + completed depends on it.
+    // THE LADDER, time-shifted (engine.js ladderStage): the ONE rung this row stood on
+    // at the as-of day — top rung first, so the furthest milestone reached BY then wins
+    // over an earlier blank. completed (counted just above) is the top rung; the three
+    // below are the pre-completion queues. One value per row, so no row is ever counted
+    // in two of them (or in one of them AND completed) — the identity
+    //   total = awaitingDispatch + shippedNotReceived + awaitingResults + completed
+    // rests on it. `null` = no milestone by asOf at all — not ordered yet, or no order
+    // date ever: in no rung, exactly as it is in no total (the dateless line is the
+    // one the engine still files in awaitingDispatch — header note).
     //
-    // Time-shifted, the guard is `rejectedByAsOf`, NOT `isRejected`: a row that is
-    // rejected TODAY was still genuinely awaiting dispatch on a date before its
-    // rejection was dated. Guarding on isRejected would drop it out of every bucket in
-    // that window and break the identity from the other side (total 1, buckets 0).
-    // Guarding on rejectedByAsOf keeps every row in exactly ONE bucket on every date.
-    //
+    // Completion is tested as `rejectedByAsOf`, NOT `isRejected`: a row that is rejected
+    // TODAY was still genuinely awaiting dispatch on a date before its rejection was
+    // dated. Testing isRejected would drop it out of every rung in that window and break
+    // the identity from the other side (total 1, rungs 0). rejectedByAsOf keeps every
+    // row on exactly ONE rung on every date.
+    let stage = null;
+    if (resultedByAsOf || rejectedByAsOf) stage = 'completed';
+    else if (receivedByAsOf) stage = 'awaitingResults';
+    else if (dispatchedByAsOf) stage = 'shippedNotReceived';
+    else if (orderByAsOf) stage = 'awaitingDispatch';
+
     // The trailing enteredInWindow(...) on these three (and on lateNoResult below) is the
     // OPTIONAL surviving-entrants gate — a no-op unless the caller passed sinceIso. Its
     // argument is the row's ENTRY day into THIS queue, never the day it last moved.
-    if (orderByAsOf && !dispatchedByAsOf && !rejectedByAsOf
-        && enteredInWindow(orderD)) awaitingDispatch++;
-
-    if (dispatchedByAsOf && !receivedByAsOf && !rejectedByAsOf
-        && enteredInWindow(dispatchedD)) shippedNotReceived++;
-
-    // awaitingResults (engine: receivedMs != null && resultedMs == null && !rejected).
-    if (receivedByAsOf && !resultedByAsOf && !rejectedByAsOf
-        && enteredInWindow(receivedD)) awaitingResults++;
+    if (stage === 'awaitingDispatch' && enteredInWindow(orderD)) awaitingDispatch++;
+    if (stage === 'shippedNotReceived' && enteredInWindow(dispatchedD)) shippedNotReceived++;
+    // awaitingResults (engine rung: received, and not completed).
+    if (stage === 'awaitingResults' && enteredInWindow(receivedD)) awaitingResults++;
 
     // lateNoResult (engine: status === LATE && resultedMs == null). LATE =
     // non-cancelled, non-rejected, received, StdTAT resolved, and DueDate ON or
     // before the as-of day (delay = asOfDay − due ≥ 0). Due = workday(received, tat)
     // with the engine's exact StdTAT resolution (lookup, then CSV fallback), under
     // the Fri/Sat weekend.
-    // Same time-shifted guard as awaitingResults: a row rejected LATER was genuinely
-    // late-without-a-result on the earlier date, and lateNoResult is a subset of
-    // awaitingResults, so the two guards must agree or the subset breaks.
-    if (!rejectedByAsOf && receivedByAsOf && !resultedByAsOf) {
+    // Same time-shifted rung as awaitingResults — read off `stage` itself, so the
+    // subset late ⊆ awaitingResults is structural, not two guards kept in step by hand:
+    // a row rejected LATER was genuinely late-without-a-result on the earlier date.
+    if (stage === 'awaitingResults') {
       const { tat } = resolveTat(row, tatIndex, opts);
       if (tat != null) {
         const dueMs = workday(receivedD, tat); // workday floors start internally

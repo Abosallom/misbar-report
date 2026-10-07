@@ -99,13 +99,27 @@ const isLateNoResult = (e) => e.resultedMs == null && !e.rejected && e.dueMs != 
 // a lab's FINAL outcome. `rejected` is still published as its own value but is a
 // SUBSET of completed, so it is NO LONGER a partition term — the old five-way sum
 // (…+ completed + rejected) would double-count the 15 rejected rows.
+//
+// THE LADDER (2026-10-07): each line sits in ONE bucket, the FURTHEST milestone it
+// reached, so a later date wins over a blank earlier one (a result with no dispatch /
+// receipt scan is completed, not also "awaiting dispatch"). Recounted here as a single
+// classifier — one answer per line, written independently of the engine's — rather
+// than four filters, so the recount cannot overlap even where the engine's could.
 // ---------------------------------------------------------------------------
+/** The ONE rung a non-cancelled line stands on — independent re-statement of the ladder. */
+function rungOf(e) {
+  if (e.rejected || e.resultedMs != null) return 'completed';
+  if (e.receivedMs != null) return 'awaitingResults';
+  if (e.dispatchedMs != null) return 'shippedNotReceived';
+  return 'awaitingDispatch'; // the remainder — no date of any kind is required
+}
+
 test('STAGE PARTITION — الإجمالي = بانتظار الإرسال + مُرسل غير مُستلم + بانتظار النتائج + مكتمل / total splits exactly into the four disjoint buckets (rejected is inside completed)', () => {
   const ind = {
-    awaitingDispatch: count(NC, (e) => e.dispatchedMs == null && created(e)),
-    shippedNotReceived: count(NC, (e) => e.dispatchedMs != null && e.receivedMs == null),
-    awaitingResults: count(NC, (e) => e.receivedMs != null && e.resultedMs == null && !e.rejected),
-    completed: count(NC, (e) => e.resultedMs != null || e.rejected),
+    awaitingDispatch: count(NC, (e) => rungOf(e) === 'awaitingDispatch'),
+    shippedNotReceived: count(NC, (e) => rungOf(e) === 'shippedNotReceived'),
+    awaitingResults: count(NC, (e) => rungOf(e) === 'awaitingResults'),
+    completed: count(NC, (e) => rungOf(e) === 'completed'),
     rejected: count(NC, (e) => e.rejected),
   };
   const total = NC.length;
@@ -131,12 +145,28 @@ test('STAGE PARTITION — الإجمالي = بانتظار الإرسال + م�
   assert.equal(indBoth, 0, 'صف مرفوض يحمل تاريخ نتيجة / a rejected row carries a result date');
   assert.equal(out.buckets.completed - indDated, 15,
     'فرق التعريف الجديد ليس 15 صفاً مرفوضاً / the definition change must add exactly the 15 rejected rows');
+
+  // Golden data property the 2026-10-07 ladder change rests on: NO skipped-step line (a
+  // later milestone with a blank earlier one) and no dateless line, so the old per-rung
+  // filters and the ladder agree here and no published golden number moved.
+  const skipped = count(NC, (e) =>
+    (e.resultedMs != null && (e.receivedMs == null || e.dispatchedMs == null))
+    || (e.receivedMs != null && e.dispatchedMs == null)
+    || !created(e));
+  assert.equal(skipped, 0,
+    'سطر تخطّى مرحلة في البيانات الذهبية / a golden line skips a rung (or has no order date)');
 });
 
 // ---------------------------------------------------------------------------
 // 2. FUNNEL MONOTONIC + final stage === buckets.completed
 //    The final stage is COMPLETED (result date OR rejected) since 2026-07-28;
 //    `funnel.resulted` is kept as an alias carrying the identical number.
+//    MONOTONE IS A GOLDEN-DATA FACT, NOT A RULE: each funnel stage counts the lines
+//    CARRYING that date (not the ladder rung they reached), so live data with a
+//    skipped-step line (a result but no receipt scan) can legitimately read one stage
+//    below the next — see engine.js buildFunnel and engine.test.mjs's FUNNEL test. The
+//    golden fixture has no such line (asserted in STAGE PARTITION above), so here the
+//    non-increasing check is a valid audit of the recount.
 // ---------------------------------------------------------------------------
 test('FUNNEL — القمع متناقص ومرحلته الأخيرة تساوي "مكتمل" / funnel is monotonic non-increasing and its final stage === completed', () => {
   const f = {
@@ -237,7 +267,9 @@ test('BYLAB — تقسيم كل مختبر ومجاميع الأعمدة تسا�
   const indRejected = count(NC, (e) => e.rejected);
   const indOnTime = count(NC, isOnTime);
   const indLate = count(NC, isLateNoResult);
-  const indPipeline = count(NC, (e) => !e.rejected && e.receivedMs == null);
+  // pipeline = the two pre-receipt rungs of the ladder (2026-10-07: was "not rejected,
+  // no received date", which also caught a line RESULTED with a blank receipt scan).
+  const indPipeline = count(NC, (e) => rungOf(e) === 'awaitingDispatch' || rungOf(e) === 'shippedNotReceived');
 
   assert.equal(S.awaitingResult, indAwaitingResult,
     'مجموع "بانتظار النتيجة" في المختبرات لا يطابق الحساب المستقل / Σ byLab awaitingResult disagrees with independent recount');
@@ -253,6 +285,8 @@ test('BYLAB — تقسيم كل مختبر ومجاميع الأعمدة تسا�
   // Cross-surface: byLab column sums === the stage buckets / totals.
   assert.equal(S.total, out.totals.total,
     'مجموع إجماليات المختبرات ≠ الإجمالي / Σ byLab total !== totals.total');
+  assert.equal(S.pipeline, out.buckets.awaitingDispatch + out.buckets.shippedNotReceived,
+    'مجموع "قيد الإرسال/النقل" ≠ بانتظار الإرسال + مُرسل غير مُستلم / Σ byLab pipeline !== buckets.awaitingDispatch + buckets.shippedNotReceived');
   assert.equal(S.awaitingResult, out.buckets.awaitingResults,
     'مجموع "بانتظار النتيجة" ≠ "بانتظار النتائج" في المراحل / Σ byLab awaitingResult !== buckets.awaitingResults');
   assert.equal(S.rejected, out.buckets.rejected,

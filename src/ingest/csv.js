@@ -1,5 +1,8 @@
-// ingest/csv.js — parse the KAMC daily CSV export (30 cols) into normalized OrderRow[]
-// PLUS the file's own parsed rows, untouched (`raw`).
+// ingest/csv.js — parse the KAMC daily CSV export (30 cols; exports since 2026-09-28 add
+// the ordering-HOSPITAL columns, see findHospitalColumns) into normalized OrderRow[] PLUS
+// the file's own parsed rows, untouched (`raw`). Rows of EVERY ordering hospital are
+// returned — the KAMC-only cut is model/hospital.js splitByHospital, applied where the
+// app consumes the rows, never here.
 // Library is injected (browser loads PapaParse separately); never imported here.
 // PATIENT DATA has exactly two carriers here, both MEMORY-ONLY and both confined to
 // this manual-upload path:
@@ -17,7 +20,7 @@
 //    browser solely as the file the user explicitly downloads. ingest/grafana.js has NO
 //    `raw` and must never gain one — its rows are encrypted into the snapshot committed
 //    to a public repo, and the live pull carries no patient columns anyway.
-import { normFacility } from '../contracts.js?v=v2026-10-05.2';
+import { normFacility } from '../contracts.js?v=v2026-10-07.1';
 
 // Columns we actually map. Missing ones are reported in errors[] (fail soft).
 export const MAPPED_COLUMNS = [
@@ -33,6 +36,41 @@ export const MAPPED_COLUMNS = [
   'Test name',
   'TAT - Days',
 ];
+
+// ---- the ordering-HOSPITAL columns (2026-10-07) -------------------------------------
+// Since 2026-09-28 the export also carries the ordering hospital — a name and an id —
+// because a second hospital (SGH) now orders through the same system (model/hospital.js
+// has the why and the KAMC-only rule). The two sources spell the headers differently:
+// Grafana sends 'facility_name' / 'facility_id', the user's CSV shows 'Facility Name'
+// (and a re-save may change case), so they are matched on a KEY with case, spaces and
+// underscores removed. Deliberately NOT in MAPPED_COLUMNS: every file from before
+// 2026-09-28 lacks them and must stay a complete, error-free upload (rows with no
+// hospital column are KAMC by definition — model/hospital.js isKamcRow).
+// The exact key is what keeps the neighbours out: 'Performing facility name' (the LAB,
+// → OrderRow.facility) keys to 'performingfacilityname' and 'Ordering facility ID' to
+// 'orderingfacilityid', so neither can be mistaken for the hospital columns.
+export const HOSPITAL_NAME_KEY = 'facilityname';
+export const HOSPITAL_ID_KEY = 'facilityid';
+/** Header → match key: lower-case, all whitespace (incl. a BOM) and underscores removed. */
+export const columnKey = (h) => String(h ?? '').toLowerCase().replace(/[\s_]+/g, '');
+
+/**
+ * Find the ordering-hospital columns among a file's / frame's field names (first match
+ * wins). Shared with ingest/grafana.js so both paths read the SAME columns by the SAME
+ * rule. Absent → null (the row then gets hospital: null and no id fallback).
+ * @param {Iterable<string>} fields
+ * @returns {{nameCol: (string|null), idCol: (string|null)}}
+ */
+export function findHospitalColumns(fields) {
+  let nameCol = null;
+  let idCol = null;
+  for (const f of fields || []) {
+    const k = columnKey(f);
+    if (nameCol == null && k === HOSPITAL_NAME_KEY) nameCol = f;
+    if (idCol == null && k === HOSPITAL_ID_KEY) idCol = f;
+  }
+  return { nameCol, idCol };
+}
 
 const clean = (v) => {
   const s = v == null ? '' : String(v).trim();
@@ -76,6 +114,8 @@ export function parseKamcCsv(text, Papa) {
     }
   }
 
+  const { nameCol: hospitalCol, idCol: facilityIdCol } = findHospitalColumns(fields);
+
   const data = res.data || [];
   const rows = [];
   for (let i = 0; i < data.length; i++) {
@@ -105,8 +145,15 @@ export function parseKamcCsv(text, Papa) {
       // 'Performing facility id' column is absent from this export → null.
       specimenNo: clean(r['Specimen Id']),
       shipmentId: clean(r['Shipment ID']),
-      orderingFacilityId: clean(r['Ordering facility ID']),
+      // 'Ordering facility ID' stays the source; the hospital id column (facility_id)
+      // carries the SAME id and fills in when that column is absent or the cell blank —
+      // this id is what model/hospital.js isKamcRow decides on.
+      orderingFacilityId:
+        clean(r['Ordering facility ID']) ?? (facilityIdCol ? clean(r[facilityIdCol]) : null),
       performingFacilityId: clean(r['Performing facility id']),
+      // Ordering HOSPITAL name, whitespace-collapsed (the source writes SGH with a double
+      // space). Not patient data. null when the file predates the column.
+      hospital: hospitalCol ? normFacility(clean(r[hospitalCol])) : null,
       // Patient date of birth, for the per-lab late-tests Excel ONLY (user request
       // 2026-09-28: labs match a specimen to its patient by specimen no + DOB). This
       // is PATIENT DATA and is carried on THIS path alone — the manual CSV upload,

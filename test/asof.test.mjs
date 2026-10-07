@@ -650,3 +650,129 @@ test('gate: the six EVENT keys are byte-identical gated vs ungated, on the golde
     assert.ok(on.numbers[k] < off.numbers[k], `${k}: the gate did nothing (${off.numbers[k]})`);
   }
 });
+
+// =============================================================================
+// 6. THE LADDER (2026-10-07) — the four stage keys partition total on EVERY day
+// =============================================================================
+// The engine's "four cards sum to total + 2" bug lived here too: awaitingDispatch only
+// tested "not dispatched by asOf" and shippedNotReceived "not received by asOf", so a
+// row RESULTED with a blank dispatch / receipt date stayed in a pipeline queue for ever
+// AND counted as completed. Both files now file each row on ONE rung — the furthest
+// milestone reached by the as-of day. Same SYNTHETIC skipped-step shapes as
+// engine.test.mjs's ladder suite (copied, not imported: a test file is not a module to
+// share). Calendar: Mon 2026-09-28 order + collection, Tue 09-29 dispatch, Wed 09-30
+// receipt, Fri 10-02 result; 10-07 is past every timestamp (saturated).
+const L_SAT = '2026-10-07';
+function ladderRows() {
+  const D = '2026-09-29 09:00:00';
+  const RCV = '2026-09-30 10:00:00';
+  const RES = '2026-10-02 11:00:00';
+  const r = (orderId, o) => qrow({
+    orderId, orderDate: '2026-09-28', collected: '2026-09-28 08:00:00', testName: 'LADDER TEST', tatDaysCsv: 3, ...o,
+  });
+  return [
+    r('AD', {}),
+    r('SNR', { dispatched: D }),
+    r('AR', { dispatched: D, received: RCV }),
+    r('DONE', { dispatched: D, received: RCV, resulted: RES, rawStatus: 'Result Approved' }),
+    r('RES_ONLY', { resulted: RES, rawStatus: 'Result Approved' }), // THE LIVE CASE
+    r('DISP_RES', { dispatched: D, resulted: RES, rawStatus: 'Result Approved' }),
+    r('RCV_ONLY', { received: RCV }),
+    r('RCV_RES', { received: RCV, resulted: RES, rawStatus: 'Result Approved' }),
+    r('REJ_BARE', { collected: null, rawStatus: 'Result Rejected' }),
+    r('REJ_DISP', { dispatched: D, rawStatus: 'Result Rejected' }),
+    r('CANC', { resulted: RES, rawStatus: 'Order Cancelled' }),
+  ];
+}
+const STAGE_KEYS = ['awaitingDispatch', 'shippedNotReceived', 'awaitingResults', 'completed'];
+const stageSum = (n) => STAGE_KEYS.reduce((s, k) => s + n[k], 0);
+/** Every ISO day from..to inclusive (UTC). */
+function isoDays(from, to) {
+  const out = [];
+  for (let t = Date.parse(`${from}T00:00:00Z`); t <= Date.parse(`${to}T00:00:00Z`); t += 86400000) {
+    out.push(new Date(t).toISOString().slice(0, 10));
+  }
+  return out;
+}
+const L_DAYS = isoDays('2026-09-27', '2026-10-08'); // the day before the orders → past saturation
+
+test('LADDER as-of: each skipped-step row stands on exactly ONE rung every day, and Σ rungs === total', () => {
+  const rows = ladderRows();
+  for (const row of rows) {
+    for (const iso of L_DAYS) {
+      const n = computeNumbersAsOf({ rows: [row], tatTests: {}, asOfIso: iso }).numbers;
+      // total is 0 (not ordered yet / cancelled) or 1, and the rungs must match it exactly.
+      assert.equal(stageSum(n), n.total, `${row.orderId} @ ${iso}: rungs ${stageSum(n)} vs total ${n.total}`);
+      for (const k of STAGE_KEYS) assert.ok(n[k] <= 1, `${row.orderId} @ ${iso}: ${k} counted twice`);
+    }
+  }
+  // The whole set, every day, and against an independent hand count at three dates.
+  for (const iso of L_DAYS) {
+    const n = computeNumbersAsOf({ rows, tatTests: {}, asOfIso: iso }).numbers;
+    assert.equal(stageSum(n), n.total, `Σ rungs === total @ ${iso}`);
+  }
+  const at = (iso) => {
+    const n = computeNumbersAsOf({ rows, tatTests: {}, asOfIso: iso }).numbers;
+    return Object.fromEntries(['total', ...STAGE_KEYS].map((k) => [k, n[k]]));
+  };
+  // 09-28: everything ordered, only REJ_BARE dated (its rejection falls back to the order day).
+  assert.deepEqual(at('2026-09-28'), { total: 10, awaitingDispatch: 9, shippedNotReceived: 0, awaitingResults: 0, completed: 1 });
+  // 10-01: dispatched / received rows have moved up; nothing is resulted yet. RCV_ONLY and
+  // RCV_RES were received with NO dispatch date — awaitingResults, not still pre-dispatch.
+  assert.deepEqual(at('2026-10-01'), { total: 10, awaitingDispatch: 2, shippedNotReceived: 2, awaitingResults: 4, completed: 2 });
+  // 10-02: the results land — RES_ONLY leaves awaitingDispatch, DISP_RES leaves
+  // shippedNotReceived (the pre-fix code kept both there AND counted them completed).
+  assert.deepEqual(at('2026-10-02'), { total: 10, awaitingDispatch: 1, shippedNotReceived: 1, awaitingResults: 2, completed: 6 });
+});
+
+test('LADDER CROWN: as-of at a saturated date === the engine on the skipped-step rows', () => {
+  // The identity proves the two ladders are the SAME ladder: every "≤ asOf" test collapses
+  // to the engine's "!= null" once no timestamp is later than the as-of day.
+  const rows = ladderRows();
+  const { numbers } = computeNumbersAsOf({ rows, tatTests: {}, asOfIso: L_SAT });
+  assert.deepEqual(numbers, currentNumbersOf(compute(rows, {}, { asOf: L_SAT })));
+  assert.equal(stageSum(numbers), numbers.total);
+  // The ONE documented divergence: a line with NO order date. The engine's total counts
+  // every non-cancelled line, so its bottom rung takes it; as-of cannot place it on any
+  // day, so it is outside total AND awaitingDispatch — off by that one line on exactly
+  // those two keys, and each side's partition still holds.
+  const dateless = qrow({ orderId: 'NO_DATES', testName: 'LADDER TEST', tatDaysCsv: 3 });
+  const eng = currentNumbersOf(compute([...rows, dateless], {}, { asOf: L_SAT }));
+  const asof = computeNumbersAsOf({ rows: [...rows, dateless], tatTests: {}, asOfIso: L_SAT }).numbers;
+  assert.deepEqual(asof, numbers, 'as-of ignores the dateless line');
+  assert.deepEqual(eng, { ...numbers, total: numbers.total + 1, awaitingDispatch: numbers.awaitingDispatch + 1 });
+  assert.equal(stageSum(eng), eng.total);
+});
+
+test('LADDER on the golden data: Σ rungs === total on every day of the fixture\'s range', () => {
+  // 2026-04-22 (the day before the first order) → 2026-07-10 (past the report date).
+  for (const iso of isoDays('2026-04-22', '2026-07-10')) {
+    const n = computeNumbersAsOf({ rows: GOLDEN_ORDERS, tatTests: TAT_LOOKUP, asOfIso: iso }).numbers;
+    assert.equal(stageSum(n), n.total, `golden Σ rungs === total @ ${iso}`);
+  }
+});
+
+test('LADDER + gate: every queue membership is ONE unbroken run that starts on its entry day', () => {
+  // The SURVIVING ENTRANTS argument needs every EXIT to be monotone, so a row in a queue at
+  // the end was in it continuously since its entry day. The ladder ADDED exits
+  // (awaitingDispatch now also leaves on received / resulted, shippedNotReceived on
+  // resulted); this checks the consequence directly, per row and per queue.
+  const ENTRY = { awaitingDispatch: 'orderDate', shippedNotReceived: 'dispatched', awaitingResults: 'received' };
+  for (const row of ladderRows()) {
+    for (const [k, field] of Object.entries(ENTRY)) {
+      const member = L_DAYS.filter((iso) => computeNumbersAsOf({ rows: [row], tatTests: {}, asOfIso: iso }).numbers[k] === 1);
+      if (member.length === 0) continue;
+      const first = L_DAYS.indexOf(member[0]);
+      assert.deepEqual(member, L_DAYS.slice(first, first + member.length), `${row.orderId}/${k}: one unbroken run`);
+      assert.equal(member[0], String(row[field]).slice(0, 10), `${row.orderId}/${k}: the run starts on the ${field} day`);
+    }
+  }
+  // The regression the gate saw: at 10-07, with the window opened on the order day, the
+  // pre-fix code reported FOUR surviving pre-dispatch entrants (AD, RES_ONLY, RCV_ONLY,
+  // RCV_RES — three of them received or resulted long before). Only AD is still waiting.
+  const rows = ladderRows();
+  const gatedAt = (since) => computeNumbersAsOf({ rows, tatTests: {}, asOfIso: L_SAT, sinceIso: since }).numbers;
+  assert.equal(gatedAt('2026-09-28').awaitingDispatch, 1);
+  assert.equal(gatedAt('2026-09-29').awaitingDispatch, 0, 'AD entered on 09-28, before this floor');
+  assert.equal(gatedAt('2026-09-28').shippedNotReceived, 1, 'only SNR — DISP_RES has finished');
+});

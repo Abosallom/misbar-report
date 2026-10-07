@@ -1,10 +1,10 @@
 // ui/screen-review.js — review/edit report content with a live slide preview (Track E).
-import { STR, todayISO, formatDateAr, formatRangeAr } from '../i18n/ar.js?v=v2026-10-05.2';
-import { el, editableTable, textareaField, toast } from './components.js?v=v2026-10-05.2';
-import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-10-05.2';
-import { autoDraft, splitTaskLists } from '../model/drafts.js?v=v2026-10-05.2';
-import { analyseSendout, hasMaster, AR_COUNTRY } from '../model/sendout.js?v=v2026-10-05.2';
-import { buildHistoryPanel } from './history-table.js?v=v2026-10-05.2';
+import { STR, todayISO, formatDateAr, formatRangeAr } from '../i18n/ar.js?v=v2026-10-07.1';
+import { el, editableTable, textareaField, toast } from './components.js?v=v2026-10-07.1';
+import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-10-07.1';
+import { autoDraft, splitTaskLists } from '../model/drafts.js?v=v2026-10-07.1';
+import { analyseSendout, hasMaster, AR_COUNTRY } from '../model/sendout.js?v=v2026-10-07.1';
+import { buildHistoryPanel } from './history-table.js?v=v2026-10-07.1';
 // REPORT SCOPE (2026-09-29). STATIC, not guarded like delta-window below: scope decides
 // WHICH ROWS every number is computed from, and there is no safe degraded answer — a
 // build that silently ignored a chosen scope would publish the full programme's numbers
@@ -13,17 +13,17 @@ import { buildHistoryPanel } from './history-table.js?v=v2026-10-05.2';
 import {
   EMPTY_SCOPE, normalizeScope, isScoped, hasRange, parseShipmentIds, labOptions,
   findShipments, applyScope, shipmentDetails,
-} from '../model/scope.js?v=v2026-10-05.2';
+} from '../model/scope.js?v=v2026-10-07.1';
 import {
   normalizeDeltaMode, isWeekDeltaMode, DEFAULT_DELTA_MODE,
-} from '../model/delta-baseline.js?v=v2026-10-05.2';
+} from '../model/delta-baseline.js?v=v2026-10-07.1';
 // Same module instance drafts.js already imports (identical specifier) — the grace
 // re-check below MUST use task-lifecycle's own identity/status vocabulary, never a
 // second local copy of it. Static, not guarded: drafts.js (imported above) already
 // depends on this module, so there is no new failure mode.
 import {
   CLOSED as CLOSED_STATUS, LIST_EXTERNAL, LIST_INTERNAL, taskKey,
-} from '../model/task-lifecycle.js?v=v2026-10-05.2';
+} from '../model/task-lifecycle.js?v=v2026-10-07.1';
 
 /* small local module helpers (kept local to avoid cross-screen coupling) */
 async function tryImport(path) { try { return await import(path); } catch { return null; } }
@@ -300,7 +300,9 @@ function allRowsOf(state) {
  *
  * THE DATA IS THE ORDERS ARRAY ITSELF, BY IDENTITY. Every reload path assigns a NEW
  * array to state.parsed.orders — the upload screen's live pull and CSV parse, the mock
- * loader, the automation's pull — and a reused pull keeps the same one, so identity is
+ * loader, the automation's pull, each after model/hospital.js splitByHospital (the
+ * source's own array, or a fresh `kept` one when rows were dropped — new per load
+ * either way) — and a reused pull keeps the same one, so identity is
  * exactly "is this still the data the scope was chosen against". A content fingerprint
  * (row count + first/last order id) was tried and is WRONG for the commonest reload: a
  * re-pull minutes later where only statuses moved has the same shape, so the old scope
@@ -818,7 +820,7 @@ export async function render(container, ctx) {
   // any failure, which simply omits the two slides.
   if (state.sendoutMaster === undefined) {
     const dataKey = ((store.settings || {}).grafana || {}).dataKey || '';
-    const mod = await tryImport('../ingest/sendout-master.js?v=v2026-10-05.2');
+    const mod = await tryImport('../ingest/sendout-master.js?v=v2026-10-07.1');
     state.sendoutMaster = (mod && mod.loadSendoutMaster)
       ? await mod.loadSendoutMaster(dataKey)
       : null;
@@ -834,7 +836,7 @@ export async function render(container, ctx) {
   // so the app always takes the guarded import.
   const compute = typeof ctx.compute === 'function'
     ? ctx.compute
-    : pickFn(await tryImport('../engine/engine.js?v=v2026-10-05.2'), ['compute', 'runEngine', 'run']);
+    : pickFn(await tryImport('../engine/engine.js?v=v2026-10-07.1'), ['compute', 'runEngine', 'run']);
   const model = modelFor(state, store, compute);
   { // settings may have been edited since the model was drafted — re-source them
     const s = store.settings || {};
@@ -861,7 +863,7 @@ export async function render(container, ctx) {
   // Guarded import, exactly as the retired picker was: a build without the module
   // degrades to the engine's own deltas instead of throwing. Re-run below on a
   // report-date change and on a mode switch; being PURE, every re-run agrees.
-  const dwMod = await tryImport('../model/delta-window.js?v=v2026-10-05.2');
+  const dwMod = await tryImport('../model/delta-window.js?v=v2026-10-07.1');
   const stampWindow = dwMod && dwMod.stampWindowDeltas;
   // The chips need the parsed CSV rows: with no upload in this session (mock preview)
   // stampWindowDeltas leaves the engine's deltas alone and stamps no window, and the
@@ -954,9 +956,9 @@ export async function render(container, ctx) {
     // A range's END when one is active (the deck is dated 'to'), else the chosen date.
     model.reportDate = effectiveReportDate(state, model.scope);
     stampDeltas(); // re-window the chips for the current report date (pure → idempotent)
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-10-05.2');
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-10-07.1');
     const buildSpec = pickFn(specMod, ['buildSpec', 'build', 'makeSpec', 'toSpec']);
-    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-10-05.2');
+    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-10-07.1');
     const renderFn = pickFn(rendMod, ['renderSpec', 'renderSlides', 'renderHtml', 'render']);
 
     if (!buildSpec || !renderFn) {
@@ -1417,7 +1419,7 @@ export async function render(container, ctx) {
     el('summary', { class: 'card__title', style: 'cursor:pointer', text: STR.review.labelsCardTitle }),
   ]);
   (async () => {
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-10-05.2');
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-10-07.1');
     const LABEL_NAMES = specMod && specMod.LABEL_NAMES;
     const DEFAULT_LABELS = (specMod && specMod.DEFAULT_LABELS) || {};
     if (!LABEL_NAMES || typeof LABEL_NAMES !== 'object') {
@@ -1942,9 +1944,21 @@ export async function render(container, ctx) {
   ]);
   const preview = el('div', { class: 'review-preview' }, [slideToggleRow, previewFrame]);
 
+  // Other hospitals' orders the upload left out (state.parsed.excludedHospitals, set
+  // beside every write of the orders — see state.js): one muted line under the subtitle,
+  // so the reviewer reads it before generating. Only while order rows are loaded
+  // (allRowsOf) — with none, there is nothing the figures could be missing. APP SCREEN
+  // ONLY: no slide, preview included, may carry a hospital name.
+  const excludedHospitals = (allRowsOf(state) && state.parsed.excludedHospitals) || [];
   const head = el('div', { class: 'screen__head' }, [
     el('h1', { text: STR.review.title }),
     el('p', { text: STR.review.subtitle }),
+    // Inline size/colour: `.screen__head p` outranks .small/.muted and would print this
+    // in the subtitle's own voice.
+    excludedHospitals.length ? el('p', {
+      role: 'note', style: 'margin-top:4px;font-size:.85rem;color:var(--slate-500)',
+      text: excludedHospitals.map((h) => STR.review.hospitalExcluded(h.count, h.name || h.id)).join(' · '),
+    }) : null,
   ]);
 
   // Source order: controls first (RTL => right), preview second (left/main).

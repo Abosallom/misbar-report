@@ -15,9 +15,16 @@
 //   • the generate screen's share text: byte-identical unscoped; scoped, a lab list
 //     folded like the cover's and the range printed as its dates, never a bare label;
 //   • the review strings: every key the screen reads lives in ar.js, with hints that
-//     say what sendout.js actually puts in each bucket.
+//     say what sendout.js actually puts in each bucket;
+//   • ONE HOSPITAL ONLY (2026-10-07): runAutomation's pull step keeps the current
+//     hospital's rows (model/hospital.js splitByHospital) on BOTH the direct pull and
+//     the snapshot fallback, records what it left out in parsed.excludedHospitals, and
+//     every later step (engine, lab workbooks) sees only the kept rows; the notice
+//     strings print a collapsed name and never the current hospital's; state.js starts
+//     and resets with no exclusions.
 //
-// Plain node, synthetic rows only (no patient data, no real lab or shipment names).
+// Plain node, synthetic rows only (no patient data, no real lab, shipment or hospital
+// names — the hospital IDS are the source's own operational ids, via hospital.js).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -32,6 +39,8 @@ import * as deltaBaseline from '../src/model/delta-baseline.js';
 import * as taskLifecycle from '../src/model/task-lifecycle.js';
 import * as store from '../src/store.js';
 import { SETTINGS_KEY } from '../src/contracts.js';
+import { KAMC_FACILITY_ID } from '../src/model/hospital.js';
+import { state as appState, resetRunData } from '../src/state.js';
 
 /* ------------------------------------------------------------------ *
  * Fixtures
@@ -462,6 +471,198 @@ test('runAutomation refuses to publish a model that carries a scope (belt and br
   assert.equal(generated, 0, 'no files produced');
   assert.equal(st.snapshots.length, 0, 'nothing recorded');
   assert.equal(res.ok, false);
+});
+
+/* ------------------------------------------------------------------ *
+ * One hospital only — the pull step keeps the current hospital's rows
+ * ------------------------------------------------------------------ */
+
+// The OTHER hospital, synthetic: an id that is not KAMC_FACILITY_ID and a made-up name
+// spelled with the doubled/tripled spaces the source really sends.
+const OTHER_ID = '9001';
+const OTHER_NAME_RAW = 'Test  Other Hospital   North Branch';
+const OTHER_NAME = 'Test Other Hospital North Branch';
+const SECOND_ID = '9002';
+
+/** A synthetic order line of a hospital (`hosp` = { id, name }, or none for a legacy row). */
+const hrow = (orderId, hosp) => ({
+  orderId, lineNo: Number(orderId), testName: 'TEST A', facility: 'Lab A',
+  ...(hosp ? { orderingFacilityId: hosp.id, hospital: hosp.name } : {}),
+});
+const MIXED = [
+  hrow('1', { id: KAMC_FACILITY_ID, name: 'Current Hospital' }),
+  hrow('2', { id: OTHER_ID, name: OTHER_NAME_RAW }),
+  hrow('3'), // predates the hospital columns → counts (legacy files were single-hospital)
+  hrow('4', { id: OTHER_ID, name: OTHER_NAME_RAW }),
+  hrow('5', { id: SECOND_ID, name: null }), // an id with no name: shown by its id
+  hrow('6', { id: KAMC_FACILITY_ID, name: 'Current Hospital' }),
+];
+const KEPT_IDS = ['1', '3', '6'];
+
+/** Grafana settings that make the pull runnable: direct (baseUrl+token) or snapshot-only. */
+function pullStore(direct) {
+  return {
+    settings: {
+      grafana: direct
+        ? { enabled: true, baseUrl: 'https://grafana.test', accessToken: 'tok', dataKey: '' }
+        : { enabled: true, dataKey: 'k' },
+      tatLookup: {},
+    },
+    snapshots: [],
+    updateSnapshot(x) { this.snapshots.push(x); },
+    loadSettings() { return { snapshotHistory: {} }; },
+    saveSettings() {},
+  };
+}
+
+/** runAutomation with pull → engine → labs on; returns what each later step was handed. */
+async function pullRun({ direct, rows, state }) {
+  const seen = { engine: null, labs: null, reportModel: null };
+  const st = state || {
+    files: { csv: null, tracker: null },
+    parsed: { orders: null, tracker: null, summary: null },
+    reportModel: null,
+    edits: {},
+    reportDate: DATE,
+  };
+  const res = await runAutomation({
+    store: pullStore(direct),
+    state: st,
+    options: { ...AUTOMATION_DEFAULTS, enabled: true, autoPull: true, autoLabFiles: true },
+    deps: {
+      loadGrafana: async () => ({
+        yearStartMs: () => 0,
+        fetchKamcOrders: async () => {
+          if (!direct) throw new Error('the snapshot-only case must not query directly');
+          return { rows, errors: [] };
+        },
+        fetchKamcSnapshot: async () => ({ rows, errors: [], fetchedAt: '2026-09-23T05:00:00.000Z' }),
+      }),
+      loadEngine: async () => ({
+        compute: (orders) => { seen.engine = orders; return { totals: { total: orders.length }, funnel: {}, buckets: {} }; },
+      }),
+      loadReportModel: async () => ({
+        buildReportModel: ({ engineOutput, reportDate, orders }) => {
+          seen.reportModel = orders;
+          return { reportDate, kpi: engineOutput };
+        },
+      }),
+      loadSendoutMaster: async () => null,
+      loadDeltaWindow: async () => null,
+      loadLateLabs: async () => ({
+        buildLateLabWorkbooks: ({ rows: r }) => { seen.labs = r; return []; },
+      }),
+      loadDownload: async () => null,
+      now: () => Date.parse('2026-09-23T06:00:00.000Z'),
+    },
+  });
+  return { res, state: st, seen, msg: (res.steps.find((x) => x.id === 'pull') || {}).message };
+}
+
+for (const [label, direct] of [['direct pull', true], ['snapshot fallback', false]]) {
+  test(`stepPull (${label}) keeps the current hospital's rows only, and every later step sees just those`, async () => {
+    const { res, state, seen, msg } = await pullRun({ direct, rows: MIXED });
+    assert.equal(res.ok, true, res.errors.join('; '));
+    const ids = (a) => a.map((r) => r.orderId);
+    assert.deepEqual(ids(state.parsed.orders), KEPT_IDS, 'orders = kept rows, original order');
+    // The ORIGINAL row objects (no copies): the CSV path's lineNo → raw.records pairing
+    // and identity-keyed lookups downstream depend on it.
+    assert.equal(state.parsed.orders[0], MIXED[0]);
+    assert.equal(seen.engine, state.parsed.orders, 'the engine computes the kept rows');
+    assert.equal(seen.reportModel, state.parsed.orders, 'the report model drafts from them');
+    assert.equal(seen.labs, state.parsed.orders, 'the lab workbooks are built from them');
+    assert.deepEqual(state.parsed.excludedHospitals, [
+      { id: OTHER_ID, name: OTHER_NAME, count: 2 },
+      { id: SECOND_ID, name: null, count: 1 },
+    ]);
+    // The step line gives the KEPT count and names what it left out (app panel only).
+    const okLine = direct
+      ? STR.upload.grafanaOk.replace('{n}', '3')
+      : STR.upload.grafanaSnapshotOk.replace('{n}', '3');
+    assert.ok(msg.startsWith(okLine.split('{t}')[0]), `kept count in: ${msg}`);
+    assert.ok(msg.includes(STR.upload.hospitalExcludedShort(2, OTHER_NAME)), msg);
+    assert.ok(msg.includes(STR.upload.hospitalExcludedShort(1, SECOND_ID)), 'an unnamed hospital shows its id');
+    assert.ok(!msg.includes('Current Hospital'), 'the current hospital is never named');
+  });
+}
+
+test('stepPull: a single-hospital or legacy pull keeps every row, excludes nothing, says nothing extra', async () => {
+  for (const rows of [
+    [hrow('1', { id: KAMC_FACILITY_ID, name: 'Current Hospital' }), hrow('2', { id: KAMC_FACILITY_ID, name: 'Current Hospital' })],
+    [hrow('1'), hrow('2')], // predates the hospital columns
+  ]) {
+    const { state, msg } = await pullRun({ direct: true, rows });
+    // Nothing dropped → the source's own array, untouched: the pre-cut behaviour exactly.
+    assert.equal(state.parsed.orders, rows);
+    assert.deepEqual(state.parsed.excludedHospitals, []);
+    assert.equal(msg, STR.upload.grafanaOk.replace('{n}', '2'));
+  }
+});
+
+test('stepPull: a pull that is ALL another hospital leaves no orders — the engine skips, nothing is counted', async () => {
+  const rows = [hrow('1', { id: OTHER_ID, name: OTHER_NAME_RAW })];
+  const { res, state, seen } = await pullRun({ direct: true, rows });
+  assert.deepEqual(state.parsed.orders, []);
+  assert.deepEqual(state.parsed.excludedHospitals, [{ id: OTHER_ID, name: OTHER_NAME, count: 1 }]);
+  assert.equal((res.steps.find((x) => x.id === 'engine') || {}).status, 'skip');
+  assert.equal(seen.engine, null, 'compute never ran over the other hospital');
+  assert.equal(seen.labs, null, 'no lab workbook from the other hospital');
+});
+
+test('stepPull: a fresh pull replaces an earlier exclusion list (the notice follows the orders)', async () => {
+  const state = {
+    files: { csv: null, tracker: null },
+    parsed: {
+      orders: null, tracker: null, summary: null,
+      excludedHospitals: [{ id: OTHER_ID, name: OTHER_NAME, count: 9 }], // yesterday's
+    },
+    reportModel: null,
+    edits: {},
+    reportDate: DATE,
+  };
+  await pullRun({ direct: true, rows: [hrow('1')], state });
+  assert.deepEqual(state.parsed.excludedHospitals, []);
+});
+
+test('runAutomation without a parsed bucket starts it with no exclusions', async () => {
+  const state = { files: { csv: null, tracker: null }, reportDate: DATE };
+  const res = await runAutomation({ state, options: { ...AUTOMATION_DEFAULTS }, deps: {} });
+  assert.deepEqual(state.parsed.excludedHospitals, []);
+  assert.equal(res.ok, true);
+});
+
+test('state.js: a fresh run has no exclusions, and «تقرير جديد» clears them', () => {
+  resetRunData();
+  assert.deepEqual(appState.parsed.excludedHospitals, []);
+  appState.parsed.orders = [hrow('1')];
+  appState.parsed.excludedHospitals = [{ id: OTHER_ID, name: OTHER_NAME, count: 2 }];
+  resetRunData();
+  assert.deepEqual(appState.parsed.excludedHospitals, []);
+  assert.equal(appState.parsed.orders, null);
+  // excludedHospitals is a plain field beside the accessor: it never touches raw.
+  appState.parsed.orders = [hrow('1')];
+  appState.parsed.raw = { fields: ['Order ID'], records: [] };
+  appState.parsed.excludedHospitals = [];
+  assert.notEqual(appState.parsed.raw, null);
+  resetRunData();
+});
+
+test('the excluded-hospital notices: count, collapsed name, the rule — never the current hospital', () => {
+  for (const fn of [STR.upload.hospitalExcluded, STR.upload.hospitalExcludedShort, STR.review.hospitalExcluded]) {
+    assert.equal(typeof fn, 'function');
+    const out = fn(35, OTHER_NAME_RAW);
+    assert.ok(out.includes('35'), out);
+    assert.ok(out.includes(`«${OTHER_NAME}»`), `whitespace-collapsed name: ${out}`);
+    assert.ok(!/\s{2}/.test(out), 'no doubled space survives');
+    assert.ok(!/KAMC|King|Abdul|عبدالله|عبد الله/i.test(out), 'never names the current hospital');
+    assert.ok(fn(1, null).includes('«—»'), 'a missing name degrades to a dash, never "null"');
+    assert.ok(fn(1, '9002').includes('«9002»'), 'an id passed in place of a name');
+  }
+  // The long forms state the rule: only the current hospital counts, until further notice.
+  assert.ok(STR.upload.hospitalExcluded(2, 'X').includes('حتى إشعار آخر'));
+  for (const fn of [STR.upload.hospitalExcluded, STR.review.hospitalExcluded]) {
+    assert.ok(fn(2, 'X').includes('المستشفى الحالي فقط'));
+  }
 });
 
 /* ------------------------------------------------------------------ *
