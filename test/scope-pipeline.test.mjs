@@ -208,39 +208,48 @@ test('recordRunSnapshot against the real store: scoped leaves settings byte-iden
 
 const P = 'تقرير مسبار';
 const PI = 'تقرير مسبار الداخلي';
+// UPDATED 2026-10-11 (user rule): the historic, untagged name now belongs to the MAIN
+// report — KAMC + SGH ('both'); a call with no report type is a legacy KAMC-only model and
+// is tagged « - KAMC - » (test/ui-hospital.test.mjs pins every type). These cases pin the
+// SCOPE rules, which are the same for every type, so they name the main report explicitly.
+const MAIN = 'both';
 
 test('buildFileName: unscoped is byte-identical to the historic name', () => {
-  assert.equal(buildFileName(P, DATE, 'pptx'), 'تقرير مسبار 23092026.pptx');
+  assert.equal(buildFileName(P, DATE, 'pptx', undefined, MAIN), 'تقرير مسبار 23092026.pptx');
   for (const [name, scope] of Object.entries(UNSCOPED)) {
-    assert.equal(buildFileName(P, DATE, 'pptx', scope), 'تقرير مسبار 23092026.pptx', name);
-    assert.equal(buildFileName(PI, DATE, 'pdf', scope), 'تقرير مسبار الداخلي 23092026.pdf', name);
+    assert.equal(buildFileName(P, DATE, 'pptx', scope, MAIN), 'تقرير مسبار 23092026.pptx', name);
+    assert.equal(buildFileName(PI, DATE, 'pdf', scope, MAIN), 'تقرير مسبار الداخلي 23092026.pdf', name);
   }
+  // No report type ⇒ the legacy KAMC-only model ⇒ tagged, never the main report's name.
+  assert.equal(buildFileName(P, DATE, 'pptx'), 'تقرير مسبار - KAMC - 23092026.pptx');
 });
 
 test('buildFileName: a range names from-to, and any scope adds (مخصص) once', () => {
   const range = normalizeScope(SCOPED.range);
-  assert.equal(buildFileName(P, DATE, 'pptx', range), 'تقرير مسبار 11092026-23092026 (مخصص).pptx');
+  assert.equal(buildFileName(P, DATE, 'pptx', range, MAIN), 'تقرير مسبار 11092026-23092026 (مخصص).pptx');
   // The range comes from the SCOPE, not from dateStr.
-  assert.equal(buildFileName(PI, '2026-09-29', 'pdf', range), 'تقرير مسبار الداخلي 11092026-23092026 (مخصص).pdf');
+  assert.equal(buildFileName(PI, '2026-09-29', 'pdf', range, MAIN), 'تقرير مسبار الداخلي 11092026-23092026 (مخصص).pdf');
   // Labs- or shipments-only: the report date stays, the suffix marks it.
-  assert.equal(buildFileName(P, DATE, 'pdf', normalizeScope(SCOPED.labs)), 'تقرير مسبار 23092026 (مخصص).pdf');
-  assert.equal(buildFileName(P, DATE, 'pptx', normalizeScope(SCOPED.shipments)), 'تقرير مسبار 23092026 (مخصص).pptx');
+  assert.equal(buildFileName(P, DATE, 'pdf', normalizeScope(SCOPED.labs), MAIN), 'تقرير مسبار 23092026 (مخصص).pdf');
+  assert.equal(buildFileName(P, DATE, 'pptx', normalizeScope(SCOPED.shipments), MAIN), 'تقرير مسبار 23092026 (مخصص).pptx');
   // Everything at once: still one suffix, range date part.
-  const all = buildFileName(P, DATE, 'pptx', normalizeScope(SCOPED.everything));
+  const all = buildFileName(P, DATE, 'pptx', normalizeScope(SCOPED.everything), MAIN);
   assert.equal(all, 'تقرير مسبار 11092026-23092026 (مخصص).pptx');
   assert.equal(all.split('مخصص').length - 1, 1);
+  // A scoped KAMC report (the UI scopes single-hospital reports): tag, then the same rules.
+  assert.equal(buildFileName(P, DATE, 'pptx', range, 'kamc'), 'تقرير مسبار - KAMC - 11092026-23092026 (مخصص).pptx');
 });
 
 test('buildFileDefs threads the scope into all four names; no scope = historic names', () => {
-  const historic = buildFileDefs(DATE).map((d) => d.name);
+  const historic = buildFileDefs(DATE, undefined, MAIN).map((d) => d.name);
   assert.deepEqual(historic, [
     'تقرير مسبار الداخلي 23092026.pptx',
     'تقرير مسبار 23092026.pptx',
     'تقرير مسبار الداخلي 23092026.pdf',
     'تقرير مسبار 23092026.pdf',
   ]);
-  assert.deepEqual(buildFileDefs(DATE, EMPTY_SCOPE).map((d) => d.name), historic);
-  const scoped = buildFileDefs(DATE, normalizeScope(SCOPED.range));
+  assert.deepEqual(buildFileDefs(DATE, EMPTY_SCOPE, MAIN).map((d) => d.name), historic);
+  const scoped = buildFileDefs(DATE, normalizeScope(SCOPED.range), MAIN);
   assert.deepEqual(scoped.map((d) => d.id), ['internal-pptx', 'nupco-pptx', 'internal-pdf', 'nupco-pdf']);
   for (const d of scoped) {
     assert.match(d.name, / 11092026-23092026 \(مخصص\)\.(pptx|pdf)$/, d.id);
@@ -335,7 +344,8 @@ test('runAutomation rebuilds a full model and records it, even over a scoped rev
       loadDownload: async () => null,
       produceReportFiles: async ({ model }) => {
         seen = model;
-        return buildFileDefs(model.reportDate, model.scope).map((def) => ({ def, blob: { size: 1 } }));
+        // The very call produceReportFiles makes (scope + report type off the model).
+        return buildFileDefs(model.reportDate, model.scope, model.hospital).map((def) => ({ def, blob: { size: 1 } }));
       },
     },
   });
@@ -343,7 +353,12 @@ test('runAutomation rebuilds a full model and records it, even over a scoped rev
   assert.notEqual(seen, leftover, 'the scoped review model is never published');
   assert.equal(isScoped(seen.scope), false);
   assert.equal(seen.scopedRows, undefined);
-  assert.deepEqual(res.files.map((f) => f.name), buildFileDefs(DATE).map((d) => d.name), 'historic names');
+  // The automation publishes the MAIN report (KAMC + SGH) under the historic names.
+  assert.equal(seen.hospital, 'both');
+  assert.deepEqual(res.files.map((f) => f.name), [
+    'تقرير مسبار الداخلي 23092026.pptx', 'تقرير مسبار 23092026.pptx',
+    'تقرير مسبار الداخلي 23092026.pdf', 'تقرير مسبار 23092026.pdf',
+  ], 'historic names');
   assert.equal(st.snapshots.length, 1, 'the full report is recorded');
 });
 
@@ -674,9 +689,14 @@ test('the excluded-hospital notices: count, collapsed name, the third-hospital r
  * Share card — the text pasted into a chat, without the deck
  * ------------------------------------------------------------------ */
 
-// HEAD's template, spelled out: the unscoped message must never move.
+// HEAD's template, spelled out: the unscoped message must never move. makeModel has no
+// hospital field — a legacy KAMC-only model — and since the 2026-10-11 naming rule the
+// KAMC-only report is a SINGLE-HOSPITAL report: its message carries the type line right
+// under the heading (the historic, untagged text now belongs to the main KAMC + SGH
+// report — test/ui-hospital.test.mjs). Every other line is the historic template.
 const SHARE_FULL = [
   'تقرير مسبار الأسبوعي — 23/09/2026',
+  STR.generate.reportType('KAMC'),
   '• إجمالي الطلبات: 10',
   '• فحوصات مكتملة (تشمل المرفوضة): 5 (50%)',
   '↳ منها مرفوضة: 1',
@@ -686,10 +706,10 @@ const SHARE_FULL = [
   'الملفات: 4 (نسختا PPTX و PDF داخلية ونوبكو)',
 ].join('\n');
 
-/** The scope line (line 2) of a scoped share text. */
-const scopeLineOf = (scope) => shareText(makeModel(scope), DATE, 4).split('\n')[1];
+/** The scope line (line 3: after the heading and the KAMC type line) of a scoped share text. */
+const scopeLineOf = (scope) => shareText(makeModel(scope), DATE, 4).split('\n')[2];
 
-test('shareText: every unscoped shape is byte-identical to the historic message', () => {
+test('shareText: every unscoped shape is byte-identical to the (KAMC-typed) historic message', () => {
   for (const [name, scope] of Object.entries(UNSCOPED)) {
     assert.equal(shareText(makeModel(scope), DATE, 4), SHARE_FULL, name);
   }
@@ -712,7 +732,8 @@ test('shareText: a range prints its dates on the scope line, never the bare labe
   const S = STR.review.scope;
   const range = formatRangeAr('2026-09-11', DATE);
   for (const scope of [SCOPED.range, normalizeScope(SCOPED.range)]) {
-    const [heading, line] = shareText(makeModel(scope), DATE, 4).split('\n');
+    const [heading, type, line] = shareText(makeModel(scope), DATE, 4).split('\n');
+    assert.equal(type, STR.generate.reportType('KAMC'), 'the KAMC-only type line sits above the scope');
     assert.equal(heading, `تقرير مسبار الأسبوعي — ${range}`, 'the heading carries the range');
     assert.equal(line, `${S.active} — ${S.range}: ${range}`);
     assert.ok(!line.endsWith(S.range), 'no dangling «الفترة» item');

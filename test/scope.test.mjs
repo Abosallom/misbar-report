@@ -261,7 +261,9 @@ test('an AMBIGUOUS blank stays unattributed END TO END under a scope that hides 
   // credits each by TEST NAME (contract [B] byTestName): the path a re-inferred 'z'
   // would take into Lab A's row. A blank facility itself is always `unmapped`.
   const master = [{ vendor: 'Vendor Q -Orig-', country: 'Country Q', reflab: 'RefLab Q', item: 'TEST SHARED' }];
-  const state = { parsed: { orders: rows }, sendoutMaster: master, reportDate: '2026-09-29' };
+  // reportHospital 'kamc': scopes belong to the single-hospital reports (the main KAMC +
+  // SGH report takes none), and an unset report type is now that main report.
+  const state = { parsed: { orders: rows }, sendoutMaster: master, reportDate: '2026-09-29', reportHospital: 'kamc' };
   const store = { settings: { tatLookup: TAT_LOOKUP } };
   const kpiLab = (kpi, lab) => (kpi.byLab.find((l) => l.lab === lab) || { total: 0 }).total;
   const unattributed = (kpi) => kpi.byLab.filter((l) => l.lab !== 'Lab A' && l.lab !== 'Lab B')

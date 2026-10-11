@@ -5,11 +5,11 @@
 // build-spec reads from the very same predicate. A local re-derivation here is exactly
 // how a filename would one day say «مخصص» while the cover says nothing (or the reverse).
 // scope.js is pure (no DOM, no vendor, no ar.js back-edge), so this adds no cycle.
-import { isScoped, normalizeScope } from '../model/scope.js?v=v2026-10-11.1';
+import { isScoped, normalizeScope } from '../model/scope.js?v=v2026-10-11.2';
 // The hospital registry's short codes (KAMC / SGH) are what the file-name tag, the report
 // type pills and the share text print — read from the ONE registry, never re-typed here.
 // hospital.js is pure (no imports at all), so this adds no cycle either.
-import { HOSPITALS } from '../model/hospital.js?v=v2026-10-11.1';
+import { HOSPITALS } from '../model/hospital.js?v=v2026-10-11.2';
 
 /** Join ids for a sentence: Arabic comma, tolerant of a bare string or a missing list. */
 const joinIds = (ids) => [].concat(ids == null ? [] : ids).map(String).join('، ');
@@ -140,9 +140,14 @@ export const STR = {
     // serves), so this line says where the SGH lines went: to the review screen's report
     // type choice. Informational, never a warning.
     sghRows: (n) => `يحتوي الملف أيضًا على ${n} طلبًا من ${HOSPITALS.sgh.code} (${HOSPITALS.sgh.arName}). يُختار نوع التقرير — ${HOSPITALS.kamc.code} أو ${HOSPITALS.sgh.code} أو ${HOSPITALS.kamc.code} + ${HOSPITALS.sgh.code} — في شاشة المراجعة.`,
-    // The unattended run's pull-step line: the automatic report is the KAMC report only,
-    // so the SGH lines it pulled are named as NOT in it (automation/pipeline.js stepPull).
-    sghNotAutomated: (n) => `${n} طلبًا من ${HOSPITALS.sgh.code} لا تدخل التقرير الآلي (${HOSPITALS.kamc.code} فقط)`,
+    // The unattended run's pull-step line (automation/pipeline.js stepPull). The automatic
+    // report is the MAIN report — KAMC + SGH — so the SGH lines it pulled ARE in its deck;
+    // the line says so, and that the per-lab files stay KAMC's (SGH has no Test Menu, so
+    // no line of it can be late or due).
+    // The same count when this run makes NO report it could be in (autoGenerate off, or
+    // no KAMC rows — the engine step skips): a neutral count, never a claim about a deck.
+    sghPulledOnly: (n) => `سُحب أيضًا ${n} طلبًا من ${HOSPITALS.sgh.code}`,
+    sghInAutomated: (n) => `${n} طلبًا من ${HOSPITALS.sgh.code} ضمن التقرير الآلي (${HOSPITALS.kamc.code} + ${HOSPITALS.sgh.code})، وملفات المختبرات لطلبات ${HOSPITALS.kamc.code} فقط`,
   },
   review: {
     title: 'مراجعة وتحرير التقرير',
@@ -153,10 +158,14 @@ export const STR = {
     // THIRD hospital — neither KAMC nor SGH), repeated here because this is the last
     // screen before the deck is generated. App screen only — never on a slide.
     hospitalExcluded: (n, name) => `لا يشمل أي تقرير ${n} طلبًا من «${oneLine(name)}» — مستشفى غير مشمول.`,
-    // REPORT TYPE (2026-10-11) — the hospital selector inside the «نطاق التقرير» card.
-    // KAMC is the historic report (default, the only one that is recorded); SGH and
-    // KAMC + SGH are SIDE reports: like a scoped deck they never write the published
-    // history, the snapshot or the task log (automation/pipeline.js recordRunSnapshot).
+    // REPORT TYPE (2026-10-11, revised the same day) — the hospital selector inside the
+    // «نطاق التقرير» card. KAMC + SGH is the MAIN weekly report (the default, the
+    // automation's report, the historic file names). KAMC-only and SGH-only are the
+    // special single-hospital reports, named for their hospital in the file name
+    // (buildFileName). Recording (automation/pipeline.js recordRunSnapshot): an unscoped
+    // main report writes the published KAMC numbers (never the task log — its deck has no
+    // task slides); an unscoped KAMC report writes them as it always did (+ the task
+    // log); SGH is a SIDE report and writes nothing.
     // `modes` are the pill labels, built from the registry codes.
     hospital: {
       title: 'نوع التقرير',
@@ -165,9 +174,11 @@ export const STR = {
         sgh: HOSPITALS.sgh.code,
         both: `${HOSPITALS.kamc.code} + ${HOSPITALS.sgh.code}`,
       },
-      // One Latin code only: a sentence mixing several Latin codes with Arabic «و»
-      // reorders under the bidi algorithm and reads scrambled in the RTL card.
-      hint: `تقرير ${HOSPITALS.kamc.code} هو التقرير المعتاد، والنوعان الآخران تقريران جانبيان لا يُسجَّلان في سجل التقارير.`,
+      // Bidi: every sentence starts and ends with Arabic, and the Latin codes are either
+      // one run («KAMC + SGH» — only neutrals between them) or kept apart by an Arabic
+      // word («أو»), never joined by a bare «و» — that reorders and reads scrambled in
+      // the RTL card.
+      hint: `تقرير ${HOSPITALS.kamc.code} + ${HOSPITALS.sgh.code} هو التقرير الأسبوعي الرئيسي. أما تقرير المستشفى الواحد (${HOSPITALS.kamc.code} أو ${HOSPITALS.sgh.code}) فيحمل رمز المستشفى في اسم الملف.`,
       // BOTH mode: the scope filters do not apply (decision 7) — one short line instead.
       bothNoScope: `لا تنطبق المختبرات والشحنات والفترة على تقرير ${HOSPITALS.kamc.code} + ${HOSPITALS.sgh.code}: يشمل جميع طلبات المستشفيين.`,
       // The chosen report's hospital has no rows in the loaded data: nothing to report,
@@ -178,10 +189,15 @@ export const STR = {
       // still carries its policy's historical cancelled constants (cancelledByMonth), so
       // the deck can print a non-zero KAMC cancelled figure with no KAMC rows.
       bothMissing: (label) => `البيانات المحمّلة لا تحتوي على أي طلب لـ ${label}. تحقّق من الملف قبل التوليد إن لم يكن ذلك مقصودًا.`,
+      // The SGH report's banner only (screen-review / screen-generate): the main report
+      // and the KAMC report are recorded, so neither is called a side report.
       sideReport: `هذا تقرير جانبي: لا يُسجَّل في سجل التقارير، ولا يؤثر على مقارنات تقرير ${HOSPITALS.kamc.code} ولا على متابعة المهام.`,
-      // Shown IN PLACE of the history panel outside KAMC mode: the panel charts the
-      // published KAMC reports.
+      // Shown IN PLACE of the history panel in the SGH report: the panel charts the
+      // published KAMC series (written by the KAMC + SGH and the KAMC reports).
       historyHidden: `أرقام التقارير المنشورة تخص تقرير ${HOSPITALS.kamc.code}، لذلك لا تظهر في هذا التقرير.`,
+      // KAMC + SGH (the main report): one line ABOVE the history panel — the panel there
+      // charts KAMC's numbers only, which are the numbers this report records.
+      historyKamcSeries: `أرقام التقارير والتقدم أدناه تخص ${HOSPITALS.kamc.code} وحده، وهي الأرقام التي يسجّلها هذا التقرير في سجل التقارير.`,
       // KAMC + SGH: the per-run number overrides are not offered (decision 8).
       noOverrides: `تعديل الأرقام يدويًا غير متاح في تقرير ${HOSPITALS.kamc.code} + ${HOSPITALS.sgh.code}.`,
       overridesCleared: 'أُلغيت التعديلات اليدوية على الأرقام لأن نوع التقرير تغيّر.',
@@ -466,8 +482,8 @@ export function formatRangeAr(fromIso, toIso) {
  *
  * `scope` (optional, a model/scope.js scope) exists so a SIDE REPORT can never be
  * mistaken for the full one once it is a loose file in a chat or a mail thread:
- *   • unscoped / absent → byte-identical to the historic name (the automation and the
- *     full manual report never pass a scope, and existing file names must not move);
+ *   • unscoped / absent → the date part is the report date (with `hospital` 'both' —
+ *     the main report, the automation's included — the historic name byte for byte);
  *   • date range        → the date part becomes 'DDMMYYYY-DDMMYYYY' (from-to), since
  *     a single day would misstate what the deck covers;
  *   • scoped at all     → ' (مخصص)' before the extension — also for a labs- or
@@ -475,13 +491,15 @@ export function formatRangeAr(fromIso, toIso) {
  * @param {string} variantPrefix e.g. 'تقرير مسبار' | 'تقرير مسبار الداخلي'
  * @param {string} dateStr 'YYYY-MM-DD'
  * @param {string} ext 'pptx' | 'pdf'
- * `hospital` (optional, the report type — see hospitalFileTag below): absent/'kamc' →
- * no tag (the historic names); 'sgh' / 'both' → ' - SGH -' / ' - KAMC SGH -' after the
- * prefix. The scope rules above apply on top, unchanged.
+ * `hospital` (the report type — see hospitalFileTag below): 'both' (the MAIN weekly
+ * report) → no tag, the historic names byte for byte; 'kamc' / 'sgh' (a single-hospital
+ * report) → ' - KAMC -' / ' - SGH -' after the prefix; absent → 'kamc' (a model with no
+ * report type is a legacy KAMC-only model). The scope rules above apply on top, unchanged.
  * @param {Object} [scope] model/scope.js scope (normalizeScope output)
  * @param {('kamc'|'sgh'|'both')} [hospital] the report type (model.hospital)
- * @returns {string} e.g. 'تقرير مسبار 19072026.pptx',
- *   'تقرير مسبار 11092026-23092026 (مخصص).pptx', 'تقرير مسبار - KAMC SGH - 08102026.pptx'
+ * @returns {string} e.g. 'تقرير مسبار 19072026.pptx' (both),
+ *   'تقرير مسبار 11092026-23092026 (مخصص).pptx' (both, scoped),
+ *   'تقرير مسبار - KAMC - 08102026.pptx' (kamc), 'تقرير مسبار - SGH - 08102026.pdf' (sgh)
  */
 export function buildFileName(variantPrefix, dateStr, ext, scope, hospital) {
   const head = `${variantPrefix}${hospitalFileTag(hospital)}`;
@@ -496,21 +514,24 @@ export function buildFileName(variantPrefix, dateStr, ext, scope, hospital) {
 }
 
 /**
- * The report-type tag of a file name (2026-10-11, CONTRACT decision 9). The KAMC report
- * — 'kamc' or absent (every caller that predates the report types, the automation
- * included) — has NO tag: its names stay byte-identical. SGH and KAMC + SGH insert their
- * hospital codes between the prefix and the date the way the user's own reference deck
- * is named (`Misbar_Weekly_Report_-_KAMC_SGH_-_2026-10-08`): ' - SGH -' / ' - KAMC SGH -'.
- * Without it an SGH deck and the KAMC deck of the same day would share a name and one
- * would overwrite (or be mistaken for) the other in Downloads.
- * An UNKNOWN value THROWS: a typo must never produce the KAMC report's file name for
+ * The report-type tag of a file name (user rule, 2026-10-11 revision). The KAMC + SGH
+ * report ('both') is the MAIN weekly report from now on, so it carries the historic
+ * name with NO tag — byte-identical to every weekly file the recipients already have.
+ * A SINGLE-HOSPITAL report is the special case and is named for its hospital, both in
+ * the same place and format: ' - KAMC -' / ' - SGH -' between the prefix and the date.
+ * Without the tag a KAMC-only deck and the main deck of the same day would share a name
+ * and one would overwrite (or be mistaken for) the other in Downloads.
+ * ABSENT (null / undefined) ⇒ 'kamc', tagged: a model without a report type is a legacy
+ * KAMC-only model (screen-generate's fallback, every model built before the report
+ * types), and its numbers are KAMC's alone — the untagged main name would mislabel it.
+ * An UNKNOWN value THROWS: a typo must never produce the main report's file name for
  * another report.
  * @param {('kamc'|'sgh'|'both'|undefined|null)} hospital
- * @returns {string} '' for KAMC, else ' - <codes> -'
+ * @returns {string} '' for the main (KAMC + SGH) report, else ' - <code> -'
  */
 export function hospitalFileTag(hospital) {
-  if (hospital == null || hospital === 'kamc') return '';
+  if (hospital === 'both') return '';
+  if (hospital == null || hospital === 'kamc') return ` - ${HOSPITALS.kamc.code} -`;
   if (hospital === 'sgh') return ` - ${HOSPITALS.sgh.code} -`;
-  if (hospital === 'both') return ` - ${HOSPITALS.kamc.code} ${HOSPITALS.sgh.code} -`;
   throw new Error(`buildFileName: unknown report type ${JSON.stringify(hospital)}`);
 }

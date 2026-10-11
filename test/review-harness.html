@@ -258,6 +258,9 @@
       reportModel: null,
       edits: {},
       reportDate: REPORT_DATE,
+      // The single-hospital KAMC report: this harness drives the SCOPE paths (KAMC / SGH
+      // reports only) and reads model.kpi — the main KAMC + SGH report has neither.
+      reportHospital: 'kamc',
       settings: s,
       screen: 'review',
       sendoutMaster: WITH_MASTER ? fakeMaster(rows) : null, // set ⇒ the real loader never runs
@@ -306,7 +309,7 @@
   function describe(m) {
     if (!m) return '';
     const scoped = isScoped(m.scope);
-    const names = buildFileDefs(m.reportDate, m.scope).map((f) => f.name).join(' | ');
+    const names = buildFileDefs(m.reportDate, m.scope, m.hospital).map((f) => f.name).join(' | ');
     const support = ((m.panels && m.panels.supportRequired) || []).join(' / ') || '—';
     return `→ generate: التاريخ ${m.reportDate} • ${scoped ? 'مخصص' : 'كامل'} • الإجمالي ${m.kpi && m.kpi.totals ? m.kpi.totals.total : '?'}`
       + ` • شحنات ${(m.shipmentDetails || []).length} • الدعم المطلوب: ${support} • ${names}`;

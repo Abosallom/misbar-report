@@ -90,9 +90,10 @@ export const state = {
   reportModel: null,
   // Which report type the operator picked on the review screen (model/hospital.js
   // HOSPITAL_MODES). A choice about ONE run, like a scope: memory only, never in
-  // settings, never read by the unattended automation (which is always the KAMC
-  // report), and back to 'kamc' — the historic report — on «تقرير جديد».
-  reportHospital: 'kamc',
+  // settings, never read by the unattended automation (which always makes the main
+  // report itself), and back to 'both' — KAMC + SGH, the MAIN weekly report — on
+  // «تقرير جديد». KAMC-only / SGH-only are the special single-hospital reports.
+  reportHospital: 'both',
   edits: {},
   reportDate: null,
   settings: null,
@@ -105,7 +106,7 @@ export function resetRunData() {
   state.parsed = freshParsed(); // raw: null — the uploaded file's patient rows go with the run; ordersByHospital { kamc: null, sgh: null }; excludedHospitals: []
   state.engineOutput = null;
   state.reportModel = null;
-  state.reportHospital = 'kamc';
+  state.reportHospital = 'both'; // the main report (see the field above)
   state.edits = {};
   state.reportDate = null;
 }

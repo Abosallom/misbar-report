@@ -58,7 +58,8 @@ export const HOSPITALS = Object.freeze({
   }),
 });
 
-/** The three report types the review screen offers (KAMC = the historic report, default). */
+/** The three report types the review screen offers ('both' = KAMC + SGH, the main weekly
+ *  report and the default; 'kamc' / 'sgh' = single-hospital reports, tagged in file names). */
 export const HOSPITAL_MODES = Object.freeze(['kamc', 'sgh', 'both']);
 
 // KAMC's NAME. The source spells KAMC 'King Abdul ah Medical City' (sic — a dropped "l");

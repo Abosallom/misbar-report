@@ -1,15 +1,15 @@
 // ui/screen-upload.js — file upload + parse + engine kickoff (Track E).
-import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-10-11.1';
-import { el, dropZone, fileSummaryCard, toast } from './components.js?v=v2026-10-11.1';
-import { normTest } from '../contracts.js?v=v2026-10-11.1';
-import { getPapa, getXLSX } from '../vendor-loader.js?v=v2026-10-11.1';
-import { TAT_LOINC } from '../seeds/tat-lookup.js?v=v2026-10-11.1';
-import { buildLateLabsSection } from './late-labs-section.js?v=v2026-10-11.1';
-import { buildAutomationPanel } from './automation-panel.js?v=v2026-10-11.1';
+import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-10-11.2';
+import { el, dropZone, fileSummaryCard, toast } from './components.js?v=v2026-10-11.2';
+import { normTest } from '../contracts.js?v=v2026-10-11.2';
+import { getPapa, getXLSX } from '../vendor-loader.js?v=v2026-10-11.2';
+import { TAT_LOINC } from '../seeds/tat-lookup.js?v=v2026-10-11.2';
+import { buildLateLabsSection } from './late-labs-section.js?v=v2026-10-11.2';
+import { buildAutomationPanel } from './automation-panel.js?v=v2026-10-11.2';
 // Optional filtered-CSV download (labs × order stages → the uploaded file's own rows).
 // It reads state.parsed.raw — PATIENT DATA, memory-only; see state.js for the pairing
 // rule this screen upholds at every site that writes state.parsed.orders.
-import { buildCsvExportSection } from './csv-export-section.js?v=v2026-10-11.1';
+import { buildCsvExportSection } from './csv-export-section.js?v=v2026-10-11.2';
 // THE HOSPITAL DOOR (2026-10-07; report types 2026-10-11): the feed carries KAMC's and
 // SGH's orders. Every site below that writes state.parsed.orders goes through
 // takeOrders(): parsed.orders = the KAMC rows — what EVERY surface of this screen reads
@@ -20,11 +20,11 @@ import { buildCsvExportSection } from './csv-export-section.js?v=v2026-10-11.1';
 // silently skipped the split would put another hospital's orders into every number (and
 // SGH test names into the global TAT table). hospital.js is pure (no DOM, no vendor
 // bundle), so this adds no failure mode.
-import { takeOrders } from '../model/hospital.js?v=v2026-10-11.1';
+import { takeOrders } from '../model/hospital.js?v=v2026-10-11.2';
 
 /** The SAME specifier main.js and ui/automation-panel.js import — resolving to
  *  the identical URL means the probe below hits the already-cached module. */
-const AUTOMATION_PIPELINE_URL = '../automation/pipeline.js?v=v2026-10-11.1';
+const AUTOMATION_PIPELINE_URL = '../automation/pipeline.js?v=v2026-10-11.2';
 
 /** Format an ISO timestamp as local 'HH:MM' for snapshot-freshness labels. */
 function fmtHHMM(iso) {
@@ -241,7 +241,7 @@ function normalizeTracker(res) {
 
 async function ingestCsv(file) {
   const Papa = await getPapa();
-  const mod = await tryImport('../ingest/csv.js?v=v2026-10-11.1');
+  const mod = await tryImport('../ingest/csv.js?v=v2026-10-11.2');
   const fn = pickFn(mod, ['parseKamcCsv', 'parseCsv', 'ingestCsv', 'parseOrders', 'parse']);
   if (fn) {
     const text = await file.text();
@@ -254,7 +254,7 @@ async function ingestCsv(file) {
 
 async function ingestTracker(file) {
   const XLSX = await getXLSX();
-  const mod = await tryImport('../ingest/xlsx.js?v=v2026-10-11.1');
+  const mod = await tryImport('../ingest/xlsx.js?v=v2026-10-11.2');
   const fn = pickFn(mod, ['parseTracker', 'ingestXlsx', 'parseXlsx', 'parse']);
   if (fn) {
     const buf = await file.arrayBuffer();
@@ -476,7 +476,7 @@ export async function render(container, ctx) {
     const gcfg = (store.settings && store.settings.grafana) || {};
     const dataKey = (gcfg.dataKey || '').trim();
     try {
-      const mod = await import('../ingest/grafana.js?v=v2026-10-11.1');
+      const mod = await import('../ingest/grafana.js?v=v2026-10-11.2');
       const asOf = state.reportDate || todayISO();
       const directConfigured = !!(gcfg.baseUrl && gcfg.accessToken);
       try {
@@ -889,7 +889,7 @@ export async function render(container, ctx) {
     const seq = ++unmatchedSeq;
     let mod;
     try {
-      mod = await import('../ingest/tat-suggest.js?v=v2026-10-11.1');
+      mod = await import('../ingest/tat-suggest.js?v=v2026-10-11.2');
     } catch { return; } // module not present yet — keep the plain panel behavior
     if (seq !== unmatchedSeq) return; // a newer paint superseded this run
     const fn = pickFn(mod, ['suggestTats']);
@@ -1037,7 +1037,7 @@ export async function render(container, ctx) {
     if (!orders || !orders.length) { heroHost.innerHTML = ''; return; }
     let out;
     try {
-      const mod = await import('../engine/engine.js?v=v2026-10-11.1');
+      const mod = await import('../engine/engine.js?v=v2026-10-11.2');
       if (seq !== heroSeq) return; // a newer run superseded this one
       const compute = pickFn(mod, ['compute', 'runEngine', 'run']);
       if (typeof compute !== 'function') { heroHost.innerHTML = ''; return; }
@@ -1062,7 +1062,7 @@ export async function render(container, ctx) {
       let out = (state.engineOutput && state.engineOutput.totals) ? state.engineOutput : null;
       if (!out) {
         try {
-          const mod = await tryImport('../engine/engine.js?v=v2026-10-11.1');
+          const mod = await tryImport('../engine/engine.js?v=v2026-10-11.2');
           const compute = pickFn(mod, ['compute', 'runEngine', 'run']);
           if (compute) {
             out = compute(state.parsed.orders, (store.settings || {}).tatLookup, engineOpts());

@@ -26,34 +26,42 @@
 // model the operator left there whenever the engine step skipped or failed. So the
 // unattended run is the FULL report, or no report.
 //
-// REPORT TYPES (2026-10-11): the review screen can also produce an SGH report or a
-// KAMC + SGH ("BOTH") report (model.hospital 'sgh' | 'both'; absent ⇒ 'kamc', every
-// model that predates the report types). Both are SIDE reports exactly like a scoped one,
-// and this file honours model.hospital in the same three places — recordRunSnapshot
-// (writes nothing), applyWindowDeltas (each hospital's chips with its own policy) and
-// buildFileDefs (the hospital tag in the file names). The UNATTENDED run stays the KAMC
-// report: it reads state.parsed.orders — the KAMC rows only (model/hospital.js
-// takeOrders) — in every step, never parsed.ordersByHospital and never the operator's
-// state.reportHospital, and stepGenerate refuses any model that is not KAMC.
-import { STR, todayISO, buildFileName } from '../i18n/ar.js?v=v2026-10-11.1';
-import { VARIANTS, normTest } from '../contracts.js?v=v2026-10-11.1';
-import { getGenLibs } from '../vendor-loader.js?v=v2026-10-11.1';
+// REPORT TYPES (2026-10-11; user rule revised the same day). Three report types
+// (model.hospital): 'both' — KAMC + SGH, the MAIN weekly report; 'kamc' / 'sgh' — the
+// special single-hospital reports (absent ⇒ 'kamc': a legacy KAMC-only model). This file
+// honours model.hospital in three places — recordRunSnapshot (the main report records
+// KAMC's numbers from its KAMC sub-model and never the task log; KAMC records as it always
+// did; SGH writes nothing), applyWindowDeltas (each hospital's chips with its own policy)
+// and buildFileDefs (the main report keeps the historic names; a single-hospital report
+// is tagged with its hospital code).
+// The UNATTENDED run makes the MAIN report: stepEngine builds the combined deck with
+// model/hospital-report.js buildBothModel over the load's KAMC rows (parsed.orders) and
+// SGH rows (parsed.ordersByHospital.sgh — read there and nowhere else), and stepGenerate
+// refuses any model that is not the main report. EVERYTHING ELSE stays KAMC's: the
+// engine hero output, the TAT auto-accept (an SGH test name must never reach the global
+// TAT table), the per-lab Late & Due workbooks and their drafts all read parsed.orders —
+// the KAMC rows only (model/hospital.js takeOrders). The operator's state.reportHospital
+// is never read.
+import { STR, todayISO, buildFileName } from '../i18n/ar.js?v=v2026-10-11.2';
+import { VARIANTS, normTest } from '../contracts.js?v=v2026-10-11.2';
+import { getGenLibs } from '../vendor-loader.js?v=v2026-10-11.2';
 // STATIC on purpose, unlike the injected model modules below: isScoped gates the
 // published-history write, and neither guarded fallback is safe — "absent ⇒ unscoped"
 // would let a side report overwrite the history, "absent ⇒ scoped" would silently stop
 // recording full reports. scope.js is pure (no DOM, no vendor bundle), and ar.js above
 // already depends on it for the «(مخصص)» file-name suffix, so this adds no new failure mode.
-import { isScoped } from '../model/scope.js?v=v2026-10-11.1';
+import { isScoped } from '../model/scope.js?v=v2026-10-11.2';
 // THE HOSPITAL DOOR (2026-10-07, report types 2026-10-11): the feed carries KAMC's and
 // SGH's orders (and possibly a third hospital's). takeOrders puts the KAMC rows in
-// parsed.orders — the ONLY rows this unattended run ever reads — SGH's beside them in
-// parsed.ordersByHospital (read by the review screen's SGH / KAMC + SGH reports only),
-// and drops any third hospital. STATIC for isScoped's reason: there is no safe degraded
-// answer — "absent ⇒ keep every row" would put another hospital's orders into an
-// UNATTENDED morning report nobody reviews. A load failure abandons the run (main.js
+// parsed.orders — they feed every KAMC-side step of this unattended run (TAT suggestions,
+// per-lab files, email drafts, the history numbers) — SGH's beside them in
+// parsed.ordersByHospital, read here ONLY by stepEngine's buildBothModel call (the main
+// KAMC + SGH deck) and stepPull's count line; any third hospital is dropped. STATIC for
+// isScoped's reason: there is no safe degraded answer — "absent ⇒ keep every row" would
+// put another hospital's orders into an UNATTENDED morning report nobody reviews. A load failure abandons the run (main.js
 // catches the import) — no report, never a wrong one. hospital.js is pure (no DOM, no
 // vendor bundle).
-import { takeOrders } from '../model/hospital.js?v=v2026-10-11.1';
+import { takeOrders } from '../model/hospital.js?v=v2026-10-11.2';
 
 /* ------------------------------------------------------------------ *
  * Shared micro-helpers (same idioms the screens use)
@@ -207,12 +215,19 @@ export function shouldAutoDownloadFiles({ settings, mobile } = {}) {
   return ro.autoDownloadFiles == null ? true : !!ro.autoDownloadFiles;
 }
 
-/** Is this model the KAMC report — the one report that is recorded and the only one the
- *  unattended run may publish? model.hospital 'kamc', or absent (every model built before
- *  the report types existed). Anything else — 'sgh', 'both', a typo — is not. A null
- *  model has no hospital to disagree with (recordRunSnapshot's own guards handle it). */
+/** Is this model the single-hospital KAMC report? model.hospital 'kamc', or absent (a
+ *  legacy KAMC-only model: every model built before the report types existed). Anything
+ *  else — 'sgh', 'both', a typo — is not. A null model has no hospital to disagree with
+ *  (recordRunSnapshot's own guards handle it). */
 export function isKamcReport(model) {
   return !model || model.hospital == null || model.hospital === 'kamc';
+}
+
+/** Is this model the MAIN weekly report — KAMC + SGH ('both'), the one report the
+ *  unattended run may publish? Exactly 'both': absent is a legacy KAMC model, and a typo
+ *  is nothing (fail closed). */
+export function isMainReport(model) {
+  return !!model && model.hospital === 'both';
 }
 
 /** Variant → the model task list THAT variant's deck publishes (build-spec.js:1213). */
@@ -265,19 +280,45 @@ export function recordRunSnapshot({
   // FAIL CLOSED: a scope that cannot even be read is not provably the full report, and a
   // missed write heals on the next full run while a polluted history does not.
   //
-  // THE SAME FOR EVERY REPORT TYPE BUT KAMC (2026-10-11): an SGH or KAMC + SGH deck is a
-  // side report too. snapshot / snapshotHistory are KAMC's published series (the engine's
-  // delta baseline and the history panel read them as KAMC's), and the taskLog grace
-  // belongs to the KAMC report's audience. Only model.hospital 'kamc' — or ABSENT, every
-  // model that predates the report types, the automation's included — records; any other
-  // value, unknown ones included, writes nothing (fail closed, as above).
+  // REPORT TYPES (2026-10-11, user rule revised the same day). snapshot / snapshotHistory
+  // are KAMC's published series (the engine's delta baseline and the history panel read
+  // them as KAMC's), so only a report that HOLDS KAMC's full numbers may write them:
+  //   • 'both' — KAMC + SGH, the MAIN weekly report. It writes the numbers of its KAMC
+  //     sub-model (model.kamc — buildHospitalModel('kamc') over the same KAMC rows with
+  //     the same policy and date as the KAMC report's own build), so the series keeps
+  //     getting one entry per weekly report, and an entry for date D is the same numbers
+  //     a KAMC report for D writes. Only when that sub-model was built from KAMC rows: a
+  //     main report over a load with NO KAMC lines holds no KAMC report (one could not
+  //     even be generated — the review blocks it), and its zeros must not become the
+  //     published KAMC numbers for D. It NEVER writes the task log: its deck has no task
+  //     slides, and a closed task's one grace showing must not be spent on a deck that
+  //     never showed it (the second block below).
+  //   • 'kamc' — or ABSENT, a legacy KAMC-only model — records both blocks as it always did.
+  //   • anything else — 'sgh', unknown values — writes nothing (fail closed, as above).
   let scoped;
   try { scoped = isScoped(model && model.scope); } catch { scoped = true; }
   if (scoped) return;
-  if (!isKamcReport(model)) return;
+  let numbersOf; // the model whose kpi is published
+  let recordsTasks;
+  if (isKamcReport(model)) {
+    numbersOf = model;
+    recordsTasks = true;
+  } else if (isMainReport(model)) {
+    const sub = model.kamc;
+    if (!sub || !Array.isArray(sub.scopedRows) || !sub.scopedRows.length) return;
+    // Belt and braces: the main report takes no scope (decision 7), so neither may the
+    // sub-model whose numbers are published — fail closed like the guard above.
+    let subScoped;
+    try { subScoped = isScoped(sub.scope); } catch { subScoped = true; }
+    if (subScoped) return;
+    numbersOf = sub;
+    recordsTasks = false;
+  } else {
+    return;
+  }
 
   try {
-    const k = (model && model.kpi) || {};
+    const k = (numbersOf && numbersOf.kpi) || {};
     const numbers = {
       total: k.totals && k.totals.total,
       collected: k.funnel && k.funnel.collected,
@@ -323,6 +364,8 @@ export function recordRunSnapshot({
   // NUPCO audience never receives, and the next report prunes them for good. A
   // variant that shipped nothing therefore contributes an EMPTY list: its entries
   // keep openOn/closedOn:null and earn their grace on the next successful run.
+  // The main report's deck has no task slides — it showed no task (see the guard above).
+  if (!recordsTasks) return;
   try {
     if (typeof recordShownTasks !== 'function' || !model || !date) return;
     const shipped = shippedVariantSet(shippedVariants);
@@ -383,7 +426,7 @@ function installFastTimers() {
 // Build the SlideSpec per VARIANT — the variant changes slide-5 content
 // (task rows), so one shared spec would leak internal tasks into NUPCO files.
 async function buildVariantSpec(model, variant) {
-  const mod = await tryImport('../slidespec/build-spec.js?v=v2026-10-11.1');
+  const mod = await tryImport('../slidespec/build-spec.js?v=v2026-10-11.2');
   const fn = pickFn(mod, ['buildSpec', 'build', 'makeSpec', 'toSpec']);
   if (!fn) return null;
   let spec = fn(model, { variant });
@@ -409,7 +452,7 @@ async function toBlob(result, kind) {
 // renderPptx(spec, {variant, PptxGenJS}) -> Promise<Blob>
 async function makePptx(spec, variant, libs) {
   if (!spec) return null;
-  const mod = await tryImport('../render/pptx-renderer.js?v=v2026-10-11.1');
+  const mod = await tryImport('../render/pptx-renderer.js?v=v2026-10-11.2');
   const fn = pickFn(mod, ['renderPptx', 'buildPptx', 'toPptx', 'makePptx', 'render']);
   if (!fn) return null;
   const r = await fn(spec, { variant, PptxGenJS: libs.PptxGenJS });
@@ -421,9 +464,9 @@ async function makePptx(spec, variant, libs) {
 // the host and before capture starts — screen-generate clones them into live thumbnails.
 async function makePdf(spec, variant, libs, host, onProgress, onSlides) {
   if (!spec) return null;
-  const rMod = await tryImport('../render/html-renderer.js?v=v2026-10-11.1');
+  const rMod = await tryImport('../render/html-renderer.js?v=v2026-10-11.2');
   const renderSlides = pickFn(rMod, ['renderSlides', 'renderSpec', 'renderHtml', 'render']);
-  const pMod = await tryImport('../render/pdf-export.js?v=v2026-10-11.1');
+  const pMod = await tryImport('../render/pdf-export.js?v=v2026-10-11.2');
   const exportPdf = pickFn(pMod, ['exportPdf', 'renderPdf', 'toPdf', 'buildPdf', 'render']);
   if (!renderSlides || !exportPdf) return null;
   host.innerHTML = '';
@@ -453,8 +496,9 @@ async function makePdf(spec, variant, libs, host, onProgress, onSlides) {
  *   (i18n/ar.js buildFileName). Both callers pass model.scope, so the rows painted
  *   before generation and the files produced can never disagree on a name.
  * @param {('kamc'|'sgh'|'both')} [hospital] - the model's report type (model.hospital).
- *   Absent/'kamc' = no tag (the historic names); 'sgh' / 'both' insert the hospital
- *   codes (ar.js hospitalFileTag). Same set of four files in every report type.
+ *   'both' (the MAIN report) = no tag, the historic names; 'kamc' / 'sgh' = the
+ *   single-hospital tag ' - KAMC -' / ' - SGH -'; absent = 'kamc' (a legacy KAMC-only
+ *   model) — ar.js hospitalFileTag. Same set of four files in every report type.
  */
 export function buildFileDefs(dateStr, scope, hospital) {
   const date = dateStr || todayISO();
@@ -500,8 +544,8 @@ export async function produceReportFiles({ model, ctx, onProgress, host, signal 
     try { onProgress(evt); } catch (e) { console.warn('[generate] onProgress failed', e); }
   };
   const date = (model && model.reportDate) || todayISO();
-  // model.scope and model.hospital are undefined on runAutomation's model → the
-  // historic file names.
+  // runAutomation's model is the main report (hospital 'both', no scope) → the historic
+  // file names; a model with no hospital is a legacy KAMC model → tagged (ar.js).
   const fileDefs = buildFileDefs(date, model && model.scope, model && model.hospital);
 
   let ownHost = null;
@@ -601,7 +645,8 @@ const MSG = Object.freeze({
   engineFailed: 'تعذّر حساب المؤشرات',
   noModel: 'لا يوجد نموذج تقرير',
   scopedModel: 'نموذج التقرير مخصص — التشغيل الآلي ينشئ التقرير الكامل فقط',
-  notKamcModel: 'نموذج التقرير ليس تقرير KAMC — التشغيل الآلي ينشئ تقرير KAMC فقط',
+  notMainModel: 'نموذج التقرير ليس التقرير الرئيسي (KAMC + SGH) — التشغيل الآلي ينشئ التقرير الرئيسي فقط',
+  noMainModel: 'وحدة التقرير الرئيسي (KAMC + SGH) غير متوفرة',
   noFiles: 'تعذّر إنشاء ملفات التقرير',
   noLabFiles: 'لا توجد ملفات مختبرات',
   noLateLabs: 'لا توجد فحوصات متأخرة أو مستحقة',
@@ -619,26 +664,30 @@ const PULL_REUSE_MS = 15000;
 
 /** Default heavy dependencies — every one overridable through `deps` (tests inject fakes). */
 const DEFAULT_DEPS = Object.freeze({
-  loadGrafana: () => import('../ingest/grafana.js?v=v2026-10-11.1'),
-  loadEngine: () => tryImport('../engine/engine.js?v=v2026-10-11.1'),
-  loadReportModel: () => import('../model/report-model.js?v=v2026-10-11.1'),
-  loadDeltaBaseline: () => tryImport('../model/delta-baseline.js?v=v2026-10-11.1'),
+  loadGrafana: () => import('../ingest/grafana.js?v=v2026-10-11.2'),
+  loadEngine: () => tryImport('../engine/engine.js?v=v2026-10-11.2'),
+  loadReportModel: () => import('../model/report-model.js?v=v2026-10-11.2'),
+  // The main report's builder (buildBothModel). NOT guarded, like the report model above:
+  // without it there is no main report to publish, and the engine step fails loudly
+  // (generate then skips) rather than publishing some other report as the weekly one.
+  loadHospitalReport: () => import('../model/hospital-report.js?v=v2026-10-11.2'),
+  loadDeltaBaseline: () => tryImport('../model/delta-baseline.js?v=v2026-10-11.2'),
   // The delta-chip stamper. Guarded like the rest: a build without it degrades to the
   // engine's own clamped deltas instead of failing this module at load time.
-  loadDeltaWindow: () => tryImport('../model/delta-window.js?v=v2026-10-11.1'),
-  loadTaskLifecycle: () => tryImport('../model/task-lifecycle.js?v=v2026-10-11.1'),
-  loadLateLabs: () => import('../export/late-labs.js?v=v2026-10-11.1'),
-  loadTatSuggest: () => tryImport('../ingest/tat-suggest.js?v=v2026-10-11.1'),
-  loadTatLoinc: () => tryImport('../seeds/tat-lookup.js?v=v2026-10-11.1'),
+  loadDeltaWindow: () => tryImport('../model/delta-window.js?v=v2026-10-11.2'),
+  loadTaskLifecycle: () => tryImport('../model/task-lifecycle.js?v=v2026-10-11.2'),
+  loadLateLabs: () => import('../export/late-labs.js?v=v2026-10-11.2'),
+  loadTatSuggest: () => tryImport('../ingest/tat-suggest.js?v=v2026-10-11.2'),
+  loadTatLoinc: () => tryImport('../seeds/tat-lookup.js?v=v2026-10-11.2'),
   // Track 5's module; absent until it ships → the emails step reports 'skip'.
-  loadEmlDraft: () => tryImport('../export/eml-draft.js?v=v2026-10-11.1'),
+  loadEmlDraft: () => tryImport('../export/eml-draft.js?v=v2026-10-11.2'),
   // The encrypted send-out catalogue. Guarded: absent module or a failed decrypt
   // means the deck simply omits the two send-out slides.
-  loadSendoutMaster: () => tryImport('../ingest/sendout-master.js?v=v2026-10-11.1'),
+  loadSendoutMaster: () => tryImport('../ingest/sendout-master.js?v=v2026-10-11.2'),
   // The vendor contact book (To: per lab + the standard CC block). Guarded: a
   // build without it just means drafts fall back to the Settings map alone.
-  loadLabContacts: () => tryImport('../seeds/lab-contacts.js?v=v2026-10-11.1'),
-  loadDownload: () => tryImport('../ui/late-labs-section.js?v=v2026-10-11.1'),
+  loadLabContacts: () => tryImport('../seeds/lab-contacts.js?v=v2026-10-11.2'),
+  loadDownload: () => tryImport('../ui/late-labs-section.js?v=v2026-10-11.2'),
   produceReportFiles,
   now: () => Date.now(),
 });
@@ -806,10 +855,10 @@ export async function runAutomation({
   // Live snapshot / Grafana pull — the SAME sequence the upload screen's
   // fetchLive() runs: direct public-dashboard query first, and on a CORS/network
   // TypeError fall back to the encrypted snapshot when a data key is configured.
-  // Both land through takeOrders(), so every later step (engine, deck, lab workbooks,
-  // drafts, the TAT auto-accept) reads parsed.orders — the KAMC rows only — and the
-  // unattended run is exactly the KAMC report the screens make. SGH's rows sit beside
-  // them in parsed.ordersByHospital, which no step here reads.
+  // Both land through takeOrders(), so every KAMC-side step (engine hero, lab workbooks,
+  // drafts, the TAT auto-accept) reads parsed.orders — the KAMC rows only. SGH's rows sit
+  // beside them in parsed.ordersByHospital, read by ONE consumer: stepEngine's main-report
+  // build (buildBothModel), which computes them on their own with SGH's policy.
   async function stepPull() {
     const settings = theStore.settings || {};
     const gcfg = settings.grafana || {};
@@ -859,15 +908,22 @@ export async function runAutomation({
     }
     // Say what was left out in the step's own line — an unattended run has no upload
     // screen notice in front of anyone. Aggregates only (count + hospital name).
-    // Third hospitals only (takeOrders); SGH's lines are not excluded, but they are not
-    // in THIS run's report either — said so the morning line never implies otherwise.
+    // Third hospitals only (takeOrders). SGH's lines are not excluded: they are IN this
+    // run's main report (KAMC + SGH) — said, with the one thing that stays KAMC's (the
+    // per-lab files), since the KAMC count above is all the line otherwise reports. Said
+    // ONLY when it can be true: generate is switched on AND there are KAMC rows (with
+    // none, stepEngine skips with noOrders and no deck exists). Otherwise a neutral count.
     const excluded = theState.parsed.excludedHospitals || [];
     if (excluded.length) {
       message = `${message} — ${excluded.map((h) => STR.upload.hospitalExcludedShort(h.count, h.name || h.id)).join('، ')}`;
     }
     const obh = theState.parsed.ordersByHospital;
     const sghCount = (obh && Array.isArray(obh.sgh)) ? obh.sgh.length : 0;
-    if (sghCount) message = `${message} — ${STR.upload.sghNotAutomated(sghCount)}`;
+    if (sghCount) {
+      const kamcOrders = theState.parsed.orders;
+      const deckComing = !!opts.autoGenerate && Array.isArray(kamcOrders) && kamcOrders.length > 0;
+      message = `${message} — ${deckComing ? STR.upload.sghInAutomated(sghCount) : STR.upload.sghPulledOnly(sghCount)}`;
+    }
 
     if (opts.autoAcceptTat) {
       try {
@@ -878,7 +934,12 @@ export async function runAutomation({
     return { message };
   }
 
-  // Engine + ReportModel + delta baseline — the same modules review/generate use.
+  // Engine + ReportModel + delta chips — the same modules review/generate use — and then
+  // the MAIN report (KAMC + SGH) the run publishes. The KAMC engine output stays the
+  // run's hero numbers (theState.engineOutput, as before); buildReportModel still drafts
+  // the run's non-order content (tasks, panels, challenges…) exactly as the review screen
+  // drafts it, so the model handed on has the same shape as the review's own KAMC + SGH
+  // model (its order figures replaced by buildBothModel's kamc / sgh / combined).
   async function stepEngine() {
     const orders = theState.parsed.orders;
     if (!orders || !orders.length) return { status: 'skip', message: MSG.noOrders };
@@ -910,21 +971,61 @@ export async function runAutomation({
       errors.push(`sendout: ${(e && e.message) || String(e)}`);
     }
 
-    const model = buildReportModel({
+    const tracker = resolveTracker(theState, settings);
+    const base = buildReportModel({
       engineOutput: out,
-      tracker: resolveTracker(theState, settings),
+      tracker,
       settings,
       reportDate,
       orders,
       sendoutMaster,
       edits: theState.edits || {},
     });
+
+    // THE MAIN REPORT — KAMC + SGH. Each hospital on its own rows with its own policy
+    // (buildBothModel: KAMC's sub-model is the KAMC report's own build, argument for
+    // argument — same rows, settings, date, catalogue — so its numbers are the ones a KAMC
+    // report would record). SGH's rows: this load's, or none — a load without SGH lines is
+    // STILL the main report (SGH prints 0), never silently the KAMC one.
+    const hr = await D.loadHospitalReport();
+    if (!hr || typeof hr.buildBothModel !== 'function') throw new Error(MSG.noMainModel);
+    const obh = theState.parsed.ordersByHospital;
+    const both = hr.buildBothModel({
+      kamcRows: orders,
+      sghRows: (obh && Array.isArray(obh.sgh)) ? obh.sgh : [],
+      settings,
+      reportDate,
+      tracker,
+      sendoutMaster,
+      edits: theState.edits || {},
+      // The raw stored mode, as applyWindowDeltas passes it (the stampers normalise it).
+      mode: settings.reportOptions && settings.reportOptions.deltaMode,
+    });
+    // The drafted content + the main report's figures, the way the review screen's
+    // refreshedModel swaps figures: the single-hospital figure fields (kpi, sendout) go —
+    // a KAMC kpi beside kamc / sgh / combined would be the previous type's leftover. A
+    // scope on `base` is KEPT on purpose so stepGenerate's guard still sees it.
+    const model = { ...base };
+    delete model.kpi;
+    delete model.sendout;
+    Object.assign(model, {
+      // The builder's own word for what it built ('both') — not re-typed here, so
+      // stepGenerate's isMainReport guard checks the builder, not this assignment.
+      hospital: both.hospital,
+      reportDate: both.reportDate,
+      kamc: both.kamc,
+      sgh: both.sgh,
+      combined: both.combined,
+      deltaWindow: both.deltaWindow,
+    });
     // Presentation options + per-run manual overrides, exactly as the screens stamp them.
     if (settings.reportOptions) model.reportOptions = settings.reportOptions;
     if (!model.overrides) model.overrides = {};
 
+    // Routed by model.hospital to stampBothDeltas (each hospital's chips from its own
+    // rows; idempotent — buildBothModel already stamped), never the KAMC stamper.
     const dw = typeof D.loadDeltaWindow === 'function' ? await D.loadDeltaWindow() : null;
-    applyWindowDeltas(model, theState, theStore, dw && dw.stampWindowDeltas);
+    applyWindowDeltas(model, theState, theStore, dw && dw.stampWindowDeltas, hr);
     theState.reportModel = model;
     runModel = model; // the ONLY hand-off to generate/emails — see runModel above
 
@@ -933,7 +1034,8 @@ export async function runAutomation({
   }
 
   // The 4 report files + the snapshot/history write a successful run owes the
-  // delta features. autoDownload additionally pushes them to the browser.
+  // delta features (KAMC's numbers from the main report's KAMC sub-model; no task log —
+  // recordRunSnapshot). autoDownload additionally pushes them to the browser.
   // Renders ONLY this run's own model (runModel): no engine success → nothing to publish.
   async function stepGenerate() {
     const model = runModel;
@@ -946,10 +1048,10 @@ export async function runAutomation({
     let scoped;
     try { scoped = isScoped(model.scope); } catch { scoped = true; }
     if (scoped) return { status: 'error', message: MSG.scopedModel };
-    // Same belt and braces for the report type: stepEngine builds the KAMC report from
-    // parsed.orders and never sets model.hospital, so a non-KAMC model here is a bug —
-    // refuse it rather than publish an SGH / KAMC + SGH deck as the morning report.
-    if (!isKamcReport(model)) return { status: 'error', message: MSG.notKamcModel };
+    // Same belt and braces for the report type: stepEngine builds the MAIN report
+    // (hospital 'both'), so anything else here is a bug — refuse it rather than publish a
+    // single-hospital deck (or a legacy untyped one) as the weekly report.
+    if (!isMainReport(model)) return { status: 'error', message: MSG.notMainModel };
     const produced = await D.produceReportFiles({
       model, ctx: ctx || { state: theState, store: theStore }, onProgress: null, host: null, signal,
     });

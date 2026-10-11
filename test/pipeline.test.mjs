@@ -81,6 +81,20 @@ function fakeDeps(over = {}) {
       buildReportModel: ({ engineOutput, reportDate }) => ({ reportDate, kpi: engineOutput }),
     }),
     loadDeltaBaseline: async () => null,
+    // The MAIN report's builder (model/hospital-report.js buildBothModel) — faked like the
+    // engine: KAMC's sub-model carries the engine fake's numbers over the KAMC rows it was
+    // handed (scopedRows, as the real one), SGH's is empty. stampBothDeltas: a no-op.
+    loadHospitalReport: async () => ({
+      buildBothModel: ({ kamcRows, sghRows, reportDate }) => ({
+        hospital: 'both',
+        reportDate,
+        kamc: { hospital: 'kamc', reportDate, kpi: { totals: { total: 2 }, funnel: {}, buckets: { completed: 1 } }, scopedRows: kamcRows },
+        sgh: { hospital: 'sgh', reportDate, kpi: { totals: { total: 0 }, funnel: {}, buckets: { completed: 0 } }, scopedRows: sghRows },
+        combined: {},
+        deltaWindow: null,
+      }),
+      stampBothDeltas: () => null,
+    }),
     loadLateLabs: async () => ({
       buildLateLabWorkbooks: () => [{ lab: 'Lab A', fileName: 'Lab A.xlsx', xlsxBytes: new Uint8Array([1, 2]) }],
     }),
@@ -202,9 +216,11 @@ test('a full run walks the steps in order and returns the contract shape', async
   assert.deepEqual(res.errors, []);
 
   // The pulled rows reached state, the model was assembled from them, and the
-  // successful generate persisted the snapshot through the store.
+  // successful generate persisted the snapshot through the store. The model is the MAIN
+  // report (KAMC + SGH); the snapshot carries its KAMC sub-model's numbers.
   assert.equal(state.parsed.orders, ROWS);
   assert.equal(state.reportModel, seenModel);
+  assert.equal(seenModel.hospital, 'both');
   assert.equal(seenModel.reportDate, '2026-07-20');
   assert.deepEqual(store.snapshots.map((s) => s.asOf), ['2026-07-20']);
   assert.equal(store.snapshots[0].numbers.completed, 1);
@@ -417,11 +433,12 @@ test('the snapshot fallback runs when the direct query fails with a TypeError', 
 /* ------------------------------------------------------------------ *
  * Task-lifecycle state (settings.taskLog)
  *
- * A successful automated run owes the lifecycle the same write the manual generate
- * screen makes — otherwise the unattended path would keep showing a task as open
- * forever, and a task closed overnight would never get its one grace report.
- * The write reads the FINAL model (manual review edits are recorded exactly as
- * published) and only happens once files were actually produced.
+ * UPDATED 2026-10-11 (user rule): the automated run now publishes the MAIN report —
+ * KAMC + SGH — whose deck has NO task slides, so it must NOT spend the closed-task grace
+ * log (a closed task's one grace showing would be burnt on a deck that never showed
+ * it). The run's model still CARRIES the drafted task lists (the review screen reuses
+ * them), which is exactly why the guard lives in recordRunSnapshot and is pinned here.
+ * The KAMC report keeps writing the log (test/ui-hospital.test.mjs).
  * ------------------------------------------------------------------ */
 
 const LIFECYCLE_ROWS = {
@@ -440,22 +457,27 @@ const withTasksDeps = (over = {}) => fakeDeps({
   ...over,
 });
 
-test('a successful run records the shown tasks into settings.taskLog', async () => {
+test('a successful (main-report) run records the numbers but NOT the task log', async () => {
   const store = makeStore();
-  const res = await run({ store, deps: withTasksDeps() });
+  const state = makeState();
+  let shownTasks = 0;
+  const res = await run({
+    store,
+    state,
+    deps: withTasksDeps({
+      loadTaskLifecycle: async () => ({ ...taskLifecycle, recordShownTasks: (...a) => { shownTasks += 1; return taskLifecycle.recordShownTasks(...a); } }),
+    }),
+  });
   assert.equal(statusOf(res, 'generate'), 'done');
-
-  // loadDeltaBaseline is null in the fakes, so the snapshotHistory block writes
-  // nothing: every saveSettings here belongs to the lifecycle write.
-  assert.equal(store.docs.length, 1, 'exactly one settings write');
-  const doc = store.docs[0];
-  assert.deepEqual(doc.taskLog, {
-    [taskKey('ext', LIFECYCLE_ROWS.tasksCurrent[0])]: { openOn: '2026-07-20', closedOn: null },
-    [taskKey('int', LIFECYCLE_ROWS.tasksInternal[0])]: { openOn: '2026-07-20', closedOn: null },
-  }, 'both lists recorded under the run’s report date');
-  // The existing snapshot path is untouched by the new block.
+  // The model handed on still carries the drafted lists (the review screen reuses them)…
+  assert.deepEqual(state.reportModel.tasksCurrent, LIFECYCLE_ROWS.tasksCurrent);
+  // …but the main report never showed them: no lifecycle write at all.
+  assert.equal(shownTasks, 0, 'recordShownTasks is never called');
+  assert.deepEqual(store.docs, [], 'no settings write (snapshotHistory is null in the fakes)');
+  // The numbers path still ran, under the run's report date.
   assert.equal(store.snapshots.length, 1);
   assert.equal(store.snapshots[0].asOf, '2026-07-20');
+  assert.ok(taskKey, 'taskKey stays importable for the KAMC-side cases');
 });
 
 test('the minimal model fake (no task arrays) triggers NO taskLog write', async () => {

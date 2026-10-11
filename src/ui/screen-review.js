@@ -1,10 +1,10 @@
 // ui/screen-review.js — review/edit report content with a live slide preview (Track E).
-import { STR, todayISO, formatDateAr, formatRangeAr } from '../i18n/ar.js?v=v2026-10-11.1';
-import { el, editableTable, textareaField, toast } from './components.js?v=v2026-10-11.1';
-import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-10-11.1';
-import { autoDraft, splitTaskLists } from '../model/drafts.js?v=v2026-10-11.1';
-import { analyseSendout, hasMaster, AR_COUNTRY } from '../model/sendout.js?v=v2026-10-11.1';
-import { buildHistoryPanel } from './history-table.js?v=v2026-10-11.1';
+import { STR, todayISO, formatDateAr, formatRangeAr } from '../i18n/ar.js?v=v2026-10-11.2';
+import { el, editableTable, textareaField, toast } from './components.js?v=v2026-10-11.2';
+import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-10-11.2';
+import { autoDraft, splitTaskLists } from '../model/drafts.js?v=v2026-10-11.2';
+import { analyseSendout, hasMaster, AR_COUNTRY } from '../model/sendout.js?v=v2026-10-11.2';
+import { buildHistoryPanel } from './history-table.js?v=v2026-10-11.2';
 // REPORT SCOPE (2026-09-29). STATIC, not guarded like delta-window below: scope decides
 // WHICH ROWS every number is computed from, and there is no safe degraded answer — a
 // build that silently ignored a chosen scope would publish the full programme's numbers
@@ -13,23 +13,23 @@ import { buildHistoryPanel } from './history-table.js?v=v2026-10-11.1';
 import {
   EMPTY_SCOPE, normalizeScope, isScoped, hasRange, parseShipmentIds, labOptions,
   findShipments, applyScope, shipmentDetails,
-} from '../model/scope.js?v=v2026-10-11.1';
+} from '../model/scope.js?v=v2026-10-11.2';
 import {
   normalizeDeltaMode, isWeekDeltaMode, DEFAULT_DELTA_MODE,
-} from '../model/delta-baseline.js?v=v2026-10-11.1';
+} from '../model/delta-baseline.js?v=v2026-10-11.2';
 // Same module instance drafts.js already imports (identical specifier) — the grace
 // re-check below MUST use task-lifecycle's own identity/status vocabulary, never a
 // second local copy of it. Static, not guarded: drafts.js (imported above) already
 // depends on this module, so there is no new failure mode.
 import {
   CLOSED as CLOSED_STATUS, LIST_EXTERNAL, LIST_INTERNAL, taskKey,
-} from '../model/task-lifecycle.js?v=v2026-10-11.1';
-// REPORT TYPES (2026-10-11): KAMC (the historic report, default) / SGH / KAMC + SGH.
+} from '../model/task-lifecycle.js?v=v2026-10-11.2';
+// REPORT TYPES (2026-10-11): KAMC + SGH (the main weekly report, default) / KAMC / SGH.
 // STATIC for scope.js's reason: WHICH hospital's rows a report reads has no safe degraded
 // answer, and hospital.js is pure (no imports at all). The per-hospital MODEL builders
 // (model/hospital-report.js) are a guarded import inside render(), like the engine they
 // depend on — absent, an SGH / KAMC + SGH build throws and modelFor says so.
-import { HOSPITALS, HOSPITAL_MODES, rowsForMode } from '../model/hospital.js?v=v2026-10-11.1';
+import { HOSPITALS, HOSPITAL_MODES, rowsForMode } from '../model/hospital.js?v=v2026-10-11.2';
 
 /* small local module helpers (kept local to avoid cross-screen coupling) */
 async function tryImport(path) { try { return await import(path); } catch { return null; } }
@@ -312,31 +312,67 @@ function allRowsOf(state) {
 }
 
 /* ---------- Report type (2026-10-11): which hospital(s) the report is about ----------
- * state.reportHospital ∈ HOSPITAL_MODES ('kamc' default | 'sgh' | 'both') — memory only,
+ * state.reportHospital ∈ HOSPITAL_MODES ('both' default | 'kamc' | 'sgh') — memory only,
  * a choice about ONE run exactly like the scope (state.js; reset by «تقرير جديد»), never
  * read by the unattended automation. Picked on the «نطاق التقرير» card below.
- *   • KAMC — the historic report, byte for byte: parsed.orders, today's figures path.
+ *   • BOTH — KAMC + SGH, the MAIN weekly report (user rule, 2026-10-11): the reference
+ *            deck's design, each hospital computed on its own rows, then summed
+ *            (buildBothModel). No scope filters (decision 7), no number overrides
+ *            (decision 8). Historic file names (no tag). If the loaded data has no SGH
+ *            rows it is STILL this report (SGH prints 0, the `missing` notice says so) —
+ *            never silently switched to KAMC.
+ *   • KAMC — the single-hospital KAMC report (the historic design and numbers, byte for
+ *            byte): parsed.orders, today's figures path. File names tagged « - KAMC - ».
  *   • SGH  — the same design over SGH's own rows with SGH's engine policy (no Test
  *            Menu: no TAT, lateness, turnaround or country) — model/hospital-report.js
- *            buildHospitalModel. Scope filters apply to SGH's rows.
- *   • BOTH — the reference deck's design: each hospital computed on its own rows, then
- *            summed (buildBothModel). No scope filters (decision 7), no number overrides
- *            (decision 8).
- * SGH and BOTH are SIDE reports like a scoped one: they never write the published
- * history, the snapshot or the task log (pipeline.js recordRunSnapshot), and the history
- * panel is shown in KAMC mode only. */
+ *            buildHospitalModel. Scope filters apply to SGH's rows. Tagged « - SGH - ».
+ * Recording (pipeline.js recordRunSnapshot): an unscoped BOTH report writes KAMC's
+ * published numbers from its KAMC sub-model (never the task log — no task slides); an
+ * unscoped KAMC report writes them + the task log, as it always did; SGH (and any scoped
+ * deck) is a SIDE report and writes nothing. The history panel always charts KAMC's
+ * series: shown for KAMC and for the main KAMC + SGH report (with a note that the figures
+ * are KAMC's alone), hidden for SGH and any scope — see historyPanelPlan. */
 
-/** The report type in force: state.reportHospital, 'kamc' when unset (every state that
- *  predates the report types; HOSPITAL_MODES is the only vocabulary this screen writes). */
+/** The report type in force: state.reportHospital, 'both' — the main report — when unset
+ *  or unknown (HOSPITAL_MODES is the only vocabulary this screen writes). */
 export function reportHospitalOf(state) {
   const h = state && state.reportHospital;
-  return HOSPITAL_MODES.includes(h) ? h : 'kamc';
+  return HOSPITAL_MODES.includes(h) ? h : 'both';
 }
 
-/** The report type a MODEL was built as (absent ⇒ 'kamc': the automation's model and
- *  every model that predates the report types). Compared against reportHospitalOf to
- *  decide whether the figures are stale and whether a generate click may proceed. */
+/** The report type a MODEL was built as (absent ⇒ 'kamc': a model with no report type is
+ *  a legacy KAMC-only model — every model that predates the report types). Compared
+ *  against reportHospitalOf to decide whether the figures are stale and whether a
+ *  generate click may proceed. */
 const modelHospitalOf = (model) => (model && model.hospital != null ? model.hospital : 'kamc');
+
+/**
+ * The «أرقام التقارير والتقدم» panel's plan for one review model — pure (no DOM), so the
+ * per-report-type rule is pinned by a test. snapshotHistory is the published KAMC series,
+ * so the panel only ever charts KAMC's as-of numbers beside it — SGH's (or the summed)
+ * would read as one series, the same lie a scope would tell.
+ *   • SGH: hidden, one line in its place (HS.historyHidden).
+ *   • any scope: hidden, the scope's own line (a scope narrows the rows, the published
+ *     series is the full report's).
+ *   • KAMC + SGH — the MAIN report, unscoped by design: SHOWN on its KAMC sub-model's rows
+ *     (= parsed.orders), the series this very report writes into snapshotHistory
+ *     (pipeline.js recordRunSnapshot records model.kamc); a note above says the figures
+ *     are KAMC's alone. Before 2026-10-11 it was hidden, and the default screen then told
+ *     the operator the published numbers had nothing to do with the report it publishes.
+ *   • KAMC: as always — model.scopedRows, else parsed.orders.
+ * @returns {{hidden:(string|null), note:(string|null), rows:(Array|null)}}
+ */
+export function historyPanelPlan(model, state, hospital) {
+  const HSs = STR.review.hospital;
+  if (hospital === 'sgh') return { hidden: HSs.historyHidden, note: null, rows: null };
+  if (isScoped(model && model.scope)) return { hidden: str('scope', 'historyHidden'), note: null, rows: null };
+  const parsedOrders = (state && state.parsed && state.parsed.orders) || null;
+  if (hospital === 'both') {
+    const k = model && model.kamc;
+    return { hidden: null, note: HSs.historyKamcSeries, rows: (k && Array.isArray(k.scopedRows)) ? k.scopedRows : allRowsOf(state) };
+  }
+  return { hidden: null, note: null, rows: Array.isArray(model && model.scopedRows) ? model.scopedRows : parsedOrders };
+}
 
 /** One reported hospital's rows ('kamc' | 'sgh'), or null when it has none. Through
  *  model/hospital.js rowsForMode — the one place that says where each hospital's rows
@@ -690,6 +726,25 @@ export function bannerDeltasOf(model) {
     if (any) out[key] = sum;
   }
   return out;
+}
+
+/* The SIDE REPORT banner's content for a model, or null when the model is a recorded
+ * report (see the banner in render()): a scoped deck (any type) or the SGH report gets
+ * one; the main KAMC + SGH report and the unscoped KAMC report do not. The title names
+ * the report type for SGH and «تقرير مخصص» for a scope; the line is the SGH sentence
+ * for SGH, the scope sentence otherwise. Pure; exported for node tests. */
+export function sideReportNotice(model) {
+  const hospital = modelHospitalOf(model);
+  let scoped;
+  try { scoped = isScoped(model && model.scope); } catch { scoped = true; } // fail closed, as recordRunSnapshot
+  const sgh = hospital === 'sgh';
+  if (!scoped && !sgh) return null;
+  const SC = STR.review.scope;
+  return {
+    title: [sgh ? STR.generate.reportType(hospitalLabel(hospital)) : null, scoped ? SC.active : null]
+      .filter(Boolean).join(' · '),
+    text: sgh ? STR.review.hospital.sideReport : SC.sideReport,
+  };
 }
 
 /* A FRESH model object whenever the figures went stale (see figuresFor): a changed
@@ -1061,7 +1116,7 @@ export async function render(container, ctx) {
   // any failure, which simply omits the two slides.
   if (state.sendoutMaster === undefined) {
     const dataKey = ((store.settings || {}).grafana || {}).dataKey || '';
-    const mod = await tryImport('../ingest/sendout-master.js?v=v2026-10-11.1');
+    const mod = await tryImport('../ingest/sendout-master.js?v=v2026-10-11.2');
     state.sendoutMaster = (mod && mod.loadSendoutMaster)
       ? await mod.loadSendoutMaster(dataKey)
       : null;
@@ -1077,11 +1132,11 @@ export async function render(container, ctx) {
   // so the app always takes the guarded import.
   const compute = typeof ctx.compute === 'function'
     ? ctx.compute
-    : pickFn(await tryImport('../engine/engine.js?v=v2026-10-11.1'), ['compute', 'runEngine', 'run']);
+    : pickFn(await tryImport('../engine/engine.js?v=v2026-10-11.2'), ['compute', 'runEngine', 'run']);
   // The SGH / KAMC + SGH model builders — guarded like the engine they depend on. Loaded
   // even in KAMC mode: the generate click and a report-type switch go through modelFor
   // with it, and a missing module must surface as modelFor's loud fallback, not a crash.
-  const hrMod = await tryImport('../model/hospital-report.js?v=v2026-10-11.1');
+  const hrMod = await tryImport('../model/hospital-report.js?v=v2026-10-11.2');
   const model = modelFor(state, store, compute, { hospitalReport: hrMod });
   // The report type ON SCREEN — the model's, which is the state's choice unless that
   // build failed and modelFor fell back to KAMC (it said so).
@@ -1113,7 +1168,7 @@ export async function render(container, ctx) {
   // Guarded import, exactly as the retired picker was: a build without the module
   // degrades to the engine's own deltas instead of throwing. Re-run below on a
   // report-date change and on a mode switch; being PURE, every re-run agrees.
-  const dwMod = await tryImport('../model/delta-window.js?v=v2026-10-11.1');
+  const dwMod = await tryImport('../model/delta-window.js?v=v2026-10-11.2');
   const stampWindow = dwMod && dwMod.stampWindowDeltas;
   // The chips need the parsed CSV rows: with no upload in this session (mock preview)
   // stampWindowDeltas leaves the engine's deltas alone and stamps no window, and the
@@ -1224,9 +1279,9 @@ export async function render(container, ctx) {
     // A range's END when one is active (the deck is dated 'to'), else the chosen date.
     model.reportDate = effectiveReportDate(state, model.scope);
     stampDeltas(); // re-window the chips for the current report date (pure → idempotent)
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-10-11.1');
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-10-11.2');
     const buildSpec = pickFn(specMod, ['buildSpec', 'build', 'makeSpec', 'toSpec']);
-    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-10-11.1');
+    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-10-11.2');
     const renderFn = pickFn(rendMod, ['renderSpec', 'renderSlides', 'renderHtml', 'render']);
 
     if (!buildSpec || !renderFn) {
@@ -1697,7 +1752,7 @@ export async function render(container, ctx) {
     el('summary', { class: 'card__title', style: 'cursor:pointer', text: STR.review.labelsCardTitle }),
   ]);
   (async () => {
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-10-11.1');
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-10-11.2');
     const LABEL_NAMES = specMod && specMod.LABEL_NAMES;
     const DEFAULT_LABELS = (specMod && specMod.DEFAULT_LABELS) || {};
     if (!LABEL_NAMES || typeof LABEL_NAMES !== 'object') {
@@ -1982,24 +2037,20 @@ export async function render(container, ctx) {
   let historyOpen = !!(restore && restore.historyOpen);
   function renderHistory() {
     historyHost.innerHTML = '';
-    // KAMC MODE ONLY: snapshotHistory is the KAMC report's published series, and SGH's
-    // (or the summed) as-of numbers beside it would read as one series — the same lie a
-    // scope would tell. One line in its place, like the scoped case below.
-    if (hospital !== 'kamc') {
+    // What the panel shows per report type: historyPanelPlan (pure, pinned by a test).
+    const plan = historyPanelPlan(model, state, hospital);
+    if (plan.hidden) {
       historyHost.appendChild(el('div', { class: 'card', style: 'padding:12px 16px' }, [
-        el('p', { class: 'small muted', text: HS.historyHidden }),
-      ]));
-      return;
-    }
-    if (isScoped(model.scope)) {
-      historyHost.appendChild(el('div', { class: 'card', style: 'padding:12px 16px' }, [
-        el('p', { class: 'small muted', text: str('scope', 'historyHidden') }),
+        el('p', { class: 'small muted', text: plan.hidden }),
       ]));
       return;
     }
     const s = store.settings || {};
+    if (plan.note) {
+      historyHost.appendChild(el('p', { class: 'small muted', style: 'margin:0 4px 6px', text: plan.note }));
+    }
     const panel = buildHistoryPanel({
-      rows: stampRows(),
+      rows: plan.rows,
       tatTests: s.tatLookup || {},
       history: s.snapshotHistory || {},
       endIso: effectiveReportDate(state, model.scope),
@@ -2076,7 +2127,8 @@ export async function render(container, ctx) {
     const header = (pillText, pillOn) => el('summary', { class: 'card__title', style: 'cursor:pointer;margin:0;flex-wrap:wrap' }, [
       el('span', { text: SC.title }),
       // The report type is named in the SUMMARY so it reads with the card collapsed.
-      el('span', { style: scopePillStyle(hospital !== 'kamc'), text: hospitalLabel(hospital) }),
+      // Highlighted for the special single-hospital reports; calm for the main one.
+      el('span', { style: scopePillStyle(hospital !== 'both'), text: hospitalLabel(hospital) }),
       pillText ? el('span', { style: scopePillStyle(pillOn), text: pillText }) : null,
     ]);
     if (hospital === 'both' || !allRows) {
@@ -2087,7 +2139,9 @@ export async function render(container, ctx) {
           hospital === 'both' ? el('p', { class: 'small muted', style: 'margin:0', text: HS.bothNoScope }) : null,
         ]),
       ]);
-      card.open = restore ? !!restore.scopeOpen : true;
+      // The main report (KAMC + SGH) opens collapsed, as the daily report always has; a
+      // single-hospital type with nothing to scope opens (its empty notice is up top).
+      card.open = restore ? !!restore.scopeOpen : hospital !== 'both';
       return card;
     }
 
@@ -2266,10 +2320,11 @@ export async function render(container, ctx) {
       header(isScoped(ms) ? SC.active : SC.allLabs, isScoped(ms)),
       el('div', { style: 'margin-top:14px' }, [active, hospitalSection, labsSection, shipSection, rangeSection]),
     ]);
-    // Open while a scope or a non-KAMC report type is in force (the operator must see
-    // what shapes the deck); otherwise collapsed — the daily run is the full KAMC
-    // report. Our own rerender keeps whatever the operator last chose.
-    card.open = restore ? !!restore.scopeOpen : (isScoped(ms) || hospital !== 'kamc');
+    // Only KAMC-only / SGH-only reach this branch (the main KAMC + SGH report takes no
+    // scope — above), and both are special single-hospital reports: open, so the
+    // operator sees what shapes the deck. Our own rerender keeps whatever the operator
+    // last chose.
+    card.open = restore ? !!restore.scopeOpen : true;
     return card;
   }
   // Built whenever an order load happened (ordersLoaded), even one with no KAMC or SGH
@@ -2277,21 +2332,19 @@ export async function render(container, ctx) {
   if (ordersLoaded(state)) scopeCard = buildScopeCard();
   // (e) SIDE REPORT banner — above everything else on the screen, so a scoped deck can
   // never be generated by someone who did not notice it was scoped. The same sentence is
-  // repeated on the generate screen's success panel. An SGH / KAMC + SGH report is a side
-  // report too: the banner names the report type and says it is recorded nowhere.
-  const scopedSide = isScoped(model.scope);
-  const sideBanner = (scopedSide || hospital !== 'kamc') ? el('div', {
+  // repeated on the generate screen's success panel. An SGH report is a side report too:
+  // the banner names the report type and says it is recorded nowhere. NOT the main
+  // KAMC + SGH report (it IS recorded — KAMC's numbers, pipeline.js recordRunSnapshot)
+  // and not the unscoped KAMC report (recorded as it always was): no banner for either.
+  const side = sideReportNotice(model);
+  const sideBanner = side ? el('div', {
     class: 'card', role: 'status',
     style: 'border:1px solid var(--amber);background:var(--warn-bg,#FEF3C7);color:var(--warn-text,#92400E);padding:12px 16px;display:flex;gap:10px;align-items:flex-start',
   }, [
     el('span', { text: '⚠', 'aria-hidden': 'true', style: 'font-size:1.1rem;line-height:1.5' }),
     el('div', { style: 'min-width:0' }, [
-      el('div', {
-        style: 'font-weight:800',
-        text: [hospital !== 'kamc' ? STR.generate.reportType(hospitalLabel(hospital)) : null, scopedSide ? SC.active : null]
-          .filter(Boolean).join(' · '),
-      }),
-      el('div', { class: 'small', text: hospital !== 'kamc' ? HS.sideReport : SC.sideReport }),
+      el('div', { style: 'font-weight:800', text: side.title }),
+      el('div', { class: 'small', text: side.text }),
     ]),
   ]) : null;
   // (f) NOTHING TO REPORT — the chosen report type's hospital has no rows in the loaded

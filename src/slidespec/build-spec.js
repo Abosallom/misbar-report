@@ -57,14 +57,14 @@
 // standing rule, unchanged for it). The SGH and BOTH decks print exactly the names the
 // reference deck prints («SGH», «مستشفى الألماني السعودي») — the reference supersedes the
 // old rule for those two report types only.
-import { COLORS as C, GEOM } from '../theme.js?v=v2026-10-11.1';
-import { AR_COUNTRY, AR_COUNTRY_SHORT, reflabShort } from '../model/sendout.js?v=v2026-10-11.1';
-import { isScoped, hasRange } from '../model/scope.js?v=v2026-10-11.1';
+import { COLORS as C, GEOM } from '../theme.js?v=v2026-10-11.2';
+import { AR_COUNTRY, AR_COUNTRY_SHORT, reflabShort } from '../model/sendout.js?v=v2026-10-11.2';
+import { isScoped, hasRange } from '../model/scope.js?v=v2026-10-11.2';
 // NAMESPACE import on purpose: build-spec-both.js may import helpers back from this file
 // (an ESM cycle). A namespace binding is only read inside buildSpec, at CALL time, when
 // both modules have finished evaluating — and it tolerates either a named
 // `buildBothSpec` export (the contract's name) or a default export.
-import * as bothSpecModule from './build-spec-both.js?v=v2026-10-11.1';
+import * as bothSpecModule from './build-spec-both.js?v=v2026-10-11.2';
 
 // EXPLICIT-TRUE kpiCards KEYS. reportOptions.kpiCards normally reads "on unless === false"
 // (see buildExec's cardDefs filter). The keys in this set INVERT that: they render only

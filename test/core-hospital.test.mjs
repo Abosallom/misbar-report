@@ -285,7 +285,7 @@ test('rowsForMode — nothing loaded / a bucket that predates ordersByHospital; 
 
 // ---- state.js: the parsed bucket ---------------------------------------------------
 
-test('state.js — a fresh run: nothing loaded for EITHER hospital, no exclusions, report type KAMC', () => {
+test('state.js — a fresh run: nothing loaded for EITHER hospital, no exclusions, report type KAMC + SGH (the main report)', () => {
   resetRunData();
   // null, like orders (review R-2): never [] = "loaded, zero rows".
   assert.deepEqual(state.parsed.ordersByHospital, { kamc: null, sgh: null });
@@ -294,10 +294,15 @@ test('state.js — a fresh run: nothing loaded for EITHER hospital, no exclusion
   assert.equal(rowsForMode(state.parsed, 'sgh'), null, 'sgh: nothing loaded, same as kamc');
   assert.deepEqual(rowsForMode(state.parsed, 'both'), { kamc: null, sgh: null });
   assert.deepEqual(state.parsed.excludedHospitals, []);
-  assert.equal(state.reportHospital, 'kamc');
-  state.reportHospital = 'both';
+  // UPDATED 2026-10-11 (user rule): KAMC + SGH is the MAIN weekly report, so it is the
+  // default and «تقرير جديد» returns to it (was: 'kamc', the then-historic report).
+  assert.equal(state.reportHospital, 'both');
+  state.reportHospital = 'kamc';
   resetRunData();
-  assert.equal(state.reportHospital, 'kamc', '«تقرير جديد» goes back to the historic report');
+  assert.equal(state.reportHospital, 'both', '«تقرير جديد» goes back to the main report');
+  state.reportHospital = 'sgh';
+  resetRunData();
+  assert.equal(state.reportHospital, 'both');
 });
 
 test('state.js — takeOrders on the real bucket, then raw (the CSV order): raw survives, pairing holds', () => {

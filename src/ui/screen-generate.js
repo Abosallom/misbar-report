@@ -2,20 +2,23 @@
 // The file-producing core now lives in automation/pipeline.js (produceReportFiles) so
 // an unattended run makes byte-identical files; this screen drives it and paints the
 // very same progress bar, file rows and live slide thumbnails it always has.
-import { STR, todayISO, formatDateAr, formatRangeAr } from '../i18n/ar.js?v=v2026-10-11.1';
-import { el, progressBar, toast } from './components.js?v=v2026-10-11.1';
-import { resetRunData } from '../state.js?v=v2026-10-11.1';
-import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-10-11.1';
-import { autoDraft, splitTaskLists } from '../model/drafts.js?v=v2026-10-11.1';
-import { buildLateLabsSection, triggerDownload } from './late-labs-section.js?v=v2026-10-11.1';
+import { STR, todayISO, formatDateAr, formatRangeAr } from '../i18n/ar.js?v=v2026-10-11.2';
+import { el, progressBar, toast } from './components.js?v=v2026-10-11.2';
+import { resetRunData } from '../state.js?v=v2026-10-11.2';
+import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-10-11.2';
+import { autoDraft, splitTaskLists } from '../model/drafts.js?v=v2026-10-11.2';
+import { buildLateLabsSection, triggerDownload } from './late-labs-section.js?v=v2026-10-11.2';
 import {
   applyWindowDeltas, buildFileDefs, produceReportFiles, recordRunSnapshot,
   shouldAutoDownloadFiles,
-} from '../automation/pipeline.js?v=v2026-10-11.1';
-import { isScoped, hasRange, normalizeScope } from '../model/scope.js?v=v2026-10-11.1';
+} from '../automation/pipeline.js?v=v2026-10-11.2';
+import { isScoped, hasRange, normalizeScope } from '../model/scope.js?v=v2026-10-11.2';
 
-/** The report type a model is (model.hospital; absent ⇒ 'kamc', every model that predates
- *  the report types — the fallback below and the automation's included). */
+/** The report type a model is (model.hospital; absent ⇒ 'kamc': a legacy KAMC-only model —
+ *  every model that predates the report types, and the fallback below, whose numbers are
+ *  the KAMC engine output). Passed EXPLICITLY to buildFileDefs, so the painted rows and
+ *  the produced files name the same report: the main KAMC + SGH report untagged, a
+ *  single-hospital one tagged. */
 const hospitalOf = (model) => (model && model.hospital != null ? model.hospital : 'kamc');
 /** Its label as the review screen's pills print it (STR.review.hospital.modes). */
 const hospitalLabel = (h) => (STR.review.hospital.modes[h] || String(h));
@@ -165,9 +168,9 @@ export function shareText(model, date, fileCount) {
   const V = (key, computed) => (Number.isFinite(model.overrides && model.overrides[key]) ? model.overrides[key] : computed);
   const num = (v) => (Number.isFinite(v) ? v : 0);
   const hospital = hospitalOf(model);
-  // REPORT TYPES (2026-10-11). KAMC: the text is exactly what it always was. SGH / KAMC +
-  // SGH: a line names the report type (the pasted text travels without the deck), and
-  // the numbers follow the deck's own rules — a KAMC + SGH number is the two hospitals'
+  // REPORT TYPES (2026-10-11). KAMC + SGH, the MAIN report: the historic heading with no
+  // type line. KAMC / SGH, the single-hospital reports: a line names the report type (the
+  // pasted text travels without the deck). The numbers follow the deck's own rules — a KAMC + SGH number is the two hospitals'
   // results summed (model/hospital-report.js), and lateness exists only where a Test
   // Menu does (KAMC): an SGH report prints «–» for it, never the engine's 0.
   let total; let completed; let awaiting; let late; let rejected; let cancelled;
@@ -201,7 +204,11 @@ export function shareText(model, date, fileCount) {
   const scope = normalizeScope(model.scope); // same view isScoped/hasRange judge by
   const when = (hasRange(scope) && formatRangeAr(scope.from, scope.to)) || formatDateAr(date) || date;
   return `تقرير مسبار الأسبوعي — ${when}\n` +
-    (hospital !== 'kamc' ? `${STR.generate.reportType(hospitalLabel(hospital))}\n` : '') +
+    // The type line follows the file-name rule (ar.js buildFileName): the MAIN report
+    // (KAMC + SGH) keeps the historic heading alone; a single-hospital report — KAMC-only
+    // (a legacy model with no hospital field included) or SGH — names itself, so its
+    // pasted numbers are never read as the main weekly report's.
+    (hospital !== 'both' ? `${STR.generate.reportType(hospitalLabel(hospital))}\n` : '') +
     (isScoped(scope) ? `${scopeShareLine(scope)}\n` : '') +
     `• إجمالي الطلبات: ${total}\n` +
     `• فحوصات مكتملة (تشمل المرفوضة): ${completed} (${pct}%)\n` +
@@ -214,8 +221,9 @@ export function shareText(model, date, fileCount) {
 
 function buildShareCard(model, date, fileCount) {
   const text = shareText(model, date, fileCount);
-  // One more line each for a scope and a non-KAMC report type → one more textarea row.
-  const extra = (isScoped(model.scope) ? 1 : 0) + (hospitalOf(model) !== 'kamc' ? 1 : 0);
+  // One more line each for a scope and a single-hospital report type (KAMC / SGH — the
+  // main KAMC + SGH report has no type line) → one more textarea row.
+  const extra = (isScoped(model.scope) ? 1 : 0) + (hospitalOf(model) !== 'both' ? 1 : 0);
 
   const ta = el('textarea', {
     dir: 'rtl', readOnly: true, rows: 6 + extra, value: text,
@@ -271,18 +279,18 @@ export async function render(container, ctx) {
   // Both modules are guarded → engine deltas if either is absent.
   // An SGH / KAMC + SGH model is re-stamped by model/hospital-report.js (each hospital
   // with its own policy — applyWindowDeltas routes it); guarded like the other two.
-  const dwMod = await tryImport('../model/delta-window.js?v=v2026-10-11.1');
-  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-10-11.1');
+  const dwMod = await tryImport('../model/delta-window.js?v=v2026-10-11.2');
+  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-10-11.2');
   const hrMod = hospitalOf(model) !== 'kamc'
-    ? await tryImport('../model/hospital-report.js?v=v2026-10-11.1')
+    ? await tryImport('../model/hospital-report.js?v=v2026-10-11.2')
     : null;
   const recordSnapshot = dbMod && dbMod.recordSnapshot;
   applyWindowDeltas(model, state, store, dwMod && dwMod.stampWindowDeltas, hrMod);
 
   // Same four definitions produceReportFiles will walk — one shared source, and the SAME
-  // scope + report-type arguments it passes, so a painted row name is always the
-  // downloaded file's name.
-  const fileDefs = buildFileDefs(date, model.scope, model.hospital);
+  // scope + report type it resolves (absent ⇒ 'kamc' on both sides), so a painted row
+  // name is always the downloaded file's name.
+  const fileDefs = buildFileDefs(date, model.scope, hospitalOf(model));
 
   const rowEls = {};
   const fileList = el('div', { class: 'gen-files' }, fileDefs.map((f) => {
@@ -392,7 +400,7 @@ export async function render(container, ctx) {
     // model — guarded import, so an older/partial build just keeps the numbers path.
     // A SCOPED model is a side report: recordRunSnapshot returns before either write
     // (see its guard), so it is still called unconditionally here — one owner of the rule.
-    const tlMod = await tryImport('../model/task-lifecycle.js?v=v2026-10-11.1');
+    const tlMod = await tryImport('../model/task-lifecycle.js?v=v2026-10-11.2');
     recordRunSnapshot({
       model, store, state, date, recordSnapshot,
       recordShownTasks: tlMod && tlMod.recordShownTasks,
@@ -433,8 +441,9 @@ export async function render(container, ctx) {
       // Scoped run: say, at the moment of success, that nothing was recorded — an
       // operator who expects this deck in the history panel must not go looking for it.
       isScoped(model.scope) ? el('p', { class: 'small muted', text: STR.review.scope.sideReport }) : null,
-      // The same for an SGH / KAMC + SGH deck: a side report, recorded nowhere.
-      hospitalOf(model) !== 'kamc' ? el('p', { class: 'small muted', text: STR.review.hospital.sideReport }) : null,
+      // The same for an SGH deck: a side report, recorded nowhere. Not the main KAMC + SGH
+      // report — it IS recorded (KAMC's numbers, pipeline.js recordRunSnapshot).
+      hospitalOf(model) === 'sgh' ? el('p', { class: 'small muted', text: STR.review.hospital.sideReport }) : null,
       el('p', {
         class: 'small muted',
         style: 'margin-top:6px',

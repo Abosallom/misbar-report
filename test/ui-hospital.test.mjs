@@ -1,17 +1,19 @@
 // test/ui-hospital.test.mjs — run with:  node --test
-// The three REPORT TYPES wired through the app (KAMC default / SGH / KAMC + SGH):
+// The three REPORT TYPES wired through the app (KAMC + SGH = the MAIN report and the
+// default since the 2026-10-11 user rule / KAMC-only / SGH-only; the main report's own
+// rules — names, default, banner, history, automation — are in ui-main-report.test.mjs):
 //   • mode switching on the review screen (ui/screen-review.js modelFor /
 //     buildOrderFigures): each type is built from ITS hospital's rows only, a switch
 //     rebuilds and drops the overrides and the scope, and a failed SGH / BOTH build falls
 //     back to KAMC LOUDLY;
 //   • the empty-hospital guard (hospitalAvailability): a type with no rows is blocked,
 //     never swapped for KAMC;
-//   • side reports: SGH / BOTH never write the snapshot, the history or the task log
-//     (automation/pipeline.js recordRunSnapshot), and the unattended run refuses them;
-//   • file names (i18n/ar.js buildFileName / pipeline.js buildFileDefs): KAMC unchanged,
-//     SGH and BOTH tagged;
-//   • the unattended pipeline is KAMC-only: no SGH (or third-hospital) row reaches any
-//     of its steps;
+//   • side reports: SGH never writes the snapshot, the history or the task log
+//     (automation/pipeline.js recordRunSnapshot), and the unattended run refuses it;
+//   • file names (i18n/ar.js buildFileName / pipeline.js buildFileDefs): the main
+//     report untagged (historic), KAMC and SGH tagged;
+//   • the unattended pipeline publishes the main report; its KAMC-side steps (engine
+//     hero, TAT, lab files) never see an SGH (or third-hospital) row;
 //   • the generate screen's share text and the hospital-aware chip stamper.
 // SYNTHETIC rows only (made-up ids, labs and tests); the hospital name/id pairs are the
 // source's own spellings — organisations, not patients.
@@ -94,14 +96,17 @@ const everyRowIs = (rows, h) => Array.isArray(rows) && rows.every((r) => hospita
  * Mode switching (review screen)
  * ------------------------------------------------------------------ */
 
-test('reportHospitalOf: unset → kamc (the historic report); the three modes pass through', () => {
-  assert.equal(reportHospitalOf({}), 'kamc');
-  assert.equal(reportHospitalOf(undefined), 'kamc');
+// UPDATED 2026-10-11 (user rule): unset → 'both', the MAIN weekly report (was 'kamc').
+test('reportHospitalOf: unset / unknown → both (the main report); the three modes pass through', () => {
+  assert.equal(reportHospitalOf({}), 'both');
+  assert.equal(reportHospitalOf(undefined), 'both');
+  assert.equal(reportHospitalOf({ reportHospital: 'kamk' }), 'both');
   for (const h of ['kamc', 'sgh', 'both']) assert.equal(reportHospitalOf({ reportHospital: h }), h);
 });
 
 test('buildOrderFigures kamc: today\'s figures over parsed.orders (KAMC rows only) + hospital', () => {
-  const state = loadedState([...kamcRows(), ...sghRows(), ...thirdRows()]);
+  // KAMC chosen explicitly: an unset report type is now the main KAMC + SGH report.
+  const state = loadedState([...kamcRows(), ...sghRows(), ...thirdRows()], { reportHospital: 'kamc' });
   const fig = buildOrderFigures(state, makeStore(), undefined, compute);
   assert.equal(fig.hospital, 'kamc');
   assert.ok(everyRowIs(fig.scopedRows, 'kamc'), 'no SGH / third row in the KAMC figures');
@@ -164,7 +169,7 @@ test('buildOrderFigures sgh/both without the model module THROWS — never KAMC 
 });
 
 test('modelFor: switching KAMC → SGH → BOTH → KAMC rebuilds per type, drops overrides and leftovers', () => {
-  const state = loadedState([...kamcRows(), ...sghRows()]);
+  const state = loadedState([...kamcRows(), ...sghRows()], { reportHospital: 'kamc' });
   const store = makeStore();
   const n = notifier();
   const opts = { hospitalReport, notify: n.notify };
@@ -208,7 +213,7 @@ test('modelFor: a failed SGH build falls back to KAMC LOUDLY and resets the choi
 });
 
 test('modelFor: BOTH drops any scope (decision 7); a scope survives a KAMC rebuild only', () => {
-  const state = loadedState([...kamcRows(), ...sghRows()]);
+  const state = loadedState([...kamcRows(), ...sghRows()], { reportHospital: 'kamc' });
   const store = makeStore();
   const opts = { hospitalReport, notify: () => {} };
   modelFor(state, store, compute, opts); // binds the scope to this load
@@ -307,8 +312,11 @@ const fullModel = (over = {}) => ({
   ...over,
 });
 
-test('recordRunSnapshot: an SGH / BOTH / unknown report type writes NOTHING', () => {
-  for (const hospital of ['sgh', 'both', 'SGH', 'kamc ']) {
+// UPDATED 2026-10-11 (user rule): the main KAMC + SGH report now records (KAMC's numbers
+// from its KAMC sub-model — ui-main-report.test.mjs). A 'both' model WITHOUT that
+// sub-model (this fake) still writes nothing: there is no KAMC report in it to record.
+test('recordRunSnapshot: SGH / unknown types (and a BOTH model with no KAMC sub-model) write NOTHING', () => {
+  for (const hospital of ['sgh', 'both', 'SGH', 'kamc ', 'BOTH']) {
     const st = spyStore();
     const calls = { snapshot: 0, tasks: 0 };
     recordRunSnapshot({
@@ -348,40 +356,55 @@ test('isKamcReport: only kamc / absent', () => {
  * File names
  * ------------------------------------------------------------------ */
 
-test('file names: KAMC byte-identical, SGH and BOTH tagged like the reference deck', () => {
+// UPDATED 2026-10-11 (user rule): the MAIN report (KAMC + SGH) keeps the historic name;
+// a single-hospital report is tagged with its code (was: KAMC untagged, BOTH ' - KAMC SGH -').
+test('file names: the main report (both) historic, KAMC and SGH tagged, absent = KAMC', () => {
   const P = 'تقرير مسبار';
-  assert.equal(buildFileName(P, DATE, 'pptx'), 'تقرير مسبار 08102026.pptx');
-  assert.equal(buildFileName(P, DATE, 'pptx', EMPTY_SCOPE, 'kamc'), 'تقرير مسبار 08102026.pptx');
+  assert.equal(buildFileName(P, DATE, 'pptx', EMPTY_SCOPE, 'both'), 'تقرير مسبار 08102026.pptx');
+  assert.equal(buildFileName(P, DATE, 'pptx', undefined, 'both'), 'تقرير مسبار 08102026.pptx');
+  assert.equal(buildFileName(P, DATE, 'pptx', EMPTY_SCOPE, 'kamc'), 'تقرير مسبار - KAMC - 08102026.pptx');
   assert.equal(buildFileName(P, DATE, 'pdf', EMPTY_SCOPE, 'sgh'), 'تقرير مسبار - SGH - 08102026.pdf');
-  assert.equal(buildFileName(P, DATE, 'pptx', undefined, 'both'), 'تقرير مسبار - KAMC SGH - 08102026.pptx');
+  // No report type = a legacy KAMC-only model = tagged KAMC.
+  assert.equal(buildFileName(P, DATE, 'pptx'), 'تقرير مسبار - KAMC - 08102026.pptx');
   // The scope rules apply on top, unchanged.
   assert.equal(
     buildFileName(P, DATE, 'pptx', { from: '2026-10-01', to: DATE }, 'sgh'),
     'تقرير مسبار - SGH - 01102026-08102026 (مخصص).pptx',
   );
-  assert.equal(hospitalFileTag(undefined), '');
+  assert.equal(hospitalFileTag('both'), '');
+  assert.equal(hospitalFileTag('kamc'), ' - KAMC -');
+  assert.equal(hospitalFileTag(undefined), ' - KAMC -');
+  assert.equal(hospitalFileTag(null), ' - KAMC -');
+  assert.equal(hospitalFileTag('sgh'), ' - SGH -');
   assert.throws(() => hospitalFileTag('sgx'), /unknown report type/);
+  assert.throws(() => hospitalFileTag('KAMC SGH'), /unknown report type/);
 });
 
 test('buildFileDefs: the same four files in every report type, each name tagged per type', () => {
-  const kamc = buildFileDefs(DATE, EMPTY_SCOPE);
-  const kamc2 = buildFileDefs(DATE, EMPTY_SCOPE, 'kamc');
-  assert.deepEqual(kamc2, kamc, 'kamc = the historic defs');
-  for (const h of ['sgh', 'both']) {
+  const main = buildFileDefs(DATE, EMPTY_SCOPE, 'both');
+  assert.deepEqual(main.map((d) => d.name), [
+    'تقرير مسبار الداخلي 08102026.pptx', 'تقرير مسبار 08102026.pptx',
+    'تقرير مسبار الداخلي 08102026.pdf', 'تقرير مسبار 08102026.pdf',
+  ], 'the main report = the historic names, byte for byte');
+  assert.deepEqual(buildFileDefs(DATE, EMPTY_SCOPE), buildFileDefs(DATE, EMPTY_SCOPE, 'kamc'), 'absent = kamc');
+  for (const h of ['kamc', 'sgh']) {
     const defs = buildFileDefs(DATE, EMPTY_SCOPE, h);
-    assert.deepEqual(defs.map((d) => [d.id, d.variant, d.kind]), kamc.map((d) => [d.id, d.variant, d.kind]));
-    const tag = h === 'sgh' ? ' - SGH - ' : ' - KAMC SGH - ';
-    for (const d of defs) assert.ok(d.name.includes(tag), d.name);
-    // Never the KAMC deck's name: no overwrite in Downloads.
-    for (const d of defs) assert.ok(!kamc.some((k) => k.name === d.name));
+    assert.deepEqual(defs.map((d) => [d.id, d.variant, d.kind]), main.map((d) => [d.id, d.variant, d.kind]));
+    const tag = h === 'sgh' ? ' - SGH - ' : ' - KAMC - ';
+    // The tag sits right after the prefix, before the date — the same place for both codes.
+    main.forEach((m, i) => assert.equal(defs[i].name, m.name.replace(' 08102026.', `${tag}08102026.`)));
+    // Never the main deck's name: no overwrite in Downloads.
+    for (const d of defs) assert.ok(!main.some((k) => k.name === d.name));
   }
 });
 
 /* ------------------------------------------------------------------ *
- * The unattended pipeline is KAMC-only
+ * The unattended pipeline: the MAIN report's deck, KAMC-only everything else
+ * UPDATED 2026-10-11 (user rule): was "KAMC-only in every step". The deck is now the
+ * combined KAMC + SGH report; engine hero / TAT / lab files stay KAMC's rows.
  * ------------------------------------------------------------------ */
 
-test('runAutomation: no SGH or third-hospital row reaches any step; the pull line names SGH as not included', async () => {
+test('runAutomation: the deck is KAMC + SGH; engine, TAT, lab files see KAMC rows only; the pull line says SGH is in', async () => {
   const pulled = [...kamcRows(), ...sghRows(), ...thirdRows()];
   const seen = {};
   const state = {
@@ -410,7 +433,10 @@ test('runAutomation: no SGH or third-hospital row reaches any step; the pull lin
         buildReportModel: ({ engineOutput, reportDate, orders }) => { seen.model = orders; return { reportDate, kpi: engineOutput }; },
       }),
       loadDeltaBaseline: async () => null,
+      // The KAMC stamper must never touch the main report (its chips are per hospital).
       loadDeltaWindow: async () => ({ stampWindowDeltas: (m, { rows }) => { seen.deltas = rows; } }),
+      // The REAL main-report builder, so the deck below is the true combined model.
+      loadHospitalReport: async () => hospitalReport,
       loadTaskLifecycle: async () => null,
       loadSendoutMaster: async () => null,
       loadLateLabs: async () => ({ buildLateLabWorkbooks: ({ rows }) => { seen.labs = rows; return []; } }),
@@ -423,21 +449,102 @@ test('runAutomation: no SGH or third-hospital row reaches any step; the pull lin
       now: () => Date.parse('2026-10-08T08:00:00Z'),
     },
   });
-  for (const k of ['engine', 'model', 'deltas', 'labs', 'tat']) {
+  for (const k of ['engine', 'model', 'labs', 'tat']) {
     assert.ok(Array.isArray(seen[k]), `${k} step ran`);
     assert.equal(seen[k].length, 4, `${k}: the 4 KAMC rows`);
     assert.ok(everyRowIs(seen[k], 'kamc'), `${k}: KAMC rows only`);
   }
+  assert.equal(seen.deltas, undefined, 'the KAMC stamper is never run on the main report');
   assert.ok(!seen.unmatched.includes('Assay S'), 'no SGH test name is ever offered a TAT');
-  assert.equal(seen.produced.hospital, undefined, 'the automation builds the KAMC report');
-  assert.equal(state.parsed.ordersByHospital.sgh.length, 3, 'SGH rows are kept beside — for the review only');
+  // The deck: the main report, each hospital from its own rows, no third hospital.
+  const m = seen.produced;
+  assert.equal(m.hospital, 'both', 'the automation builds the MAIN report');
+  assert.ok(everyRowIs(m.kamc.scopedRows, 'kamc') && m.kamc.scopedRows.length === 4);
+  assert.ok(everyRowIs(m.sgh.scopedRows, 'sgh') && m.sgh.scopedRows.length === 3);
+  assert.equal(m.combined.cards.total.combined, 7, 'KAMC 4 + SGH 3; the third hospital never counted');
+  assert.equal('kpi' in m, false, 'no single-hospital leftover');
   const pull = res.steps.find((s) => s.id === 'pull');
-  assert.ok(pull.message.includes(STR.upload.sghNotAutomated(3)), pull.message);
+  assert.ok(pull.message.includes(STR.upload.sghInAutomated(3)), pull.message);
   assert.ok(pull.message.includes(STR.upload.hospitalExcludedShort(1, 'Another Hospital')), pull.message);
 });
 
-test('runAutomation: stepGenerate refuses a non-KAMC model (belt and braces)', async () => {
-  let produced = 0;
+test('runAutomation: the pull line claims SGH is "in the automatic report" only when a deck can exist', async () => {
+  // Review round 2026-10-11: an SGH-only load (engine skips: no KAMC rows) or a run with
+  // generate switched off makes no deck — the pull line then gives a neutral count.
+  const run = async (pulled, autoGenerate) => runAutomation({
+    store: {
+      settings: { grafana: { enabled: true, baseUrl: 'https://grafana.test', accessToken: 'tok', dataKey: '' }, tatLookup: {} },
+      updateSnapshot() {}, loadSettings() { return {}; }, saveSettings() {}, setTat() {},
+    },
+    state: {
+      files: { csv: null, tracker: null },
+      parsed: { orders: null, tracker: null, summary: null, excludedHospitals: [] },
+      reportModel: null, edits: {}, reportDate: DATE,
+    },
+    options: { ...AUTOMATION_DEFAULTS, enabled: true, autoPull: true, autoGenerate },
+    deps: {
+      loadGrafana: async () => ({ yearStartMs: () => 0, fetchKamcOrders: async () => ({ rows: pulled, errors: [] }) }),
+      loadEngine: async () => ({ compute: (rows) => ({ totals: { total: rows.length }, funnel: {}, buckets: {} }) }),
+      loadReportModel: async () => ({ buildReportModel: ({ reportDate, engineOutput }) => ({ reportDate, kpi: engineOutput }) }),
+      loadHospitalReport: async () => hospitalReport,
+      loadDeltaWindow: async () => null,
+      loadDeltaBaseline: async () => null,
+      loadTaskLifecycle: async () => null,
+      loadSendoutMaster: async () => null,
+      produceReportFiles: async () => [{ def: { name: 'x', variant: 'internal' }, blob: { size: 1 } }],
+      now: () => Date.parse('2026-10-08T08:00:00Z'),
+    },
+  });
+  const pullMsg = (res) => res.steps.find((s) => s.id === 'pull').message;
+  // SGH-only load, generate on: no deck (engine skips) → neutral count.
+  const sghOnly = await run(sghRows(), true);
+  assert.equal(sghOnly.steps.find((s) => s.id === 'engine').status, 'skip');
+  assert.ok(pullMsg(sghOnly).includes(STR.upload.sghPulledOnly(3)), pullMsg(sghOnly));
+  assert.ok(!pullMsg(sghOnly).includes(STR.upload.sghInAutomated(3)), pullMsg(sghOnly));
+  // Generate switched off: neutral count.
+  const off = await run([...kamcRows(), ...sghRows()], false);
+  assert.ok(pullMsg(off).includes(STR.upload.sghPulledOnly(3)), pullMsg(off));
+  assert.ok(!pullMsg(off).includes(STR.upload.sghInAutomated(3)), pullMsg(off));
+  // Both conditions met: the "in the automatic report" line, as before.
+  const on = await run([...kamcRows(), ...sghRows()], true);
+  assert.ok(pullMsg(on).includes(STR.upload.sghInAutomated(3)), pullMsg(on));
+  assert.equal(on.steps.find((s) => s.id === 'generate').status, 'done');
+});
+
+// UPDATED 2026-10-11 (user rule): the guard now refuses anything that is not the MAIN
+// report (was: anything not KAMC). Each builder answer below must be refused.
+test('runAutomation: stepGenerate refuses a model that is not the main report (belt and braces)', async () => {
+  for (const hospital of ['kamc', 'sgh', undefined, 'BOTH']) {
+    let produced = 0;
+    const res = await runAutomation({
+      store: { settings: { grafana: {}, tatLookup: {} } },
+      state: {
+        files: { csv: null, tracker: null },
+        parsed: { orders: kamcRows(), tracker: null, summary: null, excludedHospitals: [] },
+        reportDate: DATE, edits: {},
+      },
+      options: { ...AUTOMATION_DEFAULTS, enabled: true, autoGenerate: true },
+      deps: {
+        loadEngine: async () => ({ compute: () => ({ totals: { total: 4 }, funnel: {}, buckets: {} }) }),
+        loadReportModel: async () => ({ buildReportModel: ({ reportDate, engineOutput }) => ({ reportDate, kpi: engineOutput }) }),
+        loadHospitalReport: async () => ({
+          buildBothModel: ({ reportDate }) => ({ hospital, reportDate, kamc: {}, sgh: {}, combined: {} }),
+        }),
+        loadDeltaWindow: async () => null,
+        loadSendoutMaster: async () => null,
+        produceReportFiles: async () => { produced += 1; return []; },
+      },
+    });
+    const gen = res.steps.find((s) => s.id === 'generate');
+    assert.equal(gen.status, 'error', String(hospital));
+    assert.equal(produced, 0, `${hospital}: no file is produced`);
+  }
+});
+
+test('runAutomation: the drafted model\'s own fields never decide the deck type — the builder does', async () => {
+  // buildReportModel only drafts the non-order content; a stray `hospital` on it (here
+  // 'kamc') is replaced by buildBothModel's answer, so the deck is still the main report.
+  let seenModel = null;
   const res = await runAutomation({
     store: { settings: { grafana: {}, tatLookup: {} } },
     state: {
@@ -448,15 +555,17 @@ test('runAutomation: stepGenerate refuses a non-KAMC model (belt and braces)', a
     options: { ...AUTOMATION_DEFAULTS, enabled: true, autoGenerate: true },
     deps: {
       loadEngine: async () => ({ compute: () => ({ totals: { total: 4 }, funnel: {}, buckets: {} }) }),
-      loadReportModel: async () => ({ buildReportModel: ({ reportDate, engineOutput }) => ({ reportDate, kpi: engineOutput, hospital: 'both' }) }),
+      loadReportModel: async () => ({ buildReportModel: ({ reportDate, engineOutput }) => ({ reportDate, kpi: engineOutput, hospital: 'kamc' }) }),
+      loadHospitalReport: async () => hospitalReport,
       loadDeltaWindow: async () => null,
+      loadDeltaBaseline: async () => null,
+      loadTaskLifecycle: async () => null,
       loadSendoutMaster: async () => null,
-      produceReportFiles: async () => { produced += 1; return []; },
+      produceReportFiles: async ({ model }) => { seenModel = model; return [{ def: { name: 'x', variant: 'internal' }, blob: { size: 1 } }]; },
     },
   });
-  const gen = res.steps.find((s) => s.id === 'generate');
-  assert.equal(gen.status, 'error');
-  assert.equal(produced, 0, 'no file is produced');
+  assert.equal(res.steps.find((s) => s.id === 'generate').status, 'done');
+  assert.equal(seenModel.hospital, 'both');
 });
 
 /* ------------------------------------------------------------------ *
@@ -487,17 +596,23 @@ test('applyWindowDeltas: a BOTH model is re-stamped idempotently; a KAMC model a
   applyWindowDeltas(fig, state, makeStore(), () => assert.fail('KAMC stamper on BOTH'), hospitalReport);
   assert.equal(JSON.stringify(fig.combined), before);
 
-  const kstate = loadedState(kamcRows());
+  const kstate = loadedState(kamcRows(), { reportHospital: 'kamc' });
   const k = buildOrderFigures(kstate, makeStore(), undefined, compute);
   let rowsSeen = null;
   applyWindowDeltas(k, kstate, makeStore(), (m, a) => { rowsSeen = a.rows; return stampWindowDeltas(m, a); });
   assert.equal(rowsSeen, k.scopedRows);
 });
 
-test('shareText: KAMC unchanged; SGH names its type and prints «–» for late; BOTH sums with KAMC-only late', () => {
+test('shareText: KAMC / SGH (single-hospital) name their type; SGH prints «–» for late; BOTH (main) keeps the historic heading and sums', () => {
   const kamc = { reportDate: DATE, kpi: { totals: { total: 10 }, buckets: { completed: 5, awaitingResults: 2, lateNoResult: 1, rejected: 1 }, cancelledNote: 0 }, overrides: {} };
-  const text = shareText(kamc, DATE, 4);
-  assert.ok(!text.includes(STR.generate.reportType('KAMC')), 'the KAMC message has no type line (historic text)');
+  // The 2026-10-11 naming rule, applied to the pasted text: KAMC-only is a single-hospital
+  // report, so it names itself — a legacy model (no hospital field) and an explicit 'kamc'.
+  for (const m of [kamc, { ...kamc, hospital: 'kamc' }]) {
+    const kl = shareText(m, DATE, 4).split('\n');
+    assert.ok(kl[0].startsWith('تقرير مسبار الأسبوعي — '), kl[0]);
+    assert.equal(kl[1], STR.generate.reportType('KAMC'), 'the KAMC-only message names its type');
+    assert.ok(kl.includes('• إجمالي الطلبات: 10'));
+  }
 
   const sgh = { ...kamc, hospital: 'sgh', noTestMenu: true };
   const lines = shareText(sgh, DATE, 4).split('\n');
@@ -515,7 +630,10 @@ test('shareText: KAMC unchanged; SGH names its type and prints «–» for late;
     combined: { cards: { lateNoResult: { combined: 1 } } },
   };
   const b = shareText(both, DATE, 4).split('\n');
-  assert.equal(b[1], STR.generate.reportType('KAMC + SGH'));
+  // The MAIN report: the historic heading straight into the bullets — no type line at all.
+  assert.ok(b[0].startsWith('تقرير مسبار الأسبوعي — '));
+  assert.equal(b[1], '• إجمالي الطلبات: 13', 'no type line under the main report heading');
+  assert.ok(!b.some((l) => l.startsWith('نوع التقرير')), b.join('|'));
   assert.ok(b.includes('• إجمالي الطلبات: 13'));
   assert.ok(b.includes('• فحوصات مكتملة (تشمل المرفوضة): 6 (46%)'));
   assert.ok(b.includes('↳ منها متأخرة: 1 (KAMC)'));
