@@ -22,7 +22,8 @@
                   names, one fake country — from the fixture's own test names, enough to
                   exercise the by-test-name and unmapped cards; ?master=0 gives none.
   Query: ?date=YYYY-MM-DD (report date, default the golden asOf 2026-07-09), ?master=0|1,
-         ?ambiguous=1 (adds two SYNTHETIC lines — see withAmbiguousBlank below).
+         ?ambiguous=1 (adds two SYNTHETIC lines — see withAmbiguousBlank below),
+         ?sgh=1 (adds 30 SYNTHETIC second-hospital lines — see withSgh below).
 
   THE ENGINE is the real one, handed to the screen through ctx.compute (the screen's
   dev-harness seam; main.js never sets it) wrapped so the live line can COUNT the runs and
@@ -96,11 +97,13 @@
   import { SCORECARD_SEED } from '../src/seeds/scorecard.js';
   import { HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED } from '../src/seeds/defaults.js';
   import { GOLDEN_ORDERS } from './fixtures/golden-orders.js';
+  import { takeOrders } from '../src/model/hospital.js';
 
   const params = new URLSearchParams(location.search);
   const REPORT_DATE = /^\d{4}-\d{2}-\d{2}$/.test(params.get('date') || '') ? params.get('date') : '2026-07-09';
   const WITH_MASTER = params.get('master') !== '0';
   const WITH_AMBIGUOUS = params.get('ambiguous') === '1';
+  const WITH_SGH = params.get('sgh') === '1';
   const UNATTRIBUTED = 'غير محدد'; // engine.js byLab caption for a blank facility
   const app = document.getElementById('app');
   const statusEl = document.getElementById('harness-status');
@@ -146,9 +149,22 @@
     };
   }
 
+  /* ?sgh=1 — the second hospital's rows (the report-type picker needs them). SYNTHETIC:
+   * the first 30 non-cancelled fixture lines copied with orderId SYNTH-SGH-n and the SGH
+   * name/id the feed uses, at two invented lab names, so they go to the SGH bucket via
+   * takeOrders exactly as live rows do (no TAT, no country — no Test Menu yet). */
+  function withSgh(rows) {
+    const base = rows.filter((r) => r.rawStatus !== 'Order Cancelled').slice(0, 30);
+    return rows.concat(base.map((r, i) => ({
+      ...r, orderId: `SYNTH-SGH-${i + 1}`, facility: i % 5 ? 'Synthetic SGH Lab A' : 'Synthetic SGH Lab B',
+      hospital: 'Saudi German Hospital Alzahraa Branch', orderingFacilityId: '1037',
+    })));
+  }
+
   let ambiguous = null; // { shipment, lab } when ?ambiguous=1 injected the two lines
   function loadRows() {
-    const shipped = withShipments(GOLDEN_ORDERS);
+    let shipped = withShipments(GOLDEN_ORDERS);
+    if (WITH_SGH) shipped = withSgh(shipped);
     if (!WITH_AMBIGUOUS) return shipped;
     const out = withAmbiguousBlank(shipped);
     ambiguous = out.info;
@@ -237,8 +253,8 @@
     computeRuns = 0;
     state = {
       files: { csv: { name: 'golden-orders (synthetic)' }, tracker: null },
-      parsed: { orders: rows, tracker: null, summary: null }, // tracker null → buildMockTracker()
-      engineOutput: uploadEngineOutput(rows, s), // the upload screen's cached output
+      parsed: { orders: null, tracker: null, summary: null }, // tracker null → buildMockTracker()
+      engineOutput: null, // set below from the KAMC rows (the upload screen's cached output)
       reportModel: null,
       edits: {},
       reportDate: REPORT_DATE,
@@ -246,6 +262,8 @@
       screen: 'review',
       sendoutMaster: WITH_MASTER ? fakeMaster(rows) : null, // set ⇒ the real loader never runs
     };
+    takeOrders(state.parsed, rows); // the app's one door: KAMC → orders, SGH → ordersByHospital.sgh
+    state.engineOutput = uploadEngineOutput(state.parsed.orders, s);
     ctx = { state, store, navigate, rerender, compute: harnessCompute };
     window.__harness = { state, store, ctx, rows };
   }
@@ -369,8 +387,8 @@
   function automationRun(withPull) {
     if (withPull) {
       rows = loadRows();                 // stepPull assigns a NEW orders array
-      state.parsed.orders = rows;
-      state.engineOutput = uploadEngineOutput(rows, store.settings);
+      takeOrders(state.parsed, rows);
+      state.engineOutput = uploadEngineOutput(state.parsed.orders, store.settings);
       window.__harness.rows = rows;
     }
     const cur = state.reportModel || {};
@@ -395,8 +413,8 @@
   // pull assigns — and the hero's fresh engine output; state.reportModel is KEPT.
   document.getElementById('h-reload').addEventListener('click', () => {
     rows = loadRows();
-    state.parsed.orders = rows;
-    state.engineOutput = uploadEngineOutput(rows, store.settings);
+    takeOrders(state.parsed, rows);
+    state.engineOutput = uploadEngineOutput(state.parsed.orders, store.settings);
     window.__harness.rows = rows;
     statusEl.textContent = 'أُعيد تحميل البيانات: مصفوفة طلبات جديدة بالشكل نفسه — يجب أن يعود التقرير كاملاً';
     rerender();

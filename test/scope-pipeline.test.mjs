@@ -647,7 +647,7 @@ test('state.js: a fresh run has no exclusions, and «تقرير جديد» clear
   resetRunData();
 });
 
-test('the excluded-hospital notices: count, collapsed name, the rule — never the current hospital', () => {
+test('the excluded-hospital notices: count, collapsed name, the third-hospital rule — never KAMC', () => {
   for (const fn of [STR.upload.hospitalExcluded, STR.upload.hospitalExcludedShort, STR.review.hospitalExcluded]) {
     assert.equal(typeof fn, 'function');
     const out = fn(35, OTHER_NAME_RAW);
@@ -658,10 +658,15 @@ test('the excluded-hospital notices: count, collapsed name, the rule — never t
     assert.ok(fn(1, null).includes('«—»'), 'a missing name degrades to a dash, never "null"');
     assert.ok(fn(1, '9002').includes('«9002»'), 'an id passed in place of a name');
   }
-  // The long forms state the rule: only the current hospital counts, until further notice.
-  assert.ok(STR.upload.hospitalExcluded(2, 'X').includes('حتى إشعار آخر'));
+  // The long forms state the rule (report types, 2026-10-11): the excluded list is THIRD
+  // hospitals only — KAMC and SGH are both reported now — and such a hospital is in NO
+  // report. The old «only the current hospital counts» wording became false the moment
+  // SGH counted, so it must be gone.
+  assert.ok(STR.upload.hospitalExcluded(2, 'X').includes('غير مشمول في أي تقرير'));
+  assert.ok(STR.review.hospitalExcluded(2, 'X').includes('لا يشمل أي تقرير'));
   for (const fn of [STR.upload.hospitalExcluded, STR.review.hospitalExcluded]) {
-    assert.ok(fn(2, 'X').includes('المستشفى الحالي فقط'));
+    assert.ok(!fn(2, 'X').includes('المستشفى الحالي'), 'the superseded rule is not restated');
+    assert.ok(!fn(2, 'X').includes('حتى إشعار آخر'), 'no "until further notice" — the rule is decided');
   }
 });
 

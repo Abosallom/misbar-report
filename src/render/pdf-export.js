@@ -36,6 +36,8 @@ function isBlank(canvas) {
 // which cannot see the page's @font-face — chart labels would fall back to a
 // generic font. Embed Cairo as base64 @font-face rules INSIDE each cloned svg.
 let fontCssPromise = null;
+// assets/fonts/Cairo-{400,600,700}-*.woff2 are byte-identical (one variable font), so this
+// single '100 900' face already renders every weight — the BOTH charts' bold labels too.
 function svgFontCss() {
   if (!fontCssPromise) {
     fontCssPromise = (async () => {
@@ -59,17 +61,40 @@ function svgFontCss() {
   return fontCssPromise;
 }
 
+// An inline-SVG <style> is NOT scoped to its SVG: in the cloned document html2canvas
+// draws from, the embedded @font-face rules join the clone's font set and serve EVERY
+// Cairo text on the page (HTML too). html2canvas awaits the clone's fonts.ready BEFORE
+// onclone and never after it, so faces added here could still be loading while it
+// measures and paints — wide word gaps, wrapped/clipped titles. onclone therefore loads
+// the faces it just added before handing the clone back (html2canvas awaits the promise
+// onclone returns). Capped, so a font that never settles cannot hang the export.
+const CLONE_FONT_SAMPLE = 'عربي KAMC 0123';
+const CLONE_FONT_WAIT_MS = 3000;
+async function settleCloneFonts(doc) {
+  let timer = null;
+  try {
+    const fonts = doc.fonts;
+    if (!fonts || typeof fonts.load !== 'function') return;
+    const loads = Promise.all(['400', '600', '700'].map((w) => fonts.load(`${w} 16px Cairo`, CLONE_FONT_SAMPLE)))
+      .then(() => fonts.ready);
+    await Promise.race([loads, new Promise((r) => { timer = setTimeout(r, CLONE_FONT_WAIT_MS); })]);
+  } catch (_) { /* non-fatal: capture with whatever has loaded */ } finally { clearTimeout(timer); }
+}
+
 async function shot(el, html2canvas, scale, fontCss) {
   return html2canvas(el, {
     scale, backgroundColor: '#FFFFFF', useCORS: false, logging: false,
     width: el.offsetWidth, height: el.offsetHeight,
     onclone: (doc) => {
-      if (!fontCss) return;
+      if (!fontCss) return undefined;
+      let added = false;
       doc.querySelectorAll('svg').forEach((svg) => {
         const st = doc.createElementNS('http://www.w3.org/2000/svg', 'style');
         st.textContent = fontCss;
         svg.insertBefore(st, svg.firstChild);
+        added = true;
       });
+      return added ? settleCloneFonts(doc) : undefined;
     },
   });
 }

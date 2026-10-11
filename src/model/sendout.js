@@ -9,7 +9,22 @@
 // the catalogue (the ops workbook, ingest/sendout-master.js) can make that call.
 //
 // HOW AN ORDER IS ATTRIBUTED — every non-cancelled order lands in EXACTLY ONE of
-// four buckets, so resolved + byTestName + unmapped + unresolved === total:
+// five buckets, so resolved + byTestName + unmapped + unresolved + noTestMenu === total:
+//   noTestMenu  its ORDERING HOSPITAL has no Test Menu (model/hospital.js hasTestMenu —
+//               SGH today, until the user supplies its menu). Checked FIRST and never
+//               attributed: the catalogue is KAMC's contract list, and a hospital
+//               without a menu may share a performing lab (and test names) with KAMC,
+//               so an alias or a test-name hit would hand its order a KAMC contract
+//               country. Not a gap either (no alias is missing), so it is kept apart
+//               from `unmapped`. Callers pass one hospital's rows; this is the
+//               fail-safe when they don't. KAMC / legacy rows always have a menu, so
+//               for them this bucket is empty and every field below is unchanged.
+//               The key is PRESENT ONLY WHEN NON-EMPTY: a KAMC result (it lands in
+//               model.sendout) must stay deep-equal to the one the app always produced
+//               — the KAMC report is the historic report, field for field — so read it
+//               as `so.noTestMenu || []`. (An SGH model's own counts-only send-out
+//               block, model/hospital-report.js, is a different shape whose
+//               `noTestMenu: true` is a flag, not this bucket.)
 //   resolved    its facility is a KNOWN catalogue vendor — through its alias
 //               (FACILITY_TO_VENDOR), or because its own normalised name IS a
 //               vendor's (an identity alias, not needed) — and that vendor's
@@ -37,7 +52,8 @@
 // variants, invisible characters): a looser key re-decides aliased orders too and
 // moves the full report, so it needs its own sign-off.
 //
-import { inferBlankFacilities } from '../engine/infer-facility.js?v=v2026-10-07.1';
+import { inferBlankFacilities } from '../engine/infer-facility.js?v=v2026-10-11.1';
+import { hasTestMenu } from './hospital.js?v=v2026-10-11.1';
 
 // PURE module: no DOM, no clock, no network, no vendor imports — the browser and
 // `node --test` share one deterministic path. The catalogue is INJECTED, never
@@ -230,12 +246,17 @@ function indexMaster(master) {
  *   scoped report's (model/scope.js "SCOPED ROWS ARE FINAL"). Omitted = infer, as
  *   always, so the full report is analysed exactly as before.
  * @returns {{total, local, international, byCountry, byLab, inferred, byTestName,
- *   unmapped, unresolved}} the four buckets of the header comment; `inferred` is a
- *   disclosure list over the attributed ones, not a bucket of its own.
+ *   unmapped, unresolved, noTestMenu?}} the five buckets of the header comment
+ *   (`noTestMenu` present only when non-empty); `inferred`
+ *   is a disclosure list over the attributed ones, not a bucket of its own.
  */
 export function analyseSendout(orders, master, opts) {
   const { byVendor, global } = indexMaster(master);
   const given = Array.isArray(orders) ? orders : [];
+  // Which rows may be attributed at all: a row of a hospital WITHOUT a Test Menu goes
+  // to `noTestMenu` (header). A hole (null) keeps its historic path (unmapped).
+  const menu = given.map((r) => !r || hasTestMenu(r));
+  const allMenu = menu.every(Boolean);
 
   // A blank performing facility is filled from the other orders of the SAME TEST,
   // using the SAME shared rule the engine applies (engine/infer-facility.js). One
@@ -251,8 +272,18 @@ export function analyseSendout(orders, master, opts) {
   // and put the order in that lab's row and COUNTRY — which the full report never
   // does. Nothing is filled here then, so `inferred` comes back empty: it lists what
   // THIS pass filled, and the caller that settled the facilities owns disclosing them.
+  //
+  // The inference sees only rows that CAN be attributed (a hospital with a Test Menu):
+  // another hospital's lines must neither fill a KAMC blank nor make one ambiguous.
+  // With every row on a menu (the KAMC report) it is the very call it always was.
   const infer = !(opts && opts.inferBlanks === false);
-  const filled = infer ? inferBlankFacilities(given) : new Map();
+  let filled = new Map();
+  if (infer && allMenu) filled = inferBlankFacilities(given);
+  else if (infer) {
+    const at = [];
+    given.forEach((r, i) => { if (menu[i]) at.push(i); });
+    for (const [j, facility] of inferBlankFacilities(at.map((i) => given[i]))) filled.set(at[j], facility);
+  }
   const rows = filled.size
     ? given.map((r, i) => (filled.has(i) ? { ...r, facility: filled.get(i) } : r))
     : given;
@@ -264,6 +295,7 @@ export function analyseSendout(orders, master, opts) {
   const byTestName = [];
   const unmapped = [];
   const unresolved = [];
+  const noTestMenu = [];
   // A lab with no FACILITY_DISPLAY caption (every byTestName lab, and a vendor known
   // only by its own name) is captioned with its first-seen spelling: 'X Lab' and
   // 'X LAB ' are one facility (one norm key) and must make ONE byLab row, not two.
@@ -278,6 +310,8 @@ export function analyseSendout(orders, master, opts) {
   };
 
   for (const o of kept) {
+    // No Test Menu for this order's hospital: counted in `total`, never attributed.
+    if (o && !hasTestMenu(o)) { noTestMenu.push(o); continue; }
     const key = norm(o && o.facility);
     // Still blank here means the inference above could NOT settle it (the test runs
     // at more than one lab, or the row carries no test name) — or, with inferBlanks
@@ -352,7 +386,7 @@ export function analyseSendout(orders, master, opts) {
       lab: hit.lab,
       country: hit.country,
       reflab: hit.reflab,
-      support: given.filter((r, j) => j !== i
+      support: given.filter((r, j) => j !== i && menu[j]
         && normTestName(r && r.testName) === normTestName(o && o.testName)
         && String((r && r.facility) || '').trim() !== '').length,
     });
@@ -390,6 +424,9 @@ export function analyseSendout(orders, master, opts) {
     byTestName,
     unmapped,
     unresolved,
+    // Orders of a hospital with no Test Menu (header): in `total`, in no other count.
+    // Only when there are any — a KAMC result stays exactly the historic shape.
+    ...(noTestMenu.length ? { noTestMenu } : {}),
   };
 }
 

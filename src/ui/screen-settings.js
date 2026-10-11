@@ -8,14 +8,17 @@
 // mirror of the automation panel), live source (Grafana + cached-tracker), and
 // backup (export/import).
 
-import { SNAPSHOT_SEED, REPORT_OPTIONS_SEED, AUTOMATION_SEED } from '../seeds/defaults.js?v=v2026-10-07.1';
-import { normalizeDeltaMode } from '../model/delta-baseline.js?v=v2026-10-07.1';
+import { SNAPSHOT_SEED, REPORT_OPTIONS_SEED, AUTOMATION_SEED } from '../seeds/defaults.js?v=v2026-10-11.1';
+import { normalizeDeltaMode } from '../model/delta-baseline.js?v=v2026-10-11.1';
+// The connection test's per-hospital line (STR.settings) — ar.js is pure and DOM-free
+// (every other screen imports it), so module-smoke's bare-Node import still holds.
+import { STR } from '../i18n/ar.js?v=v2026-10-11.1';
 // NAMESPACE import on purpose: the access tab reads lock.currentUser(), which is a
 // newer export. A named import would throw at link time on any build of lock.js that
 // predates it (and take the whole settings screen down); a namespace import lets the
 // tab degrade to 'unknown user' instead. lock.js is DOM-free at module scope, so this
 // stays importable in bare Node (test/module-smoke).
-import * as lock from './lock.js?v=v2026-10-07.1';
+import * as lock from './lock.js?v=v2026-10-11.1';
 
 const TABS = [
   { id: 'tat', label: 'مدة الفحوصات' },
@@ -1320,7 +1323,11 @@ export function render(container, ctx) {
             if (res && res.ok) {
               testMsg.className = 'st-import-msg st-import-msg--ok';
               const rows = res.rows != null ? res.rows : 0;
-              testMsg.textContent = `نجح الاتصال — ${rows} صف`;
+              // Per-hospital split when the handler supplies it (main.js onGrafanaTest):
+              // the total alone counts SGH's and any third hospital's rows too.
+              const bh = res.byHospital;
+              const split = bh ? ` (${STR.settings.connectionByHospital(bh.kamc, bh.sgh, bh.other)})` : '';
+              testMsg.textContent = `نجح الاتصال — ${rows} صف${split}`;
             } else {
               fail((res && res.error) || 'خطأ غير معروف');
             }

@@ -1,10 +1,10 @@
 // ui/screen-review.js — review/edit report content with a live slide preview (Track E).
-import { STR, todayISO, formatDateAr, formatRangeAr } from '../i18n/ar.js?v=v2026-10-07.1';
-import { el, editableTable, textareaField, toast } from './components.js?v=v2026-10-07.1';
-import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-10-07.1';
-import { autoDraft, splitTaskLists } from '../model/drafts.js?v=v2026-10-07.1';
-import { analyseSendout, hasMaster, AR_COUNTRY } from '../model/sendout.js?v=v2026-10-07.1';
-import { buildHistoryPanel } from './history-table.js?v=v2026-10-07.1';
+import { STR, todayISO, formatDateAr, formatRangeAr } from '../i18n/ar.js?v=v2026-10-11.1';
+import { el, editableTable, textareaField, toast } from './components.js?v=v2026-10-11.1';
+import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-10-11.1';
+import { autoDraft, splitTaskLists } from '../model/drafts.js?v=v2026-10-11.1';
+import { analyseSendout, hasMaster, AR_COUNTRY } from '../model/sendout.js?v=v2026-10-11.1';
+import { buildHistoryPanel } from './history-table.js?v=v2026-10-11.1';
 // REPORT SCOPE (2026-09-29). STATIC, not guarded like delta-window below: scope decides
 // WHICH ROWS every number is computed from, and there is no safe degraded answer — a
 // build that silently ignored a chosen scope would publish the full programme's numbers
@@ -13,17 +13,23 @@ import { buildHistoryPanel } from './history-table.js?v=v2026-10-07.1';
 import {
   EMPTY_SCOPE, normalizeScope, isScoped, hasRange, parseShipmentIds, labOptions,
   findShipments, applyScope, shipmentDetails,
-} from '../model/scope.js?v=v2026-10-07.1';
+} from '../model/scope.js?v=v2026-10-11.1';
 import {
   normalizeDeltaMode, isWeekDeltaMode, DEFAULT_DELTA_MODE,
-} from '../model/delta-baseline.js?v=v2026-10-07.1';
+} from '../model/delta-baseline.js?v=v2026-10-11.1';
 // Same module instance drafts.js already imports (identical specifier) — the grace
 // re-check below MUST use task-lifecycle's own identity/status vocabulary, never a
 // second local copy of it. Static, not guarded: drafts.js (imported above) already
 // depends on this module, so there is no new failure mode.
 import {
   CLOSED as CLOSED_STATUS, LIST_EXTERNAL, LIST_INTERNAL, taskKey,
-} from '../model/task-lifecycle.js?v=v2026-10-07.1';
+} from '../model/task-lifecycle.js?v=v2026-10-11.1';
+// REPORT TYPES (2026-10-11): KAMC (the historic report, default) / SGH / KAMC + SGH.
+// STATIC for scope.js's reason: WHICH hospital's rows a report reads has no safe degraded
+// answer, and hospital.js is pure (no imports at all). The per-hospital MODEL builders
+// (model/hospital-report.js) are a guarded import inside render(), like the engine they
+// depend on — absent, an SGH / KAMC + SGH build throws and modelFor says so.
+import { HOSPITALS, HOSPITAL_MODES, rowsForMode } from '../model/hospital.js?v=v2026-10-11.1';
 
 /* small local module helpers (kept local to avoid cross-screen coupling) */
 async function tryImport(path) { try { return await import(path); } catch { return null; } }
@@ -143,6 +149,18 @@ const SLIDE_TOGGLES = [
   { key: 'action', label: STR.review.slideToggles.action },
   { key: 'challenges', label: STR.review.slideToggles.challenges },
 ];
+
+/* The KAMC + SGH deck honours exactly these toggles (CONTRACT decision 10:
+ * build-spec-both.js reads only monthly / sendout / compliance — the exec slide always
+ * renders, and the deck never has action / challenges slides). A chip the deck ignores
+ * must not be offered: clicking it would change nothing in that preview yet still save
+ * a new default the KAMC deck DOES honour. */
+const BOTH_SLIDE_TOGGLES = new Set(['monthly', 'sendout', 'compliance']);
+
+/** The slide chips a report type offers (pure; exported for node tests). */
+export function slideTogglesFor(hospital) {
+  return hospital === 'both' ? SLIDE_TOGGLES.filter((t) => BOTH_SLIDE_TOGGLES.has(t.key)) : SLIDE_TOGGLES;
+}
 
 const OV_INPUT_STYLE = 'flex:1;min-width:0;border:1px solid var(--border-dark);border-radius:6px;padding:6px 8px;min-height:36px;background:var(--white);color:var(--text);font-weight:700;text-align:right';
 const OV_BADGE_STYLE = 'align-items:center;background:var(--warn-bg,#FEF3C7);color:var(--warn-text,#92400E);border:1px solid var(--amber);font-size:.68rem;font-weight:700;padding:1px 8px;border-radius:999px;white-space:nowrap';
@@ -286,10 +304,101 @@ const pagerDotStyle = (on) => 'min-width:30px;height:30px;flex:0 0 auto;border-r
 
 /* ---------- Report scope: session state + the ONE order-figures builder ---------- */
 
-/** The session's parsed order rows, or null (mock / tracker-only session). */
+/** The session's parsed order rows, or null (mock / tracker-only session). KAMC's rows:
+ *  parsed.orders is the KAMC report's population (model/hospital.js takeOrders). */
 function allRowsOf(state) {
   const o = state && state.parsed && state.parsed.orders;
   return Array.isArray(o) && o.length ? o : null;
+}
+
+/* ---------- Report type (2026-10-11): which hospital(s) the report is about ----------
+ * state.reportHospital ∈ HOSPITAL_MODES ('kamc' default | 'sgh' | 'both') — memory only,
+ * a choice about ONE run exactly like the scope (state.js; reset by «تقرير جديد»), never
+ * read by the unattended automation. Picked on the «نطاق التقرير» card below.
+ *   • KAMC — the historic report, byte for byte: parsed.orders, today's figures path.
+ *   • SGH  — the same design over SGH's own rows with SGH's engine policy (no Test
+ *            Menu: no TAT, lateness, turnaround or country) — model/hospital-report.js
+ *            buildHospitalModel. Scope filters apply to SGH's rows.
+ *   • BOTH — the reference deck's design: each hospital computed on its own rows, then
+ *            summed (buildBothModel). No scope filters (decision 7), no number overrides
+ *            (decision 8).
+ * SGH and BOTH are SIDE reports like a scoped one: they never write the published
+ * history, the snapshot or the task log (pipeline.js recordRunSnapshot), and the history
+ * panel is shown in KAMC mode only. */
+
+/** The report type in force: state.reportHospital, 'kamc' when unset (every state that
+ *  predates the report types; HOSPITAL_MODES is the only vocabulary this screen writes). */
+export function reportHospitalOf(state) {
+  const h = state && state.reportHospital;
+  return HOSPITAL_MODES.includes(h) ? h : 'kamc';
+}
+
+/** The report type a MODEL was built as (absent ⇒ 'kamc': the automation's model and
+ *  every model that predates the report types). Compared against reportHospitalOf to
+ *  decide whether the figures are stale and whether a generate click may proceed. */
+const modelHospitalOf = (model) => (model && model.hospital != null ? model.hospital : 'kamc');
+
+/** One reported hospital's rows ('kamc' | 'sgh'), or null when it has none. Through
+ *  model/hospital.js rowsForMode — the one place that says where each hospital's rows
+ *  live in `parsed` — so this screen can never read SGH out of parsed.orders. */
+function rowsFor(state, h) {
+  let r;
+  try { r = rowsForMode(state && state.parsed, h); } catch { return null; }
+  return Array.isArray(r) && r.length ? r : null;
+}
+
+/** Any reported hospital's rows — "is there order data to report?" (an SGH-only file
+ *  leaves parsed.orders EMPTY, yet the operator can still make its SGH report). */
+function loadedRows(state) {
+  return rowsFor(state, 'kamc') || rowsFor(state, 'sgh');
+}
+
+/** Did an order load happen at all — takeOrders ran (parsed.orders is an ARRAY, possibly
+ *  empty) — as opposed to nothing loaded (state.js's fresh bucket: null)? Distinct from
+ *  loadedRows: a file whose lines all belong to a THIRD hospital (or a CSV with no data
+ *  rows) is a load with no KAMC and no SGH rows, and must block every report type with
+ *  the empty notice — not fall through to the nothing-loaded preview path, where an SGH
+ *  or KAMC + SGH choice still in force would generate a deck of zeros. */
+function ordersLoaded(state) {
+  const p = state && state.parsed;
+  if (!p) return false;
+  const obh = p.ordersByHospital;
+  return Array.isArray(p.orders) || !!(obh && (Array.isArray(obh.kamc) || Array.isArray(obh.sgh)));
+}
+
+/** The pill label of a report type (STR.review.hospital.modes; registry codes). */
+const hospitalLabel = (h) => (STR.review.hospital.modes[h] || String(h));
+
+/**
+ * Can the chosen report type be generated from the loaded data?
+ *   • nothing loaded (mock / tracker-only session) → not blocked: today's preview path,
+ *     the KAMC fallback figures, exactly as before;
+ *   • data loaded but NONE of the report's hospitals has rows (an SGH report on a file
+ *     without SGH lines, a KAMC report on an SGH-only file, ANY report on a file whose
+ *     lines all belong to a third hospital — ordersLoaded) → BLOCKED: the screen says
+ *     so and the generate button is disabled. Never the KAMC report under another
+ *     report's name, never a deck of zeros pretending to be a count;
+ *   • KAMC + SGH with ONE hospital absent → allowed (its order cells print 0 — CONTRACT
+ *     decision 12) but `missing` names it so the screen says so.
+ * Pure; exported for node tests.
+ * @returns {{loaded:boolean, blocked:boolean, missing:string[]}}
+ */
+export function hospitalAvailability(state, hospital = reportHospitalOf(state)) {
+  if (!ordersLoaded(state)) return { loaded: false, blocked: false, missing: [] };
+  const has = { kamc: !!rowsFor(state, 'kamc'), sgh: !!rowsFor(state, 'sgh') };
+  const need = hospital === 'both' ? Object.keys(HOSPITALS) : [hospital];
+  const missing = need.filter((h) => !has[h]);
+  return { loaded: true, blocked: missing.length === need.length, missing };
+}
+
+/** WHICH LOAD the scope was chosen against: the object takeOrders writes per load
+ *  (parsed.ordersByHospital — new on every takeOrders call, and reset by state.js's
+ *  orders accessor whenever the orders change), else the orders array itself (a parsed
+ *  bucket that predates ordersByHospital). null when no hospital has rows. */
+function loadKeyOf(state) {
+  if (!loadedRows(state)) return null;
+  const p = state.parsed;
+  return (p.ordersByHospital && typeof p.ordersByHospital === 'object') ? p.ordersByHospital : p.orders;
 }
 
 /* WHICH DATA a scope was chosen against. The scope lives on `state` (memory only —
@@ -298,11 +407,10 @@ function allRowsOf(state) {
  * morning's export mean nothing for tomorrow's, and a lab picked yesterday would
  * silently narrow a fresh upload into a side report nobody asked for.
  *
- * THE DATA IS THE ORDERS ARRAY ITSELF, BY IDENTITY. Every reload path assigns a NEW
- * array to state.parsed.orders — the upload screen's live pull and CSV parse, the mock
- * loader, the automation's pull, each after model/hospital.js splitByHospital (the
- * source's own array, or a fresh `kept` one when rows were dropped — new per load
- * either way) — and a reused pull keeps the same one, so identity is
+ * THE DATA IS THE LOAD ITSELF, BY IDENTITY. Every reload path goes through
+ * model/hospital.js takeOrders — the upload screen's live pull and CSV parse, the mock
+ * loader, the automation's pull — which writes a NEW parsed.ordersByHospital object (and
+ * a new orders array) per load, and a reused pull keeps the same ones, so identity is
  * exactly "is this still the data the scope was chosen against". A content fingerprint
  * (row count + first/last order id) was tried and is WRONG for the commonest reload: a
  * re-pull minutes later where only statuses moved has the same shape, so the old scope
@@ -311,7 +419,7 @@ function allRowsOf(state) {
  * clean-up here either: it drops the orders, and whatever is loaded next is a new array
  * the old scope was never bound to.
  *
- * The binding is a WeakMap keyed by the orders array (→ the epoch it was bound under),
+ * The binding is a WeakMap keyed by that load object (loadKeyOf → the epoch it was bound under),
  * with only the epoch number on state: a strong reference to the array would keep a
  * dropped pull's patient-adjacent rows alive after «تقرير جديد» for no reason. The epoch
  * also keys the figures cache and the typed-but-unapplied scope input below, so all
@@ -320,15 +428,19 @@ const scopeBinding = new WeakMap();
 let dataEpoch = 0;
 
 /** The scope in force for this render: state.scope, reset to EMPTY_SCOPE when the
- *  loaded orders array is not the one it was chosen against, or when there are no
- *  rows to scope (epoch 0). */
+ *  loaded data is not the load it was chosen against, or when there are no rows to
+ *  scope (epoch 0). REPORT TYPES: the binding key is the LOAD (loadKeyOf), not the KAMC
+ *  array alone — an SGH-only file has no KAMC rows yet is still a load whose SGH rows
+ *  can be scoped; the KAMC array changes identity on exactly the same reloads. A
+ *  KAMC + SGH report takes no scope at all (decision 7), so none survives in that mode. */
 function currentScope(state) {
-  const rows = allRowsOf(state);
-  if (!rows || !state.scope || !state.scopeEpoch || scopeBinding.get(rows) !== state.scopeEpoch) {
+  const key = loadKeyOf(state);
+  if (!key || !state.scope || !state.scopeEpoch || scopeBinding.get(key) !== state.scopeEpoch) {
     state.scope = EMPTY_SCOPE;
-    state.scopeEpoch = rows ? ++dataEpoch : 0;
-    if (rows) scopeBinding.set(rows, state.scopeEpoch);
+    state.scopeEpoch = key ? ++dataEpoch : 0;
+    if (key) scopeBinding.set(key, state.scopeEpoch);
   }
+  if (reportHospitalOf(state) === 'both' && isScoped(state.scope)) state.scope = EMPTY_SCOPE;
   return state.scope;
 }
 
@@ -432,9 +544,24 @@ function engineInputs(state, settings, sc) {
  * compute THROWS: publishing the full numbers under a «مخصص» label is the one outcome
  * worse than an error, so the caller (modelFor) falls back to the full report and says so.
  * EXPORTED so node can pin both paths without a DOM. Never logs a row.
+ *
+ * REPORT TYPES (2026-10-11). `hospital` (default: the state's report type):
+ *   'kamc' → the path above, untouched, plus `hospital: 'kamc'`;
+ *   'sgh' / 'both' → hospitalOrderFigures below, from model/hospital-report.js (handed in
+ *   as `hospitalReport`). Those THROW on failure, like a scoped build: state.engineOutput
+ *   is the KAMC hero's output, and publishing it under an SGH report is the worst outcome.
  * @returns {{reportDate:string, kpi:Object, sendout:(Object|null), scope:Object,
- *   scopedRows:(Array|null), shipmentDetails:Array}} contract [C]'s model fields */
-export function buildOrderFigures(state, store, scope, compute) {
+ *   scopedRows:(Array|null), shipmentDetails:Array, hospital:string}} contract [C]'s
+ *   model fields (+ noTestMenu for SGH; kamc / sgh / combined / deltaWindow for BOTH) */
+export function buildOrderFigures(state, store, scope, compute, { hospital, hospitalReport } = {}) {
+  const h = hospital == null ? reportHospitalOf(state) : hospital;
+  if (h === 'kamc') return { ...kamcOrderFigures(state, store, scope, compute), hospital: 'kamc' };
+  if (!HOSPITAL_MODES.includes(h)) throw new Error(`unknown report type ${JSON.stringify(h)}`);
+  return hospitalOrderFigures(state, store, scope, h, hospitalReport);
+}
+
+/** The KAMC report's figures — the historic builder, verbatim (see buildOrderFigures). */
+function kamcOrderFigures(state, store, scope, compute) {
   const sc = normalizeScope(scope);
   const scoped = isScoped(sc);
   const { tat, opts } = engineInputs(state, store && store.settings, sc);
@@ -475,6 +602,96 @@ export function buildOrderFigures(state, store, scope, compute) {
   };
 }
 
+/* The SGH and KAMC + SGH figures (2026-10-11) — model/hospital-report.js does every
+ * number; this only picks the rows and lifts the ORDER-BASED fields onto the review's
+ * model (the tasks / challenges / support lines stay the review's own drafts).
+ *   SGH  — buildHospitalModel('sgh') over SGH's rows ONLY (rowsFor 'sgh': never
+ *          parsed.orders), with the scope applied to them; its model carries
+ *          `noTestMenu: true` and the counts-only send-out block.
+ *   BOTH — buildBothModel over each hospital's own rows (never the union), already
+ *          stamped; no scope (EMPTY_SCOPE), no top-level kpi: the spec reads
+ *          kamc / sgh / combined, and scopedRows is null so no single-hospital stamper
+ *          can ever stamp it with one policy.
+ * The send-out catalogue goes to KAMC only (BOTH's countries slide); SGH has none.
+ * A hospital with no rows builds over [] (its numbers are 0); hospitalAvailability
+ * decides whether that may be generated. THROWS when the module is absent or a build
+ * fails — modelFor then shows the KAMC report and says so. */
+function hospitalOrderFigures(state, store, scope, hospital, hr) {
+  if (!hr || typeof hr.buildHospitalModel !== 'function' || typeof hr.buildBothModel !== 'function') {
+    throw new Error(`${hospital} figures unavailable (model/hospital-report.js did not load)`);
+  }
+  const settings = (store && store.settings) || {};
+  const reportDate = state.reportDate || todayISO();
+  const tracker = (state.parsed && state.parsed.tracker) || null;
+  const rows = (h) => rowsFor(state, h) || [];
+  if (hospital === 'sgh') {
+    const m = hr.buildHospitalModel({
+      hospital: 'sgh', rows: rows('sgh'), settings, reportDate, tracker, sendoutMaster: null,
+      scope: normalizeScope(scope),
+    });
+    return {
+      reportDate: m.reportDate,
+      kpi: m.kpi,
+      sendout: m.sendout,
+      noTestMenu: m.noTestMenu === true,
+      scope: m.scope,
+      scopedRows: m.scopedRows,
+      shipmentDetails: m.shipmentDetails || [],
+      hospital: 'sgh',
+    };
+  }
+  const b = hr.buildBothModel({
+    kamcRows: rows('kamc'),
+    sghRows: rows('sgh'),
+    settings,
+    reportDate,
+    tracker,
+    sendoutMaster: state.sendoutMaster || null,
+    mode: settings.reportOptions && settings.reportOptions.deltaMode,
+  });
+  return {
+    reportDate: b.reportDate,
+    kamc: b.kamc,
+    sgh: b.sgh,
+    combined: b.combined,
+    deltaWindow: b.deltaWindow,
+    scope: EMPTY_SCOPE,
+    scopedRows: null,
+    shipmentDetails: [],
+    hospital: 'both',
+  };
+}
+
+/* Every model field a figures build may set. A rebuild for ANOTHER report type must not
+ * inherit the previous type's leftovers — a KAMC model still carrying an SGH build's
+ * `noTestMenu`, or BOTH's `kamc`/`sgh`/`combined` beside a KAMC kpi — so refreshedModel
+ * drops each of these the new figures do not set. */
+const FIGURE_KEYS = Object.freeze([
+  'reportDate', 'kpi', 'sendout', 'scope', 'scopedRows', 'shipmentDetails', 'hospital',
+  'noTestMenu', 'kamc', 'sgh', 'combined', 'deltaWindow',
+]);
+
+/* The «ما الجديد» banner's chip values. KAMC / SGH: the model's own kpi.deltas, as
+ * always. KAMC + SGH has no top-level kpi: each key is the hospitals' stamped chips
+ * SUMMED — lateness over the Test-Menu hospitals only (KAMC), as the deck's late card
+ * counts it (model/hospital-report.js combineHospitals). Exported for node tests. */
+export function bannerDeltasOf(model) {
+  if (modelHospitalOf(model) !== 'both') return (model && model.kpi && model.kpi.deltas) || {};
+  const out = {};
+  for (const { key } of DELTA_META) {
+    let sum = 0;
+    let any = false;
+    for (const h of Object.keys(HOSPITALS)) {
+      if (key === 'lateNoResult' && HOSPITALS[h].hasTestMenu !== true) continue;
+      const d = model[h] && model[h].kpi && model[h].kpi.deltas;
+      const v = d ? d[key] : undefined;
+      if (Number.isFinite(v)) { sum += v; any = true; }
+    }
+    if (any) out[key] = sum;
+  }
+  return out;
+}
+
 /* A FRESH model object whenever the figures went stale (see figuresFor): a changed
  * scope, a changed report date, reloaded data, or an engine setting edited in Settings.
  * Shallow copy of the old
@@ -484,10 +701,14 @@ export function buildOrderFigures(state, store, scope, compute) {
  * the banner, so a changed number set must arrive as a new model + ctx.rerender().
  * deltaWindow is dropped because it described the OLD kpi; render() re-stamps it.
  * dropOverrides: a manual override typed against one population means nothing for
- * another, so a scope change clears them (a date change, a reload or a Settings edit
- * that keeps the scope keeps them, as the model always has). */
-function refreshedModel(prev, state, store, compute, { dropOverrides = false } = {}) {
-  const next = { ...prev, ...buildOrderFigures(state, store, state.scope, compute) };
+ * another, so a scope change — or a report-type change — clears them (a date change, a
+ * reload or a Settings edit that keeps both keeps them, as the model always has).
+ * A figure field the NEW figures do not set is dropped (FIGURE_KEYS), so switching the
+ * report type never leaves the previous type's fields on the model. */
+function refreshedModel(prev, state, store, compute, { dropOverrides = false, hospitalReport = null } = {}) {
+  const figures = buildOrderFigures(state, store, state.scope, compute, { hospitalReport });
+  const next = { ...prev, ...figures };
+  for (const k of FIGURE_KEYS) if (!(k in figures)) delete next[k];
   delete next.deltaWindow;
   if (dropOverrides) next.overrides = {};
   return next;
@@ -497,8 +718,8 @@ function refreshedModel(prev, state, store, compute, { dropOverrides = false } =
  * Task splitting/panels go through model/drafts.js autoDraft — the CANONICAL
  * rule (internal = فئة التقرير 'لين'). A local regex here once diverged and
  * rendered the internal variant's task table empty with real tracker data. */
-function buildDraftReportModel(state, store, compute) {
-  const figures = buildOrderFigures(state, store, currentScope(state), compute);
+function buildDraftReportModel(state, store, compute, hospitalReport = null) {
+  const figures = buildOrderFigures(state, store, currentScope(state), compute, { hospitalReport });
   const tracker = state.parsed.tracker || buildMockTracker();
   // The task slides are NOT order-based, so scope never touches them: they are drafted
   // for the CHOSEN report date even when a range moves the deck's date to its end. A
@@ -526,7 +747,8 @@ function buildDraftReportModel(state, store, compute) {
   }
 
   return {
-    // reportDate, kpi, sendout, scope, scopedRows, shipmentDetails — see buildOrderFigures.
+    // reportDate, kpi, sendout, scope, scopedRows, shipmentDetails, hospital (+ the SGH /
+    // KAMC + SGH fields) — see buildOrderFigures.
     ...figures,
     panels: {
       supportRequired: d.supportRequired || [],
@@ -565,10 +787,14 @@ function buildDraftReportModel(state, store, compute) {
  * rerender for view reasons) and the generate click never trade the object the operator
  * is editing for a copy, and a real export pays the compute only when an input moved.
  * A model this module did not build (absent from the map) is always rebuilt. */
+// The report type (reportHospitalOf) leads the key: switching KAMC / SGH / KAMC + SGH is
+// a different number set over different rows, so it rebuilds (and drops the overrides —
+// modelFor). The engine inputs fingerprinted are KAMC's settings-side ones; the SGH
+// policy has no settings-side input but the date, which they include (opts.asOf).
 const figuresFor = new WeakMap();
 const figuresKeyOf = (state, store) => {
   const { tat, opts } = engineInputs(state, store && store.settings, state.scope);
-  return `${scopeKey(state.scope)}|${state.scopeEpoch || 0}|${JSON.stringify([tat, opts])}`;
+  return `${reportHospitalOf(state)}|${scopeKey(state.scope)}|${state.scopeEpoch || 0}|${JSON.stringify([tat, opts])}`;
 };
 
 // The pending report-date refresh (see the date input's change handler). Module scope
@@ -582,37 +808,52 @@ let dateRefreshTimer = 0;
  * report with an error that names the scope: buildOrderFigures refuses to label the full
  * numbers «مخصص», and a scope that silently did nothing would be the same lie told the
  * other way round. The generate button checks the scope it gets back against the one on
- * screen, so a click can never publish that swap unseen either. */
-function modelFor(state, store, compute) {
+ * screen, so a click can never publish that swap unseen either.
+ * REPORT TYPES: an SGH / KAMC + SGH build that fails (the model module did not load, a
+ * compute error) is handled the same way — back to the KAMC report, loudly (a toast that
+ * names the report type), the choice reset to KAMC — and the generate button compares
+ * the report type too, so the swap can never be published unseen.
+ * EXPORTED for node tests; `notify` is the toast seam (default: the real toast). */
+export function modelFor(state, store, compute, { hospitalReport = null, notify = toast } = {}) {
   currentScope(state);
   const prev = state.reportModel || null;
   const want = figuresKeyOf(state, store);
   if (prev && figuresFor.get(prev) === want) return prev;
   // Asked per attempt, not once: the fallback below resets the scope, and a scope that
   // falls back to the one prev already had is no scope change — its overrides stay and
-  // no «overrides cleared» toast claims otherwise.
+  // no «overrides cleared» toast claims otherwise. The same for the report type.
   const scopeChanged = () => !!prev && scopeKey(prev.scope) !== scopeKey(state.scope);
+  const hospitalChanged = () => !!prev && modelHospitalOf(prev) !== reportHospitalOf(state);
   const build = () => (prev
-    ? refreshedModel(prev, state, store, compute, { dropOverrides: scopeChanged() })
-    : buildDraftReportModel(state, store, compute));
+    ? refreshedModel(prev, state, store, compute, {
+      dropOverrides: scopeChanged() || hospitalChanged(), hospitalReport,
+    })
+    : buildDraftReportModel(state, store, compute, hospitalReport));
   let next;
   try {
     next = build();
   } catch (e) {
-    console.warn('[review] scoped figures unavailable; showing the full report', e && e.message);
+    const failed = reportHospitalOf(state);
     state.scope = EMPTY_SCOPE;
-    // Specific, not the bare «خطأ»: the operator must learn that the SCOPE was dropped
-    // and the full report is what they are now looking at.
-    const SC = STR.review.scope;
-    toast(str('scope', 'failed', `${STR.common.error}: ${SC.title} — ${SC.reset}`), 'err');
+    if (failed !== 'kamc') {
+      console.warn(`[review] ${failed} figures unavailable; showing the KAMC report`, e && e.message);
+      state.reportHospital = 'kamc';
+      notify(STR.review.hospital.failed(hospitalLabel(failed)), 'err');
+    } else {
+      console.warn('[review] scoped figures unavailable; showing the full report', e && e.message);
+      // Specific, not the bare «خطأ»: the operator must learn that the SCOPE was dropped
+      // and the full report is what they are now looking at.
+      const SC = STR.review.scope;
+      notify(str('scope', 'failed', `${STR.common.error}: ${SC.title} — ${SC.reset}`), 'err');
+    }
     // Falling back to the very figures prev already carries (the usual case: a scope
     // tried on the full report) keeps prev itself — no second compute, no new object.
     // Otherwise rebuild unscoped, which never throws: a compute, else the cached engine
     // output, else the mock.
     next = (prev && figuresFor.get(prev) === figuresKeyOf(state, store)) ? prev : build();
   }
-  if (scopeChanged() && prev.overrides && Object.keys(prev.overrides).length) {
-    toast(str('scope', 'overridesCleared'), 'warn');
+  if ((scopeChanged() || hospitalChanged()) && prev.overrides && Object.keys(prev.overrides).length) {
+    notify(hospitalChanged() ? STR.review.hospital.overridesCleared : str('scope', 'overridesCleared'), 'warn');
   }
   figuresFor.set(next, figuresKeyOf(state, store));
   state.reportModel = next;
@@ -820,7 +1061,7 @@ export async function render(container, ctx) {
   // any failure, which simply omits the two slides.
   if (state.sendoutMaster === undefined) {
     const dataKey = ((store.settings || {}).grafana || {}).dataKey || '';
-    const mod = await tryImport('../ingest/sendout-master.js?v=v2026-10-07.1');
+    const mod = await tryImport('../ingest/sendout-master.js?v=v2026-10-11.1');
     state.sendoutMaster = (mod && mod.loadSendoutMaster)
       ? await mod.loadSendoutMaster(dataKey)
       : null;
@@ -836,8 +1077,17 @@ export async function render(container, ctx) {
   // so the app always takes the guarded import.
   const compute = typeof ctx.compute === 'function'
     ? ctx.compute
-    : pickFn(await tryImport('../engine/engine.js?v=v2026-10-07.1'), ['compute', 'runEngine', 'run']);
-  const model = modelFor(state, store, compute);
+    : pickFn(await tryImport('../engine/engine.js?v=v2026-10-11.1'), ['compute', 'runEngine', 'run']);
+  // The SGH / KAMC + SGH model builders — guarded like the engine they depend on. Loaded
+  // even in KAMC mode: the generate click and a report-type switch go through modelFor
+  // with it, and a missing module must surface as modelFor's loud fallback, not a crash.
+  const hrMod = await tryImport('../model/hospital-report.js?v=v2026-10-11.1');
+  const model = modelFor(state, store, compute, { hospitalReport: hrMod });
+  // The report type ON SCREEN — the model's, which is the state's choice unless that
+  // build failed and modelFor fell back to KAMC (it said so).
+  const hospital = modelHospitalOf(model);
+  const avail = hospitalAvailability(state, hospital);
+  const HS = STR.review.hospital;
   { // settings may have been edited since the model was drafted — re-source them
     const s = store.settings || {};
     if (s.scorecard) model.scorecard = s.scorecard;
@@ -863,7 +1113,7 @@ export async function render(container, ctx) {
   // Guarded import, exactly as the retired picker was: a build without the module
   // degrades to the engine's own deltas instead of throwing. Re-run below on a
   // report-date change and on a mode switch; being PURE, every re-run agrees.
-  const dwMod = await tryImport('../model/delta-window.js?v=v2026-10-07.1');
+  const dwMod = await tryImport('../model/delta-window.js?v=v2026-10-11.1');
   const stampWindow = dwMod && dwMod.stampWindowDeltas;
   // The chips need the parsed CSV rows: with no upload in this session (mock preview)
   // stampWindowDeltas leaves the engine's deltas alone and stamps no window, and the
@@ -877,6 +1127,24 @@ export async function render(container, ctx) {
     ? model.scopedRows
     : ((state.parsed && state.parsed.orders) || null));
   const stampDeltas = () => {
+    // SGH / KAMC + SGH: their own stampers (model/hospital-report.js) — each hospital's
+    // chips from its OWN rows with its OWN policy, never KAMC's TAT table and never
+    // parsed.orders. The SAME calls pipeline.js applyWindowDeltas makes on generate, so
+    // the preview's chips and the deck's agree (both pure → deep-equal).
+    if (hospital !== 'kamc') {
+      const mode = normalizeDeltaMode(model.reportOptions && model.reportOptions.deltaMode);
+      const settings = store.settings || {};
+      try {
+        if (hospital === 'both') {
+          if (hrMod && typeof hrMod.stampBothDeltas === 'function') hrMod.stampBothDeltas(model, { settings, mode });
+        } else if (hrMod && typeof hrMod.stampHospitalDeltas === 'function') {
+          hrMod.stampHospitalDeltas(model, {
+            rows: Array.isArray(model.scopedRows) ? model.scopedRows : [], settings, mode,
+          });
+        }
+      } catch (e) { console.warn('[review] hospital delta stamp failed; keeping the built chips', e); }
+      return;
+    }
     if (typeof stampWindow !== 'function') return;
     stampWindow(model, {
       rows: stampRows(),
@@ -956,9 +1224,9 @@ export async function render(container, ctx) {
     // A range's END when one is active (the deck is dated 'to'), else the chosen date.
     model.reportDate = effectiveReportDate(state, model.scope);
     stampDeltas(); // re-window the chips for the current report date (pure → idempotent)
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-10-07.1');
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-10-11.1');
     const buildSpec = pickFn(specMod, ['buildSpec', 'build', 'makeSpec', 'toSpec']);
-    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-10-07.1');
+    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-10-11.1');
     const renderFn = pickFn(rendMod, ['renderSpec', 'renderSlides', 'renderHtml', 'render']);
 
     if (!buildSpec || !renderFn) {
@@ -1372,18 +1640,28 @@ export async function render(container, ctx) {
     ]);
   }
   // Analyst note: surface how many lines the engine dropped for lacking a
-  // standard TAT — only when the engine actually excluded some.
-  const excludedNote = (kpi && kpi.excludedNoTat > 0)
-    ? el('p', { class: 'small muted', style: 'margin:0 0 10px', text: `استُبعد ${kpi.excludedNoTat} سطراً بدون مدة معيارية (TAT)` })
+  // standard TAT — only when the engine actually excluded some. KAMC + SGH: KAMC's
+  // (SGH's policy never excludes — a missing TAT is its normal state).
+  const noteKpi = hospital === 'both' ? (model.kamc && model.kamc.kpi) : kpi;
+  const excludedNote = (noteKpi && noteKpi.excludedNoTat > 0)
+    ? el('p', { class: 'small muted', style: 'margin:0 0 10px', text: `استُبعد ${noteKpi.excludedNoTat} سطراً بدون مدة معيارية (TAT)` })
     : null;
   // Collapsed by default (daily flow rarely overrides numbers); styled like the
   // labels card so it reads as an advanced/optional section.
-  const kpiCard = el('details', { class: 'card' }, [
-    el('summary', { class: 'card__title', style: 'cursor:pointer', text: STR.review.kpiEditTitle }),
-    el('p', { class: 'small muted', style: 'margin:-4px 0 10px', text: STR.review.kpiEditHint }),
-    excludedNote,
-    el('div', { class: 'kpi-list' }, OVERRIDE_FIELDS.map(overrideRow)),
-  ]);
+  // KAMC + SGH: no overrides (decision 8) — which number would one replace, the KAMC,
+  // the SGH or the summed one? The card is replaced by one line saying so.
+  const kpiCard = hospital === 'both'
+    ? el('div', { class: 'card', style: 'padding:12px 16px' }, [
+      el('div', { class: 'card__title', style: 'margin-bottom:4px', text: STR.review.kpiEditTitle }),
+      excludedNote,
+      el('p', { class: 'small muted', style: 'margin:0', text: HS.noOverrides }),
+    ])
+    : el('details', { class: 'card' }, [
+      el('summary', { class: 'card__title', style: 'cursor:pointer', text: STR.review.kpiEditTitle }),
+      el('p', { class: 'small muted', style: 'margin:-4px 0 10px', text: STR.review.kpiEditHint }),
+      excludedNote,
+      el('div', { class: 'kpi-list' }, OVERRIDE_FIELDS.map(overrideRow)),
+    ]);
 
   // Slide-toggle chips (bound to reportOptions.slides.*). Toggling updates the model,
   // persists to settings as the new default, and live-refreshes the preview.
@@ -1409,7 +1687,7 @@ export async function render(container, ctx) {
     style: 'display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px',
   }, [
     el('span', { class: 'small muted', style: 'margin-inline-end:2px', text: STR.review.slideTogglesTitle }),
-    ...SLIDE_TOGGLES.map(slideChip),
+    ...slideTogglesFor(hospital).map(slideChip),
   ]);
 
   // Labels editor (collapsible, collapsed by default). One field per LABEL_NAMES key,
@@ -1419,7 +1697,7 @@ export async function render(container, ctx) {
     el('summary', { class: 'card__title', style: 'cursor:pointer', text: STR.review.labelsCardTitle }),
   ]);
   (async () => {
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-10-07.1');
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-10-11.1');
     const LABEL_NAMES = specMod && specMod.LABEL_NAMES;
     const DEFAULT_LABELS = (specMod && specMod.DEFAULT_LABELS) || {};
     if (!LABEL_NAMES || typeof LABEL_NAMES !== 'object') {
@@ -1462,19 +1740,32 @@ export async function render(container, ctx) {
       clearTimeout(dateRefreshTimer);
       pinShownModel();
       const epoch = state.scopeEpoch;
-      const m = modelFor(state, store, compute);
+      const m = modelFor(state, store, compute, { hospitalReport: hrMod });
       // …but it must still be the REPORT on screen. A click-time rebuild can come back
       // with a different scope: the scoped build failed and modelFor fell back to the full
       // report (it has said so), or the data was reloaded under the screen and the scope,
       // bound to the old rows, was dropped. Navigating on would publish a report the
       // operator never saw — a full one, which IS recorded to the history and the task
       // log, where they were looking at a side report. Stop and show what it would be.
-      if (scopeKey(m.scope) !== scopeKey(model.scope)) {
-        if (state.scopeEpoch !== epoch) {
+      // The REPORT TYPE is part of "the report on screen" too: a click-time rebuild that
+      // came back as another type (an SGH / KAMC + SGH build failed and modelFor fell
+      // back to KAMC — which IS recorded) must not navigate on.
+      const typeChanged = modelHospitalOf(m) !== modelHospitalOf(model);
+      if (typeChanged || scopeKey(m.scope) !== scopeKey(model.scope)) {
+        if (typeChanged) toast(HS.changed, 'warn');
+        else if (state.scopeEpoch !== epoch) {
           toast(str('scope', 'dataChanged', `${STR.common.warning}: ${SC.title} — ${SC.reset}`), 'warn');
         }
         genButton.disabled = false;
         rerenderKeepingPlace(); // no pin: m, already in state.reportModel, is the one to show
+        return;
+      }
+      // A report type whose hospital has no rows in the loaded data is never generated
+      // (hospitalAvailability) — re-checked at click time: the data may have been
+      // reloaded under the screen since the button was painted.
+      if (hospitalAvailability(state, modelHospitalOf(m)).blocked) {
+        toast(HS.empty(hospitalLabel(modelHospitalOf(m))), 'err');
+        rerenderKeepingPlace();
         return;
       }
       m.reportDate = effectiveReportDate(state, m.scope); // beat the 260ms preview debounce
@@ -1523,6 +1814,9 @@ export async function render(container, ctx) {
     autoDlCheck,
     el('span', { text: 'تنزيل الملفات الأربعة تلقائياً بعد التوليد' }),
   ]);
+  // Disabled while the chosen report type has nothing to report (see hospitalAvailability;
+  // the reason is printed at the top of the screen). Imperative: el() drops a false attr.
+  genButton.disabled = avail.blocked;
   const generateBtn = el('div', { class: 'sticky-actions' }, [autoDlRow, genButton]);
 
   // 'نشاط الأسبوع' banner — the first thing the operator sees. Reads model.kpi.deltas,
@@ -1567,7 +1861,8 @@ export async function render(container, ctx) {
   // the week-vs-day window wording.
 
   function buildDeltaBanner() {
-    const deltas = (kpi && kpi.deltas) || {};
+    // KAMC + SGH has no top-level kpi: the hospitals' chips summed (bannerDeltasOf).
+    const deltas = bannerDeltasOf(model);
     // Positive-only, through the module-scope exported predicate — read its comment
     // (why > 0 cannot hide a real negative, and why the deck applies the same rule)
     // before ever relaxing this back to '!== 0'. Zero ⇒ no chip; all-zero ⇒ words.empty.
@@ -1687,6 +1982,15 @@ export async function render(container, ctx) {
   let historyOpen = !!(restore && restore.historyOpen);
   function renderHistory() {
     historyHost.innerHTML = '';
+    // KAMC MODE ONLY: snapshotHistory is the KAMC report's published series, and SGH's
+    // (or the summed) as-of numbers beside it would read as one series — the same lie a
+    // scope would tell. One line in its place, like the scoped case below.
+    if (hospital !== 'kamc') {
+      historyHost.appendChild(el('div', { class: 'card', style: 'padding:12px 16px' }, [
+        el('p', { class: 'small muted', text: HS.historyHidden }),
+      ]));
+      return;
+    }
     if (isScoped(model.scope)) {
       historyHost.appendChild(el('div', { class: 'card', style: 'padding:12px 16px' }, [
         el('p', { class: 'small muted', text: str('scope', 'historyHidden') }),
@@ -1719,14 +2023,72 @@ export async function render(container, ctx) {
   // changes state.scope WITHOUT a rerender, so a handler spreading the snapshot turned the
   // box back on at the operator's next lab chip or range apply (review 2026-09-29).
   // «العودة للتقرير الكامل» alone does not: it is the reset to EMPTY_SCOPE, box included.
-  const allRows = allRowsOf(state);
+  //
+  // REPORT TYPE (2026-10-11) — the card's FIRST section: the KAMC / SGH / KAMC + SGH
+  // pills (setHospital). The scope sections below then work on the CHOSEN hospital's
+  // rows: KAMC's (parsed.orders, as always) or SGH's (its own labs, its own shipment
+  // ids). KAMC + SGH takes no scope (decision 7): one short line replaces the sections.
+  // A report type whose hospital has no rows shows no scope sections either (nothing to
+  // narrow — the empty notice at the top of the screen says why).
+  // The card exists whenever an order load happened (ordersLoaded) — an SGH-only file,
+  // or one with only third-hospital lines, included.
+  const allRows = hospital === 'kamc' ? allRowsOf(state) : (hospital === 'sgh' ? rowsFor(state, 'sgh') : null);
   const live = () => normalizeScope(state.scope);
+  /** Adopt a new report type. The scope goes with the old one — it was chosen against
+   *  that hospital's rows (its labs, its shipment ids) and means nothing for another;
+   *  KAMC + SGH takes none at all. modelFor (next render) sees the report type in the
+   *  figures key, rebuilds, and drops the overrides (toasting when there were some). */
+  function setHospital(next) {
+    if (!HOSPITAL_MODES.includes(next) || next === reportHospitalOf(state)) return;
+    const hadScope = isScoped(state.scope);
+    state.reportHospital = next;
+    state.scope = EMPTY_SCOPE;
+    view.draft.shipText = null; view.draft.from = null; view.draft.to = null;
+    if (hadScope) toast(HS.scopeCleared, 'warn');
+    pinShownModel();
+    rerenderKeepingPlace({ scopeOpen: true });
+  }
   function buildScopeCard() {
     const sc = live();                        // PAINT only: the controls' state (incl. the slide box)
     const ms = model.scope || EMPTY_SCOPE;    // what the numbers were computed for
     const draft = view.draft;
     if (draft.epoch !== state.scopeEpoch) {   // typed-but-unapplied input dies with its data
       draft.epoch = state.scopeEpoch; draft.shipText = null; draft.from = null; draft.to = null;
+    }
+    const chip = (label, count, on, onClick) => el('button', {
+      type: 'button', 'aria-pressed': on ? 'true' : 'false', style: scopeChipStyle(on), onClick,
+      // One spoken name for the two visual parts (the Latin lab name + its count pill).
+      'aria-label': count == null ? label : `${label} (${count})`,
+    }, [
+      el('span', { dir: 'auto', text: label }),
+      count == null ? null : el('span', { dir: 'ltr', style: SCOPE_COUNT_STYLE, text: String(count) }),
+    ]);
+
+    // (0) REPORT TYPE — the hospital selector. Every pill is always selectable: a type
+    // whose hospital has no rows is shown as such (and cannot be generated), never
+    // silently swapped for KAMC.
+    const hospitalSection = el('div', { class: 'field', style: 'margin:0 0 16px' }, [
+      el('label', { text: HS.title }),
+      el('div', { style: 'display:flex;flex-wrap:wrap;gap:6px' },
+        HOSPITAL_MODES.map((h) => chip(hospitalLabel(h), null, h === hospital, () => setHospital(h)))),
+      el('div', { class: 'hint', text: HS.hint }),
+    ]);
+    const header = (pillText, pillOn) => el('summary', { class: 'card__title', style: 'cursor:pointer;margin:0;flex-wrap:wrap' }, [
+      el('span', { text: SC.title }),
+      // The report type is named in the SUMMARY so it reads with the card collapsed.
+      el('span', { style: scopePillStyle(hospital !== 'kamc'), text: hospitalLabel(hospital) }),
+      pillText ? el('span', { style: scopePillStyle(pillOn), text: pillText }) : null,
+    ]);
+    if (hospital === 'both' || !allRows) {
+      const card = el('details', { class: 'card scope-card' }, [
+        header(null, false),
+        el('div', { style: 'margin-top:14px' }, [
+          hospitalSection,
+          hospital === 'both' ? el('p', { class: 'small muted', style: 'margin:0', text: HS.bothNoScope }) : null,
+        ]),
+      ]);
+      card.open = restore ? !!restore.scopeOpen : true;
+      return card;
     }
 
     // (d) What is in force + the way back to the full report — first, so it is never
@@ -1760,14 +2122,6 @@ export async function render(container, ctx) {
     // cannot have moved under it), but a filter must never be active and invisible.
     const opts = labOptions(allRows);
     for (const lab of sc.labs) if (!opts.some((o) => o.lab === lab)) opts.push({ lab, count: 0 });
-    const chip = (label, count, on, onClick) => el('button', {
-      type: 'button', 'aria-pressed': on ? 'true' : 'false', style: scopeChipStyle(on), onClick,
-      // One spoken name for the two visual parts (the Latin lab name + its count pill).
-      'aria-label': count == null ? label : `${label} (${count})`,
-    }, [
-      el('span', { dir: 'auto', text: label }),
-      count == null ? null : el('span', { dir: 'ltr', style: SCOPE_COUNT_STYLE, text: String(count) }),
-    ]);
     const labsSection = el('div', { class: 'field', style: 'margin:0 0 16px' }, [
       el('label', { text: SC.labs }),
       el('div', { style: 'display:flex;flex-wrap:wrap;gap:6px' }, [
@@ -1909,32 +2263,55 @@ export async function render(container, ctx) {
     ]);
 
     const card = el('details', { class: 'card scope-card' }, [
-      el('summary', { class: 'card__title', style: 'cursor:pointer;margin:0;flex-wrap:wrap' }, [
-        el('span', { text: SC.title }),
-        el('span', { style: scopePillStyle(isScoped(ms)), text: isScoped(ms) ? SC.active : SC.allLabs }),
-      ]),
-      el('div', { style: 'margin-top:14px' }, [active, labsSection, shipSection, rangeSection]),
+      header(isScoped(ms) ? SC.active : SC.allLabs, isScoped(ms)),
+      el('div', { style: 'margin-top:14px' }, [active, hospitalSection, labsSection, shipSection, rangeSection]),
     ]);
-    // Open while a scope is in force (the operator must see what narrows the deck);
-    // otherwise collapsed — the daily run is the full report. Our own rerender keeps
-    // whatever the operator last chose.
-    card.open = restore ? !!restore.scopeOpen : isScoped(ms);
+    // Open while a scope or a non-KAMC report type is in force (the operator must see
+    // what shapes the deck); otherwise collapsed — the daily run is the full KAMC
+    // report. Our own rerender keeps whatever the operator last chose.
+    card.open = restore ? !!restore.scopeOpen : (isScoped(ms) || hospital !== 'kamc');
     return card;
   }
-  if (allRows) scopeCard = buildScopeCard();
+  // Built whenever an order load happened (ordersLoaded), even one with no KAMC or SGH
+  // rows: the report-type pills are how the operator leaves a blocked type.
+  if (ordersLoaded(state)) scopeCard = buildScopeCard();
   // (e) SIDE REPORT banner — above everything else on the screen, so a scoped deck can
   // never be generated by someone who did not notice it was scoped. The same sentence is
-  // repeated on the generate screen's success panel.
-  const sideBanner = isScoped(model.scope) ? el('div', {
+  // repeated on the generate screen's success panel. An SGH / KAMC + SGH report is a side
+  // report too: the banner names the report type and says it is recorded nowhere.
+  const scopedSide = isScoped(model.scope);
+  const sideBanner = (scopedSide || hospital !== 'kamc') ? el('div', {
     class: 'card', role: 'status',
     style: 'border:1px solid var(--amber);background:var(--warn-bg,#FEF3C7);color:var(--warn-text,#92400E);padding:12px 16px;display:flex;gap:10px;align-items:flex-start',
   }, [
     el('span', { text: '⚠', 'aria-hidden': 'true', style: 'font-size:1.1rem;line-height:1.5' }),
     el('div', { style: 'min-width:0' }, [
-      el('div', { style: 'font-weight:800', text: SC.active }),
-      el('div', { class: 'small', text: SC.sideReport }),
+      el('div', {
+        style: 'font-weight:800',
+        text: [hospital !== 'kamc' ? STR.generate.reportType(hospitalLabel(hospital)) : null, scopedSide ? SC.active : null]
+          .filter(Boolean).join(' · '),
+      }),
+      el('div', { class: 'small', text: hospital !== 'kamc' ? HS.sideReport : SC.sideReport }),
     ]),
   ]) : null;
+  // (f) NOTHING TO REPORT — the chosen report type's hospital has no rows in the loaded
+  // data (hospitalAvailability): said at the very top, in the error colour, and the
+  // generate button is disabled. KAMC + SGH with ONE hospital absent is allowed (its
+  // cells print 0) and gets a calmer line naming it.
+  let availNote = null;
+  if (avail.blocked) {
+    availNote = el('div', {
+      class: 'card', role: 'alert',
+      style: 'border:1px solid var(--red);background:var(--bad-bg,#FEE2E2);color:var(--bad-text,#991B1B);padding:12px 16px;font-weight:700',
+      text: HS.empty(hospitalLabel(hospital)),
+    });
+  } else if (avail.missing.length) {
+    availNote = el('div', {
+      class: 'card', role: 'status',
+      style: 'padding:10px 16px;background:var(--info-bg,#E0E7FF);color:var(--info-text,#1E3A8A)',
+      text: avail.missing.map((h) => HS.bothMissing(hospitalLabel(h))).join(' '),
+    });
+  }
 
   // Banner FIRST, then the week-history panel, then daily-edited items (date →
   // support → tasks → challenges/risks), then the advanced KPI-override and
@@ -1944,12 +2321,13 @@ export async function render(container, ctx) {
   ]);
   const preview = el('div', { class: 'review-preview' }, [slideToggleRow, previewFrame]);
 
-  // Other hospitals' orders the upload left out (state.parsed.excludedHospitals, set
-  // beside every write of the orders — see state.js): one muted line under the subtitle,
-  // so the reviewer reads it before generating. Only while order rows are loaded
-  // (allRowsOf) — with none, there is nothing the figures could be missing. APP SCREEN
-  // ONLY: no slide, preview included, may carry a hospital name.
-  const excludedHospitals = (allRowsOf(state) && state.parsed.excludedHospitals) || [];
+  // THIRD hospitals' orders the upload left out (state.parsed.excludedHospitals — neither
+  // KAMC nor SGH; set beside every write of the orders, see state.js): one muted line
+  // under the subtitle, so the reviewer reads it before generating. Only after an order
+  // load (ordersLoaded) — including one whose lines were ALL a third hospital's, where
+  // this line is the reason the report is blocked; with no load, nothing was left out. App screen only (the KAMC deck still names no hospital;
+  // the SGH / KAMC + SGH decks print only the reference's KAMC / SGH names).
+  const excludedHospitals = (ordersLoaded(state) && state.parsed.excludedHospitals) || [];
   const head = el('div', { class: 'screen__head' }, [
     el('h1', { text: STR.review.title }),
     el('p', { text: STR.review.subtitle }),
@@ -1966,12 +2344,16 @@ export async function render(container, ctx) {
   // every number below describes. Unattributed send-out orders are surfaced next, above
   // the controls, because this is the last screen before the deck is generated; the
   // by-test-name disclosure follows them in its calmer, informational tone.
+  // KAMC + SGH: the send-out cards describe KAMC's attribution (the countries slide's
+  // source); SGH has no catalogue, so it has no gaps to report.
+  const sendoutModel = hospital === 'both' ? model.kamc : model;
   const screenRoot = el('div', { class: 'screen' }, [
     head,
+    availNote,
     sideBanner,
     scopeCard,
-    sendoutGapsCard(model),
-    sendoutByTestNameCard(model),
+    sendoutGapsCard(sendoutModel),
+    sendoutByTestNameCard(sendoutModel),
     el('div', { class: 'review-layout' }, [controls, preview]),
   ]);
   container.appendChild(screenRoot);

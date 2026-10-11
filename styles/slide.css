@@ -90,3 +90,15 @@
      from losing punctuation to the wrong edge. Column order is unaffected. */
   unicode-bidi: isolate;
 }
+
+/* '\n' inside a cell = a line break, as in the PPTX (pptxgenjs writes one <a:p> per
+   line): the BOTH / SGH decks' two-line note cells. OPT-IN — html-renderer adds the class
+   only to a table that uses a SlideSpec schema extension (spans, per-row heights, cell
+   margin/valign/border, table border) or sets `lineBreaks: true`. A legacy table (the
+   KAMC deck's action slide with its 'dd-mm-yyyy\ndd-mm-yyyy' date ranges) keeps
+   collapsing '\n' to a space exactly as before, so the KAMC PDF stays unchanged.
+   Runs of spaces still collapse and long text still wraps. */
+.sl-table--lines th,
+.sl-table--lines td {
+  white-space: pre-line;
+}

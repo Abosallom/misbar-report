@@ -25,13 +25,14 @@
 // Both changes make the golden workbook's _cachedDue/_cachedDelay/_cachedStatus
 // an OUT-OF-DATE external oracle for due-derived fields — deliberately.
 
-import { normTest, normFacility } from '../contracts.js?v=v2026-10-07.1';
+import { normTest, normFacility } from '../contracts.js?v=v2026-10-11.1';
 import {
   parseDateTime, toEpochDay, workday, dayDiff, calDaysBetween, monthKey,
-} from './workday.js?v=v2026-10-07.1';
-import { buildTatIndex, resolveTat, CHART_TEST_CATALOG } from './tat.js?v=v2026-10-07.1';
-import { dedupeRows } from './dedupe.js?v=v2026-10-07.1';
-import { fillBlankFacilities } from './infer-facility.js?v=v2026-10-07.1';
+} from './workday.js?v=v2026-10-11.1';
+import { buildTatIndex, resolveTat, CHART_TEST_CATALOG } from './tat.js?v=v2026-10-11.1';
+import { dedupeRows } from './dedupe.js?v=v2026-10-11.1';
+import { fillBlankFacilities } from './infer-facility.js?v=v2026-10-11.1';
+import { hasTestMenu } from '../model/hospital.js?v=v2026-10-11.1';
 
 export const STATUS = Object.freeze({
   CANCELLED: 'Cancelled',
@@ -518,10 +519,16 @@ export function compute(rows, tatLookup, opts = {}) {
   // opts.excludeNoTat drops 'No Match' rows (received present, StdTAT null from
   // both lookup and CSV) before ANY aggregation. Cancelled rows resolve to
   // 'Cancelled' in the cascade, never 'No Match', so cancelled counting is safe.
+  // A row whose hospital has NO Test Menu (model/hospital.js hasTestMenu — SGH today)
+  // is 'No Match' by construction (tat.js resolves it no TAT), not because a TAT is
+  // missing from the table: the setting exists to hide gaps in KAMC's table, and
+  // applied to such rows it would erase every received order of that hospital from its
+  // counts. So they are never dropped. KAMC / legacy rows always have a menu, so the
+  // KAMC numbers are exactly what they were.
   let enriched = enrichedAll;
   let excludedNoTat = 0;
   if (opts.excludeNoTat === true) {
-    enriched = enrichedAll.filter((e) => e.status !== STATUS.NO_MATCH);
+    enriched = enrichedAll.filter((e) => e.status !== STATUS.NO_MATCH || !hasTestMenu(e.row));
     excludedNoTat = enrichedAll.length - enriched.length;
   }
 

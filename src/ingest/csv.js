@@ -1,8 +1,9 @@
 // ingest/csv.js — parse the KAMC daily CSV export (30 cols; exports since 2026-09-28 add
 // the ordering-HOSPITAL columns, see findHospitalColumns) into normalized OrderRow[] PLUS
 // the file's own parsed rows, untouched (`raw`). Rows of EVERY ordering hospital are
-// returned — the KAMC-only cut is model/hospital.js splitByHospital, applied where the
-// app consumes the rows, never here.
+// returned — which hospital a row belongs to (KAMC, SGH, or a third one that is never
+// counted) is decided by model/hospital.js takeOrders where the app takes the rows in,
+// never here.
 // Library is injected (browser loads PapaParse separately); never imported here.
 // PATIENT DATA has exactly two carriers here, both MEMORY-ONLY and both confined to
 // this manual-upload path:
@@ -20,7 +21,7 @@
 //    browser solely as the file the user explicitly downloads. ingest/grafana.js has NO
 //    `raw` and must never gain one — its rows are encrypted into the snapshot committed
 //    to a public repo, and the live pull carries no patient columns anyway.
-import { normFacility } from '../contracts.js?v=v2026-10-07.1';
+import { normFacility } from '../contracts.js?v=v2026-10-11.1';
 
 // Columns we actually map. Missing ones are reported in errors[] (fail soft).
 export const MAPPED_COLUMNS = [
@@ -40,36 +41,47 @@ export const MAPPED_COLUMNS = [
 // ---- the ordering-HOSPITAL columns (2026-10-07) -------------------------------------
 // Since 2026-09-28 the export also carries the ordering hospital — a name and an id —
 // because a second hospital (SGH) now orders through the same system (model/hospital.js
-// has the why and the KAMC-only rule). The two sources spell the headers differently:
-// Grafana sends 'facility_name' / 'facility_id', the user's CSV shows 'Facility Name'
-// (and a re-save may change case), so they are matched on a KEY with case, spaces and
-// underscores removed. Deliberately NOT in MAPPED_COLUMNS: every file from before
-// 2026-09-28 lacks them and must stay a complete, error-free upload (rows with no
-// hospital column are KAMC by definition — model/hospital.js isKamcRow).
+// has the why and the per-hospital rules; the NAME is what it classifies on first). The
+// two sources spell the headers differently: Grafana sends 'facility_name' /
+// 'facility_id', the user's CSV shows 'Facility Name' (and a re-save may change case or
+// separators), so they are matched on a KEY with case, spaces, underscores, hyphens, dots
+// and invisible characters removed. Deliberately NOT in MAPPED_COLUMNS: every file from
+// before 2026-09-28 lacks them and must stay a complete, error-free upload (rows with no
+// hospital column are KAMC by definition — model/hospital.js hospitalOf).
 // The exact key is what keeps the neighbours out: 'Performing facility name' (the LAB,
 // → OrderRow.facility) keys to 'performingfacilityname' and 'Ordering facility ID' to
 // 'orderingfacilityid', so neither can be mistaken for the hospital columns.
 export const HOSPITAL_NAME_KEY = 'facilityname';
 export const HOSPITAL_ID_KEY = 'facilityid';
-/** Header → match key: lower-case, all whitespace (incl. a BOM) and underscores removed. */
-export const columnKey = (h) => String(h ?? '').toLowerCase().replace(/[\s_]+/g, '');
+// A SECOND-CHOICE spelling of the name header, used only when no 'facility_name' column
+// exists: the source's own label for the ordering side ('Ordering facility ID') makes
+// 'Ordering facility name' the natural name of the same column in a re-labelled export.
+// Never the PERFORMING one — that is the lab.
+const HOSPITAL_NAME_ALT_KEY = 'orderingfacilityname';
+/** Header → match key: lower-case; whitespace (incl. a BOM / NBSP), underscores, hyphens,
+ *  dots and zero-width characters removed. */
+export const columnKey = (h) => String(h ?? '').toLowerCase().replace(/[\s_.\-\u200B-\u200D\u2060]+/g, '');
 
 /**
  * Find the ordering-hospital columns among a file's / frame's field names (first match
- * wins). Shared with ingest/grafana.js so both paths read the SAME columns by the SAME
- * rule. Absent → null (the row then gets hospital: null and no id fallback).
+ * wins; an exact 'facility_name' key beats the 'Ordering facility name' alternative
+ * wherever the two sit). Shared with ingest/grafana.js so both paths read the SAME
+ * columns by the SAME rule. Absent → null (the row then gets hospital: null and no id
+ * fallback).
  * @param {Iterable<string>} fields
  * @returns {{nameCol: (string|null), idCol: (string|null)}}
  */
 export function findHospitalColumns(fields) {
   let nameCol = null;
+  let altNameCol = null;
   let idCol = null;
   for (const f of fields || []) {
     const k = columnKey(f);
     if (nameCol == null && k === HOSPITAL_NAME_KEY) nameCol = f;
+    if (altNameCol == null && k === HOSPITAL_NAME_ALT_KEY) altNameCol = f;
     if (idCol == null && k === HOSPITAL_ID_KEY) idCol = f;
   }
-  return { nameCol, idCol };
+  return { nameCol: nameCol ?? altNameCol, idCol };
 }
 
 const clean = (v) => {
@@ -147,12 +159,13 @@ export function parseKamcCsv(text, Papa) {
       shipmentId: clean(r['Shipment ID']),
       // 'Ordering facility ID' stays the source; the hospital id column (facility_id)
       // carries the SAME id and fills in when that column is absent or the cell blank —
-      // this id is what model/hospital.js isKamcRow decides on.
+      // model/hospital.js hospitalOf decides on this id when the name names no hospital.
       orderingFacilityId:
         clean(r['Ordering facility ID']) ?? (facilityIdCol ? clean(r[facilityIdCol]) : null),
       performingFacilityId: clean(r['Performing facility id']),
       // Ordering HOSPITAL name, whitespace-collapsed (the source writes SGH with a double
-      // space). Not patient data. null when the file predates the column.
+      // space) — what model/hospital.js hospitalOf classifies on FIRST. Not patient data.
+      // null when the file predates the column or the cell is blank.
       hospital: hospitalCol ? normFacility(clean(r[hospitalCol])) : null,
       // Patient date of birth, for the per-lab late-tests Excel ONLY (user request
       // 2026-09-28: labs match a specimen to its patient by specimen no + DOB). This

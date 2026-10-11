@@ -1,7 +1,10 @@
 // model/report-model.js — assemble the single ReportModel consumed by build-spec.
 // Auto-drafts from the tracker are shallow-merged with the reviewer's edits.
-import { autoDraft } from './drafts.js?v=v2026-10-07.1';
-import { analyseSendout, hasMaster } from './sendout.js?v=v2026-10-07.1';
+// ONE hospital's numbers per model (KAMC or SGH): unchanged by the per-hospital work.
+// The per-hospital builders (KAMC / SGH / KAMC+SGH) live in model/hospital-report.js,
+// which calls this for each hospital with that hospital's own engine output and rows.
+import { autoDraft } from './drafts.js?v=v2026-10-11.1';
+import { analyseSendout, hasMaster } from './sendout.js?v=v2026-10-11.1';
 
 /**
  * buildReportModel({engineOutput, tracker, settings, reportDate, orders, sendoutMaster, edits}) -> ReportModel

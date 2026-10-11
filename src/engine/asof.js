@@ -130,8 +130,9 @@
 // the ungated function — which is what leaves the CROWN identity above, buildWeekNumbers
 // and every existing caller exactly as they were.
 
-import { parseDateTime, toEpochDay, workday, MS_PER_DAY } from './workday.js?v=v2026-10-07.1';
-import { buildTatIndex, resolveTat } from './tat.js?v=v2026-10-07.1';
+import { parseDateTime, toEpochDay, workday, MS_PER_DAY } from './workday.js?v=v2026-10-11.1';
+import { buildTatIndex, resolveTat } from './tat.js?v=v2026-10-11.1';
+import { hasTestMenu } from '../model/hospital.js?v=v2026-10-11.1';
 
 // engine.js's cascade keys off these exact rawStatus literals (not exported).
 const RAW_CANCELLED = 'Order Cancelled';
@@ -246,8 +247,11 @@ export function computeNumbersAsOf({ rows, tatTests, asOfIso, sinceIso, opts = {
     // in the cascade), so their counting is untouched, exactly as in the engine.
     // `=== true` matches the engine's gate exactly: a truthy non-boolean must not
     // exclude here while the engine keeps the row (the two must count one row set).
+    // Same exemption as the engine, for the same reason: a row whose hospital has NO
+    // Test Menu (model/hospital.js hasTestMenu — SGH today) has no TAT by construction
+    // and is never dropped.
     if (opts.excludeNoTat === true && !cancelled && !isRejected && dayOf(row.received) != null
-        && resolveTat(row, tatIndex, opts).tat == null) {
+        && hasTestMenu(row) && resolveTat(row, tatIndex, opts).tat == null) {
       continue;
     }
 

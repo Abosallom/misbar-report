@@ -41,9 +41,30 @@
 // the cover's period/scope lines, the 'تقرير مخصص' pill on the cover and in every content
 // slide's footer strip (buildCover + buildSpec's post-pass, see scopeTag) and the opt-out
 // 'تفاصيل الشحنات' slide.
-import { COLORS as C, GEOM } from '../theme.js?v=v2026-10-07.1';
-import { AR_COUNTRY, AR_COUNTRY_SHORT, reflabShort } from '../model/sendout.js?v=v2026-10-07.1';
-import { isScoped, hasRange } from '../model/scope.js?v=v2026-10-07.1';
+//
+// THREE REPORT TYPES (m.hospital — model/hospital-report.js, user decision 2026-10-11):
+//   'both' → buildBothSpec (slidespec/build-spec-both.js): the user's KAMC+SGH reference
+//            deck, its own design. buildSpec only DISPATCHES to it (see buildSpec).
+//   'sgh'  → THIS file's builders over SGH's own rows, i.e. the current design, with the
+//            few adaptations a hospital WITHOUT A TEST MENU needs (no TAT ⇒ no lateness, no
+//            country, no reference lab). Every adaptation reuses the reference deck's OWN
+//            SGH wording and styling verbatim (Note 3: "DO NOT CHANGE WORDS") — see SGH_TEXT
+//            and the sgh* helpers below the colour constants.
+//   anything else (the KAMC report, and every model built before hospitals existed, which
+//            carries no `hospital` key) → today's code path, untouched: no branch below
+//            fires unless m.hospital === 'sgh', so the KAMC deck stays BYTE-IDENTICAL.
+// HOSPITAL NAMES ON SLIDES. The KAMC report still prints no hospital name anywhere (the
+// standing rule, unchanged for it). The SGH and BOTH decks print exactly the names the
+// reference deck prints («SGH», «مستشفى الألماني السعودي») — the reference supersedes the
+// old rule for those two report types only.
+import { COLORS as C, GEOM } from '../theme.js?v=v2026-10-11.1';
+import { AR_COUNTRY, AR_COUNTRY_SHORT, reflabShort } from '../model/sendout.js?v=v2026-10-11.1';
+import { isScoped, hasRange } from '../model/scope.js?v=v2026-10-11.1';
+// NAMESPACE import on purpose: build-spec-both.js may import helpers back from this file
+// (an ESM cycle). A namespace binding is only read inside buildSpec, at CALL time, when
+// both modules have finished evaluating — and it tolerates either a named
+// `buildBothSpec` export (the contract's name) or a default export.
+import * as bothSpecModule from './build-spec-both.js?v=v2026-10-11.1';
 
 // EXPLICIT-TRUE kpiCards KEYS. reportOptions.kpiCards normally reads "on unless === false"
 // (see buildExec's cardDefs filter). The keys in this set INVERT that: they render only
@@ -562,6 +583,102 @@ const CHART_GRAY = '#A5A5A5';   // chart1 series "النتائج غير المك
 const CARD_DEEP_BLUE = '#2F5597';
 const CARD_TITLE = '#DCE6F1';   // overall-average card sub-title
 
+// ============================================================================
+// SGH REPORT — a hospital WITHOUT A TEST MENU (CONTRACT §1.11, user decision 2026-10-11)
+// ============================================================================
+// SGH sends no Test Menu yet, so the app has no TAT for its tests: lateness, late %,
+// turnaround, lab country and reference lab are UNKNOWN for its orders. The engine still
+// returns 0 / null for them, which is not a fact — model/hospital-report.js marks the
+// model `noTestMenu: true` and every surface below prints the reference deck's own
+// "unknown" treatment instead of the engine's 0:
+//   exec       late card «–» (no % sub-line, no chip) + the reference slide-2 footnote
+//              (SGH pill + «لا توجد مدة إنجاز محددة (TAT) …»)
+//   countries  both cards «–» (no share line); ONE bar row styled as the reference's SGH
+//              row; the reference SGH note + legend key replace the KAMC colour footnote
+//   labs       the country + reference-lab cells merged into the reference slide-5 note
+//   compliance the late + late-% cells merged into the reference slide-6 note; totals «–»
+// The cover also gets the reference's «يشمل التقرير:» chip row with ONLY the SGH chip, so
+// an SGH deck can never pass for the KAMC report (that one is identity, not Test-Menu
+// dependent, so it keys off m.hospital alone).
+// THE TEST-MENU BRANCHES KEY OFF noTestMenu, NOT OFF THE NAME: the day SGH's Test Menu
+// arrives (HOSPITALS.sgh.hasTestMenu → true) the model stops setting the flag and the SGH
+// deck prints its real late/country/lab figures with no edit here.
+//
+// SGH_TEXT is the reference deck's text, character for character (extracted from
+// ref.pptx slide1/2/4/5/6 XML — the «الـ» carries a U+0640 tatweel, the dash in «(–)» is
+// U+2013, the legend's «—» is U+2014). It is deliberately NOT in DEFAULT_LABELS: these are
+// the user's own reference words (Note 3), not editable deck labels, and keeping them out
+// of the registry leaves the labels editor — whose keys are the KAMC deck's — untouched.
+// Exported so the BOTH deck can print the very same strings.
+// '\n' in the two table notes is the reference's paragraph break (two <a:p>), which both
+// renderers honour in a table cell (map/schema.md §3).
+export const SGH_TEXT = Object.freeze({
+  code: 'SGH',
+  arName: 'مستشفى الألماني السعودي',
+  coverIncludes: 'يشمل التقرير:',
+  noTatNote: 'لا توجد مدة إنجاز محددة (TAT) لفحوصاته بعد، لذلك لا يمكن احتساب طلباته المتأخرة وتظهر بالعلامة (–)',
+  countryNote: '* مستشفى الألماني السعودي: تفاصيل الـ Test Menu لم تصل بعد، لذلك لم تُحدَّد دولة المختبر لطلباته',
+  countryLegend: 'مستشفى الألماني السعودي — الدولة غير محددة',
+  labsNote: 'تفاصيل الـ Test Menu لمستشفى الألماني السعودي لم تصل بعد،\nلذلك لم تُحدَّد الدولة والمختبر المرجعي',
+  complianceNote: 'تفاصيل الـ Test Menu لم تصل بعد،\nلذلك لم يُحتسب التأخير',
+});
+// The reference's colours for these elements (not in theme.js, which this file may not
+// edit; the BOTH builder owns its own copies of the same hexes).
+export const SGH_COLORS = Object.freeze({
+  violet: '#7C3AED',    // SGH pill fill (exec footnote)
+  coverDot: '#C4B5FD',  // SGH dot in the cover chip (lighter violet for the navy cover)
+  na: '#94A3B8',        // «–» = not applicable / unknown (reference slide 2 n/a grey)
+  noteRed: '#B91C1C',   // «Test Menu» notes (reference slides 4, 5, 6)
+});
+const NA_DASH = '–'; // U+2013, the reference's «–»
+// The reference's «TextBox» shapes carry 12802-EMU insets (≈1 pt = 0.014in); the pills and
+// legend labels carry 0. Passed as `margin` (inches) so both renderers match.
+const REF_TXBOX_MARGIN = 0.014;
+// The SGH report (any SGH model) / the SGH report whose hospital has no Test Menu.
+const isSghReport = (m) => m.hospital === 'sgh';
+const sghNoMenu = (m) => m.hospital === 'sgh' && m.noTestMenu === true;
+// The two-line 9.5pt «Test Menu» table notes need this much row height: it is the
+// reference's own span for them (slide 6: two 0.275in rows hold the note). When an SGH
+// deck has ONE lab, the note's merged span is a single row (0.275 compliance / 0.361 labs),
+// which the renderers would grow on their own — differently in PowerPoint and in the
+// preview, and in the compliance slide straight into its table-anchored footnote. So that
+// single row is drawn at this height instead (a per-row rowH, map/schema.md §3).
+const SGH_NOTE_MIN_H = 0.55;
+/** Per-row heights for a table whose body rows all sit under one merged SGH note: the
+ *  plain number when the span is tall enough (the common case), else the body row grown. */
+const sghNoteRowH = (rowH, bodyRows, extraRows) => (bodyRows === 1 && rowH < SGH_NOTE_MIN_H
+  ? [rowH, SGH_NOTE_MIN_H, ...Array(extraRows).fill(rowH)]
+  : rowH);
+
+// Cover chip row — the reference cover's «يشمل التقرير:» + pill, with ONLY the SGH pill.
+// Reference geometry (slide1.xml, map/ref-s1-s2.md §1): label (11.35, 4.80, 1.15, 0.44)
+// 13pt CARD_TITLE right; pill 1.30 × 0.44 fully round, 13 % white; dot Ø0.16 at px+0.97;
+// name box (px+0.08, w 0.85) 14pt bold white centred. The SGH pill takes the reference's
+// FIRST pill slot (px 10.00, 0.05 left of the label) — with one hospital there is no KAMC
+// pill to sit beside, and leaving the 10.00 slot empty would detach the pill from its label.
+// Clear of every other cover box: subtitle ends 4.60, a scoped deck's scope line starts 5.75.
+function sghCoverChips() {
+  const y = 4.8, h = 0.44, px = 10.0;
+  return [
+    text(11.35, y, 1.15, h, SGH_TEXT.coverIncludes, 13, { color: CARD_TITLE, align: 'right', valign: 'middle', rtl: true, margin: REF_TXBOX_MARGIN }),
+    rect(px, y, 1.3, h, C.white, { alpha: 0.13, radius: h / 2 }),
+    rect(px + 0.97, y + 0.14, 0.16, 0.16, SGH_COLORS.coverDot, { shape: 'ellipse' }),
+    text(px + 0.08, y, 0.85, h, SGH_TEXT.code, 14, { bold: true, color: C.white, align: 'center', valign: 'middle', rtl: false, margin: REF_TXBOX_MARGIN }),
+  ];
+}
+
+// Exec footnote — reference slide 2 §2.11, verbatim: violet SGH pill (12.20, 6.755,
+// 0.62 × 0.24, fully round) + the no-TAT sentence (0.50, 6.74, 11.58 × 0.27) 9.5pt slate600
+// right-aligned. It sits in the strip between the funnel's last row (ends 6.412) and the
+// footer rule (7.10), where the current exec slide has nothing.
+function sghNoTatNote() {
+  return [
+    rect(12.2, 6.755, 0.62, 0.24, SGH_COLORS.violet, { radius: 0.12 }),
+    text(12.2, 6.755, 0.62, 0.24, SGH_TEXT.code, 9, { bold: true, color: C.white, align: 'center', valign: 'middle', rtl: false, margin: 0 }),
+    text(0.5, 6.74, 11.58, 0.27, SGH_TEXT.noTatNote, 9.5, { color: C.slate600, align: 'right', valign: 'middle', rtl: true, margin: REF_TXBOX_MARGIN }),
+  ];
+}
+
 // Gregorian month-name lookup ('01'..'12' -> Arabic). Drives the monthly table
 // headers and BOTH slide-3 chart category lists off m.kpi.monthly, so labels track
 // the data instead of being pinned to Jan–Jul.
@@ -817,6 +934,9 @@ function buildCover(m) {
   }
   // Appended last, like the scope line, so every historic element keeps its index.
   if (scoped) elements.push(...scopeTag(L, COVER_TAG));
+  // SGH report: the reference's «يشمل التقرير:» chip row, SGH chip only (see
+  // sghCoverChips). Appended after everything else for the same index-stability reason.
+  if (isSghReport(m)) elements.push(...sghCoverChips());
   return { id: 'cover', bg: C.navy, elements };
 }
 
@@ -946,6 +1066,13 @@ function buildExecFunnel(m) {
   const latePctShown = (isOv('lateNoResult') || isOv('awaitingResults'))
     ? (vAwait > 0 ? Math.round((vLate / vAwait) * 1000) / 10 : 0)
     : b.latePct;
+  // SGH (no Test Menu): the late count is UNKNOWN, not 0 — the card prints the
+  // reference's «–» in its n/a grey, drops the «تمثل X% …» sub-line (a percentage of an
+  // unknown is meaningless) and never chips (the engine's late delta is as unknown as its
+  // count). A finite manual override still wins — typing a number is a deliberate act,
+  // exactly like the turnaround card's overrides — and then the card is an ordinary late
+  // card again (value, sub-line from the displayed numbers, no chip because overridden).
+  const lateUnknown = sghNoMenu(m) && !isOv('lateNoResult');
 
   // Total-card window: first→last month WITH orders (Arabic names), tracking the data
   // instead of a pinned 'يناير – يوليو'. Empty when no month has orders.
@@ -979,7 +1106,7 @@ function buildExecFunnel(m) {
     // Measured 0.900in at 9.5pt Cairo in the card's 1.479in sublabel box (1.279in usable
     // after pptxgenjs' margins) — one line, +0.379in of slack.
     { v: V('completed', b.completed),                   vc: C.green,          lab: L('kpiCompleted'),         sub: 'تشمل المرفوضة',            ac: C.green,          dk: 'completed' },
-    { v: vLate,                                         vc: C.redPure,        lab: L('kpiLate'),              sub: `تمثل ${latePctShown}% من الطلبات`, ac: C.redPure, dk: 'lateNoResult', emph: true },
+    { v: lateUnknown ? NA_DASH : vLate,                 vc: lateUnknown ? SGH_COLORS.na : C.redPure, lab: L('kpiLate'), sub: lateUnknown ? '' : `تمثل ${latePctShown}% من الطلبات`, ac: C.redPure, dk: 'lateNoResult', emph: true, noChip: lateUnknown },
   ];
   const visible = cardDefs.filter((c) => m.reportOptions?.kpiCards?.[c.dk] !== false);
   // Canonical row (nothing switched off) => the reference's own pinned boxes; otherwise
@@ -995,7 +1122,7 @@ function buildExecFunnel(m) {
   // the window's activity, so no count of that activity belongs beside it.
   const kpiEls = visible.flatMap((c, i) => kpiCard({
     x: xOf(i), w: cardW, v: String(c.v), vc: c.vc, lab: c.lab, sub: c.sub, ac: c.ac,
-    delta: isOv(c.dk) ? undefined : fmtDelta(d[c.dk]), emph: c.emph,
+    delta: (isOv(c.dk) || c.noChip) ? undefined : fmtDelta(d[c.dk]), emph: c.emph,
   }));
 
   // -- ZONE B: order-journey funnel (from old buildJourney; X unchanged, Y +0.40).
@@ -1030,7 +1157,7 @@ function buildExecFunnel(m) {
   // KPI_DELTA_KEYS because those stages could not chip, and it must mirror the stageDelta
   // expression below exactly — the legend explains the chips, so a row that can now draw
   // one must be able to summon the caption that names its window.
-  const anyChip = visible.some((c) => !isOv(c.dk) && fmtDelta(d[c.dk]) !== undefined)
+  const anyChip = visible.some((c) => !isOv(c.dk) && !c.noChip && fmtDelta(d[c.dk]) !== undefined)
     || rows.some((r) => !isOv(r.ov) && fmtDelta(d[r.key]) !== undefined);
 
   // Cancelled note — displayed count is override-aware. Geometry/size are the 20-07
@@ -1190,6 +1317,11 @@ function buildExecFunnel(m) {
   if (anyChip) {
     els.push(text(0.5, 0.72, 6.0, 0.18, deltaLegendText(L, m.deltaWindow), 8.5, { color: C.deltaGreen, align: 'left', valign: 'middle', rtl: true }));
   }
+  // SGH (no Test Menu): the reference slide-2 footnote explaining the «–» — shown while
+  // the late card is unknown, i.e. not when an operator typed a late figure by hand, and
+  // only while that card is actually on the slide (an operator can switch it off, and the
+  // footnote would then explain a «–» the slide no longer shows).
+  if (lateUnknown && visible.some((c) => c.dk === 'lateNoResult')) els.push(...sghNoTatNote());
   return { id: 'execFunnel', bg: C.white, elements: els };
 }
 
@@ -1790,6 +1922,19 @@ function buildCompliance(m) {
   // compRejected carries NO per-cell fill, and this file may not edit that test. Styled
   // body cells are safe — the test's cellText() unwraps { text, … } objects.
   const lateCell = (s) => ({ text: s, color: C.redSoft, bold: true });
+  // SGH (no Test Menu): lateness is unknown, so each row's two late cells are replaced by
+  // ONE merged cell carrying the reference slide-6 note, styled as there (#FEF2F2 fill,
+  // 9.5pt bold #B91C1C, centred, two paragraphs), spanning both late columns and every
+  // row. Logical [… rejected, NOTE] → rev() puts NOTE first (the visual late-% slot) and
+  // its colSpan 2 covers the late slot to its right; rows after the first OMIT the
+  // covered cells (map/schema.md §3). The engine's 0 late never reaches the slide.
+  const noMenu = sghNoMenu(m);
+  const lateCells = (r, i) => (!noMenu
+    ? [lateCell(String(r.late)), lateCell(pctLab(r.latePct))]
+    : i === 0
+      ? [{ text: SGH_TEXT.complianceNote, colSpan: 2, rowSpan: lab.length, align: 'center',
+        fill: C.bgRed, color: SGH_COLORS.noteRed, bold: true, size: 9.5 }]
+      : []);
   const labRows = lab.map((r, i) => rev([
     String(i + 1),
     { text: r.lab, align: 'right' },
@@ -1797,8 +1942,7 @@ function buildCompliance(m) {
     completedCell(completedOf(r)),
     String(r.awaitingResult),
     String(r.rejected || 0),
-    lateCell(String(r.late)),
-    lateCell(pctLab(r.latePct)),
+    ...lateCells(r, i),
   ]));
   // Totals row — '#' cell left blank (as in the reference deck), 'المجموع' in the lab column.
   const totalRow = rev([
@@ -1809,8 +1953,9 @@ function buildCompliance(m) {
     { text: String(awaitTot), bold: true, fill: C.bgLighter },
     { text: String(rejTot), bold: true, fill: C.bgLighter },
     // Totals row keeps the light-red treatment of the two late columns (see lateCell).
-    { text: String(lateTot), bold: true, fill: C.bgLighter, color: C.redSoft },
-    { text: pctLab(latePctTot), bold: true, fill: C.bgLighter, color: C.redSoft },
+    // SGH (no Test Menu): «–» in the reference's n/a grey — a sum of unknowns is unknown.
+    { text: noMenu ? NA_DASH : String(lateTot), bold: true, fill: C.bgLighter, color: noMenu ? SGH_COLORS.na : C.redSoft },
+    { text: noMenu ? NA_DASH : pctLab(latePctTot), bold: true, fill: C.bgLighter, color: noMenu ? SGH_COLORS.na : C.redSoft },
   ]);
 
   // colW: the 20-07 REFERENCE DECK's own gridCol widths, EMU→inches (÷914400), in logical
@@ -1881,8 +2026,9 @@ function buildCompliance(m) {
   // x stays 0.833 — the principled centre ((13.333 − 11.667)/2); the reference's 0.8165
   // is a 0.017in manual drag, not an authored value.
   const TABLE_Y = 2.143, ROW_H = 0.275;
+  // SGH: a single lab row is grown to hold the two-line note (sghNoteRowH).
   const labTable = {
-    t: 'table', x: 0.833, y: TABLE_Y, w: 11.667, rtl: true, rowH: ROW_H,
+    t: 'table', x: 0.833, y: TABLE_Y, w: 11.667, rtl: true, rowH: noMenu ? sghNoteRowH(ROW_H, labRows.length, 1) : ROW_H,
     header: { fill: C.navy, color: C.white, bold: true },
     colW: rev(COL_W),
     rows: [header, ...labRows, totalRow],
@@ -1900,7 +2046,21 @@ function buildCompliance(m) {
   // At the usual 6–8 labs that lands at y≈4.4–4.9; it is SUPPRESSED when the table has
   // grown so tall that the note would cross the 7.05 content floor (≥15 labs), since the
   // 7.1 footer rule and the page number live just below it.
-  const tableBottom = TABLE_Y + labTable.rows.length * ROW_H;
+  // SGH DECKS place the footnote under the table's DRAWN height, not its authored one.
+  // A 0.275in row cannot hold a 10pt Cairo line: Cairo's line box is ~1.87em (≈0.26in at
+  // 10pt) and pptxgenjs adds 0.1in of cell margin, so PowerPoint/QuickLook grow every row
+  // to ≈0.39in and the authored-height footnote lands on the «المجموع» row (verify:visual
+  // QuickLook render of the SGH compliance slide). Each row is therefore counted at no less
+  // than SGH_DRAWN_ROW_H here; the HTML preview, whose rows stay short, just shows a wider
+  // gap. KAMC keeps the authored-height arithmetic below verbatim — its deck must stay
+  // byte-identical to HEAD, so that same inherited overlap is the orchestrator's call.
+  const SGH_DRAWN_ROW_H = 0.4;
+  const authoredRowH = Array.isArray(labTable.rowH) ? labTable.rowH : labTable.rows.map(() => ROW_H);
+  const tableBottom = isSghReport(m)
+    ? TABLE_Y + authoredRowH.reduce((s, h) => s + Math.max(h, SGH_DRAWN_ROW_H), 0)
+    : Array.isArray(labTable.rowH)
+      ? TABLE_Y + labTable.rowH.reduce((s, h) => s + h, 0)
+      : TABLE_Y + labTable.rows.length * ROW_H;
   const NOTE_H = 0.22;
   const els = [
     ...chrome(L('titleCompliance')),
@@ -2274,15 +2434,74 @@ function sendoutRowGeom(n) {
 const fmtInt = (n) => Number(n).toLocaleString('en-US');
 const fill = (tpl, vars) => String(tpl).replace(/\{(\w+)\}/g, (mm, k) => (vars[k] != null ? vars[k] : mm));
 
-/** One KPI card: count, label, and the share caption underneath. */
+/**
+ * One KPI card: count, label, and the share caption underneath.
+ * `count` null = UNKNOWN (SGH, no Test Menu: no lab country, so no local/international
+ * split) → the reference's «–» in its n/a grey; `caption` null → no caption line (a share
+ * of an unknown is meaningless). Both are only ever null on an SGH deck.
+ */
 function sendoutCard(x, accentX, accentColor, count, label, caption) {
   const tx = x + 0.167;
-  return [
+  const els = [
     rect(x, SO.cardY, SO.cardW, SO.cardH, C.white, { radius: SO.cardR, line: { color: C.border, w: 0.75 } }),
     rect(accentX, SO.cardY, SO.accentW, SO.cardH, accentColor, { radius: 0.0115 }),
-    text(tx, 1.222, 5.611, 0.722, fmtInt(count), 34, { bold: true, color: accentColor, align: 'right', valign: 'middle' }),
+    count == null
+      ? text(tx, 1.222, 5.611, 0.722, NA_DASH, 34, { bold: true, color: SGH_COLORS.na, align: 'right', valign: 'middle' })
+      : text(tx, 1.222, 5.611, 0.722, fmtInt(count), 34, { bold: true, color: accentColor, align: 'right', valign: 'middle' }),
     text(tx, 2.0, 5.611, 0.417, label, 11.5, { bold: true, color: C.slate900, align: 'right', valign: 'middle', rtl: true }),
-    text(tx, 2.444, 5.611, 0.306, caption, 9.5, { color: C.slate500, align: 'right', valign: 'middle', rtl: true }),
+  ];
+  if (caption != null) els.push(text(tx, 2.444, 5.611, 0.306, caption, 9.5, { color: C.slate500, align: 'right', valign: 'middle', rtl: true }));
+  return els;
+}
+
+/**
+ * SGH (no Test Menu) — the ONE bar row of the countries slide, styled exactly like the
+ * reference's SGH row (slide 4 §1.3): label «مستشفى الألماني السعودي» 12pt bold red, grey
+ * track, RED bar, value = the order COUNT only (no «%  |»: there is no country to take a
+ * share of). On the current design's ladder (row0, the reference-era 0.042 bar offset).
+ * The bar spans the FULL track: its basis is SGH's own total (the reference measured it
+ * against KAMC's total, which an SGH-only deck does not have) — so the row reads "all of
+ * SGH's orders, country unknown", which is exactly what the note under it says.
+ * @param {number} total SGH's send-out total (> 0 — the slide is gated on it)
+ */
+function sghCountryRow(total) {
+  const y = SO.row0;
+  const g = sendoutRowGeom(1);
+  const barH = SO.barH * g.f, barDY = SO.barDY * g.f;
+  const w = total ? SO.barW : 0;
+  const drawnW = Math.max(w, SO.barR * 2); // the same visibility floor as every country bar
+  return [
+    text(9.722, y, 3.083, g.rowH, SGH_TEXT.arName, 12 * g.f,
+      { bold: true, color: C.red, align: 'right', valign: 'middle', rtl: true }),
+    rect(SO.barX, y + barDY, SO.barW, barH, C.bgLighter, { radius: SO.barR }),
+    rect(SO_BAR_RIGHT - drawnW, y + barDY, drawnW, barH, C.red, { radius: SO.barR }),
+    text(0.5, y, 2.139, g.rowH, fmtInt(total || 0), 14 * g.f,
+      { bold: true, color: C.red, align: 'left', valign: 'middle' }),
+  ];
+}
+
+/**
+ * SGH (no Test Menu) — the countries slide's footer, replacing the KAMC colour footnote
+ * (sendoutColourNote names the blue/amber local/international colours and the total the
+ * bars are measured against — none of which an SGH deck draws). Two reference shapes,
+ * verbatim (slide 4 §1.5–1.6):
+ *   · the SGH note (0.50, 6.40, 12.30 × 0.26) 9.5pt bold #B91C1C, right;
+ *   · the SGH legend key — a 0.12in red square (r 0.024) + «… — الدولة غير محددة» 9pt
+ *     slate500, its box ending 0.06 before the square (the reference gap). The reference has
+ *     three keys (محلي · دولي · SGH); an SGH deck draws no local/international bar, so only
+ *     its own key is shown, in the reference's FIRST key slot (square x 12.68 — flush with
+ *     the content edge, as the محلي key is in the reference).
+ * Both sit in the band the colour footnote used (6.40 → 6.94), under SO_ROWS_BOTTOM.
+ */
+function sghCountryFooter() {
+  const sq = { x: 12.68, y: 6.76, s: 0.12 };
+  const labW = 2.85;
+  return [
+    text(0.5, 6.4, 12.3, 0.26, SGH_TEXT.countryNote, 9.5,
+      { bold: true, color: SGH_COLORS.noteRed, align: 'right', valign: 'middle', rtl: true, margin: REF_TXBOX_MARGIN }),
+    rect(sq.x, sq.y, sq.s, sq.s, C.red, { radius: 0.024 }),
+    text(sq.x - 0.06 - labW, 6.7, labW, 0.24, SGH_TEXT.countryLegend, 9,
+      { color: C.slate500, align: 'right', valign: 'middle', rtl: true, margin: 0 }),
   ];
 }
 
@@ -2292,8 +2511,10 @@ function buildSendoutCountries(m) {
   const T = so.total || 0;
   const pc = (n) => (T ? (Math.round((1000 * n) / T) / 10).toFixed(1) : '0.0');
 
-  const bars = [];
-  const countries = so.byCountry || [];
+  // SGH (no Test Menu): no country is known — see sghCountryRow / sghCountryFooter.
+  const noMenu = sghNoMenu(m);
+  const bars = noMenu ? sghCountryRow(T) : [];
+  const countries = noMenu ? [] : (so.byCountry || []);
   const g = sendoutRowGeom(countries.length);
   countries.forEach((c, i) => {
     const y = SO.row0 + i * g.step;
@@ -2328,16 +2549,19 @@ function buildSendoutCountries(m) {
       text(6.054, 0.722, 6.75, 0.181, L('sendoutSubtitle'), 9,
         { color: C.slate500, align: 'right', valign: 'middle', rtl: true }),
       // Local card sits on the RIGHT — the first card read in an RTL deck.
-      ...sendoutCard(SO.localX, 12.733, C.navy, so.local, L('sendoutLocal'),
-        fill(L('sendoutShare'), { pct: pc(so.local) })),
-      ...sendoutCard(SO.intlX, 6.403, C.amber, so.international, L('sendoutIntl'),
-        fill(L('sendoutShare'), { pct: pc(so.international) })),
+      // SGH (no Test Menu): both cards «–» with no share caption (sendoutCard's nulls).
+      ...sendoutCard(SO.localX, 12.733, C.navy, noMenu ? null : so.local, L('sendoutLocal'),
+        noMenu ? null : fill(L('sendoutShare'), { pct: pc(so.local) })),
+      ...sendoutCard(SO.intlX, 6.403, C.amber, noMenu ? null : so.international, L('sendoutIntl'),
+        noMenu ? null : fill(L('sendoutShare'), { pct: pc(so.international) })),
       rect(0.5, 3.222, 12.297, 0.012, C.border),
       text(0.5, 3.389, 12.297, 0.278, L('sendoutByCountry'), 12,
         { bold: true, color: C.navy, align: 'right', valign: 'middle', rtl: true }),
       ...bars,
-      text(0.5, 6.75, 12.297, 0.222, fill(L('sendoutColourNote'), { total: fmtInt(T) }), 9,
-        { color: C.slate500, align: 'right', valign: 'middle', rtl: true }),
+      ...(noMenu ? sghCountryFooter() : [
+        text(0.5, 6.75, 12.297, 0.222, fill(L('sendoutColourNote'), { total: fmtInt(T) }), 9,
+          { color: C.slate500, align: 'right', valign: 'middle', rtl: true }),
+      ]),
     ],
   };
 }
@@ -2363,7 +2587,22 @@ function buildSendoutLabs(m) {
   // rev() flips it into the column order the renderer lays out left-to-right.
   const header = rev([L('sendoutColLab'), L('sendoutColCountry'), L('sendoutColRefLab'),
     L('sendoutColOrders'), L('sendoutColShare')]);
-  const body = rowsIn.map((r) => {
+  // SGH (no Test Menu): rows are {lab, orders} only — no country, no reference lab. Their
+  // country + reference-lab cells are ONE merged cell carrying the reference slide-5 note,
+  // styled as there (#FEF2F2 fill, 9.5pt bold #B91C1C, centred, two paragraphs), spanning
+  // both columns and every SGH row. Logical [lab, NOTE, orders, share] → rev() puts NOTE
+  // in the visual reference-lab slot, and its colSpan 2 covers the country slot to its
+  // right. Rows after the first OMIT the covered cells (map/schema.md §3).
+  const noMenu = sghNoMenu(m);
+  const body = noMenu ? rowsIn.map((r, i) => rev([
+    { text: r.lab, align: 'center' },
+    ...(i === 0 ? [{
+      text: SGH_TEXT.labsNote, colSpan: 2, rowSpan: rowsIn.length, align: 'center',
+      fill: C.bgRed, color: SGH_COLORS.noteRed, bold: true, size: 9.5,
+    }] : []),
+    { text: fmtInt(r.orders), align: 'center', bold: true, color: C.navy },
+    { text: `${pc(r.orders)}%`, align: 'center' },
+  ])) : rowsIn.map((r) => {
     const shade = spread.has(r.lab) ? C.bgLighter : undefined;
     return rev([
       { text: r.lab, align: 'center', fill: shade },
@@ -2403,15 +2642,20 @@ function buildSendoutLabs(m) {
       text(6.054, 0.722, 6.75, 0.181, L('sendoutLabsSubtitle'), 9,
         { color: C.slate500, align: 'right', valign: 'middle', rtl: true }),
       {
-        t: 'table', x: 0.833, y: 1.167, w: 11.667, rtl: true, rowH,
+        // SGH: a single lab row is grown to hold the two-line note (sghNoteRowH).
+        t: 'table', x: 0.833, y: 1.167, w: 11.667, rtl: true, rowH: noMenu ? sghNoteRowH(rowH, body.length, 1) : rowH,
         headerSize: 10, bodySize: 10,
         header: { fill: C.navy, color: C.white, bold: true },
         colW: rev([4.306, 1.806, 3.472, 0.972, 1.111]),
         rows: [header, ...body, totalRow],
       },
-      rect(0.833, noteY, 11.667, 0.012, C.border),
-      text(0.833, noteY + 0.167, 11.667, 0.25, note, 10,
-        { color: C.slate900, align: 'right', valign: 'middle', rtl: true }),
+      // The shaded-rows sentence (and the rule that introduces it) is about labs spread
+      // over several COUNTRIES; an SGH deck knows no country, so it has neither.
+      ...(noMenu ? [] : [
+        rect(0.833, noteY, 11.667, 0.012, C.border),
+        text(0.833, noteY + 0.167, 11.667, 0.25, note, 10,
+          { color: C.slate900, align: 'right', valign: 'middle', rtl: true }),
+      ]),
       text(0.833, 6.635, 11.667, 0.222, fill(L('sendoutBasis'), { total: fmtInt(T) }), 9,
         { color: C.slate500, align: 'right', valign: 'middle', rtl: true }),
     ],
@@ -2440,6 +2684,15 @@ function buildThanks(m) {
  */
 export function buildSpec(reportModel, { variant = 'internal' } = {}) {
   const m = reportModel;
+  // REPORT TYPE DISPATCH (CONTRACT §2.4). The BOTH report is the reference deck's own
+  // design and lives in build-spec-both.js; it shares nothing below this line (its slide
+  // list, toggles and numbering are its own). 'sgh' and every other model fall through to
+  // the builders here — the SGH adaptations are inside them, keyed off m.hospital /
+  // m.noTestMenu, so a KAMC (or hospital-less) model takes exactly today's path.
+  if (m?.hospital === 'both') {
+    const buildBothSpec = bothSpecModule.buildBothSpec || bothSpecModule.default;
+    return buildBothSpec(m, { variant });
+  }
   // SLIDE TOGGLES — the 5 middle slides are filtered by m.reportOptions.slides
   // (absent → all on). Cover + thanks ALWAYS render. Page numbers are assigned AFTER
   // filtering so they renumber sequentially (1..n) over the INCLUDED content slides.

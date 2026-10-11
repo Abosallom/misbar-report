@@ -1,5 +1,8 @@
 // engine/tat.js — standard-TAT resolution + the Slide-5 by-test chart catalog.
-import { normTest } from '../contracts.js?v=v2026-10-07.1';
+import { normTest } from '../contracts.js?v=v2026-10-11.1';
+// hasTestMenu: the per-hospital Test Menu switch (model/hospital.js HOSPITALS). Pure, no
+// imports of its own, so the engine stays DOM- and I/O-free.
+import { hasTestMenu } from '../model/hospital.js?v=v2026-10-11.1';
 
 /**
  * Build a fast normalized index from a { testName: businessDays } lookup object.
@@ -22,12 +25,22 @@ export function buildTatIndex(tatLookup) {
  * Resolve the standard TAT (business days) for a row.
  * Mirrors Excel XLOOKUP(Test → lookup); on miss, optionally falls back to the
  * CSV "TAT - Days" column. Reports whether the test was matched in the lookup.
+ *
+ * FAIL-SAFE (2026-10-11): a row whose hospital has NO Test Menu (SGH today, and any
+ * third hospital — model/hospital.js hasTestMenu) resolves NO TAT, whatever the lookup
+ * or its own 'TAT - Days' cell says. The lookup is keyed by test NAME alone and holds
+ * KAMC's contract TATs; a hospital without a menu sharing a test name (the two share a
+ * performing lab) or a stray CSV value would otherwise give its orders a due date,
+ * lateness and a turnaround they do not have. Callers keep these rows (engine.js /
+ * asof.js exempt them from excludeNoTat). Legacy rows with no hospital fields are KAMC,
+ * so every existing result is unchanged.
  * @param {import('../contracts.js').OrderRow} row
  * @param {Map<string, number>} tatIndex
  * @param {{tatFallbackFromCsv?: boolean}} [opts]
  * @returns {{tat: number|null, matched: boolean, fromCsv: boolean}}
  */
 export function resolveTat(row, tatIndex, opts = {}) {
+  if (!hasTestMenu(row)) return { tat: null, matched: false, fromCsv: false };
   const key = normTest(row.testName);
   if (tatIndex.has(key)) return { tat: tatIndex.get(key), matched: true, fromCsv: false };
   const fallback = opts.tatFallbackFromCsv !== false; // default ON

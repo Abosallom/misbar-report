@@ -5,7 +5,11 @@
 // build-spec reads from the very same predicate. A local re-derivation here is exactly
 // how a filename would one day say «مخصص» while the cover says nothing (or the reverse).
 // scope.js is pure (no DOM, no vendor, no ar.js back-edge), so this adds no cycle.
-import { isScoped, normalizeScope } from '../model/scope.js?v=v2026-10-07.1';
+import { isScoped, normalizeScope } from '../model/scope.js?v=v2026-10-11.1';
+// The hospital registry's short codes (KAMC / SGH) are what the file-name tag, the report
+// type pills and the share text print — read from the ONE registry, never re-typed here.
+// hospital.js is pure (no imports at all), so this adds no cycle either.
+import { HOSPITALS } from '../model/hospital.js?v=v2026-10-11.1';
 
 /** Join ids for a sentence: Arabic comma, tolerant of a bare string or a missing list. */
 const joinIds = (ids) => [].concat(ids == null ? [] : ids).map(String).join('، ');
@@ -120,28 +124,73 @@ export const STR = {
       failed: 'تعذّر إنشاء الملف المُصفّى.',
       stale: 'تغيّرت بيانات الطلبات فأُعيد ضبط الاختيار — راجعه ثم نزّل الملف.',
     },
-    // A SECOND HOSPITAL in the feed (2026-10-07). Until the user decides how to treat
-    // it, only the current hospital's orders count: every other hospital's rows are
-    // dropped on the way in (model/hospital.js splitByHospital → state.parsed
-    // .excludedHospitals) and this line says so, once per excluded hospital, beside the
-    // data summary. APP SCREENS ONLY — no slide may ever carry a hospital name (the repo
-    // is public), and these strings deliberately never name the CURRENT hospital either:
-    // «المستشفى الحالي» is enough for the operator. `name` arrives as the feed spells
-    // it (the source has doubled spaces) and is printed whitespace-collapsed; a caller
-    // with no name passes the facility id instead. The pipeline's pull-step message
-    // uses the short form.
-    hospitalExcluded: (n, name) => `استُبعد ${n} طلبًا من «${oneLine(name)}» من جميع الأرقام حتى إشعار آخر — تُحتسب طلبات المستشفى الحالي فقط.`,
+    // HOSPITALS IN THE FEED (2026-10-07, revised 2026-10-11 with the three report types).
+    // KAMC and SGH are both REPORTED hospitals (model/hospital.js takeOrders); ANY OTHER
+    // hospital is never counted anywhere, only mentioned — once per such hospital, from
+    // state.parsed.excludedHospitals (third hospitals only), beside the data summary.
+    // `name` arrives as the feed spells it (the source has doubled spaces) and is printed
+    // whitespace-collapsed; a caller with no name passes the facility id instead. The
+    // pipeline's pull-step message uses the short form.
+    // The KAMC report itself still carries no hospital name on its slides; the SGH and
+    // KAMC + SGH decks print the names the user's reference deck prints (hospital.js).
+    hospitalExcluded: (n, name) => `استُبعد ${n} طلبًا من «${oneLine(name)}» — هذا المستشفى غير مشمول في أي تقرير.`,
     hospitalExcludedShort: (n, name) => `استُبعد ${n} طلبًا من «${oneLine(name)}»`,
+    // SGH's order lines in the loaded data (parsed.ordersByHospital.sgh): they are KEPT —
+    // the summary card above counts KAMC (the report every surface on this screen
+    // serves), so this line says where the SGH lines went: to the review screen's report
+    // type choice. Informational, never a warning.
+    sghRows: (n) => `يحتوي الملف أيضًا على ${n} طلبًا من ${HOSPITALS.sgh.code} (${HOSPITALS.sgh.arName}). يُختار نوع التقرير — ${HOSPITALS.kamc.code} أو ${HOSPITALS.sgh.code} أو ${HOSPITALS.kamc.code} + ${HOSPITALS.sgh.code} — في شاشة المراجعة.`,
+    // The unattended run's pull-step line: the automatic report is the KAMC report only,
+    // so the SGH lines it pulled are named as NOT in it (automation/pipeline.js stepPull).
+    sghNotAutomated: (n) => `${n} طلبًا من ${HOSPITALS.sgh.code} لا تدخل التقرير الآلي (${HOSPITALS.kamc.code} فقط)`,
   },
   review: {
     title: 'مراجعة وتحرير التقرير',
     subtitle: 'راجع الأرقام وحرّر النصوص، ثم انتقل للتوليد.',
     reportDate: 'تاريخ التقرير',
     variantsNote: 'سيتم توليد النسختين (الداخلية ونوبكو) معًا.',
-    // The muted line under the title: the same fact as STR.upload.hospitalExcluded,
-    // repeated here because this is the last screen before the deck is generated. App
-    // screen only — never on a slide; never names the current hospital.
-    hospitalExcluded: (n, name) => `لا تشمل أرقام هذا التقرير ${n} طلبًا من «${oneLine(name)}» — تُحتسب طلبات المستشفى الحالي فقط.`,
+    // The muted line under the title: the same fact as STR.upload.hospitalExcluded (a
+    // THIRD hospital — neither KAMC nor SGH), repeated here because this is the last
+    // screen before the deck is generated. App screen only — never on a slide.
+    hospitalExcluded: (n, name) => `لا يشمل أي تقرير ${n} طلبًا من «${oneLine(name)}» — مستشفى غير مشمول.`,
+    // REPORT TYPE (2026-10-11) — the hospital selector inside the «نطاق التقرير» card.
+    // KAMC is the historic report (default, the only one that is recorded); SGH and
+    // KAMC + SGH are SIDE reports: like a scoped deck they never write the published
+    // history, the snapshot or the task log (automation/pipeline.js recordRunSnapshot).
+    // `modes` are the pill labels, built from the registry codes.
+    hospital: {
+      title: 'نوع التقرير',
+      modes: {
+        kamc: HOSPITALS.kamc.code,
+        sgh: HOSPITALS.sgh.code,
+        both: `${HOSPITALS.kamc.code} + ${HOSPITALS.sgh.code}`,
+      },
+      // One Latin code only: a sentence mixing several Latin codes with Arabic «و»
+      // reorders under the bidi algorithm and reads scrambled in the RTL card.
+      hint: `تقرير ${HOSPITALS.kamc.code} هو التقرير المعتاد، والنوعان الآخران تقريران جانبيان لا يُسجَّلان في سجل التقارير.`,
+      // BOTH mode: the scope filters do not apply (decision 7) — one short line instead.
+      bothNoScope: `لا تنطبق المختبرات والشحنات والفترة على تقرير ${HOSPITALS.kamc.code} + ${HOSPITALS.sgh.code}: يشمل جميع طلبات المستشفيين.`,
+      // The chosen report's hospital has no rows in the loaded data: nothing to report,
+      // and the generate button is disabled — never the KAMC report under another name.
+      empty: (label) => `لا توجد طلبات ${label} في البيانات المحمّلة، لذلك لا يمكن توليد هذا التقرير. اختر نوع تقرير آخر أو حمّل بيانات تحتوي على طلباته.`,
+      // KAMC + SGH with one hospital absent from the data: allowed, but said, so a zero is
+      // never mistaken for a count. Deliberately NOT "its numbers print 0": an absent KAMC
+      // still carries its policy's historical cancelled constants (cancelledByMonth), so
+      // the deck can print a non-zero KAMC cancelled figure with no KAMC rows.
+      bothMissing: (label) => `البيانات المحمّلة لا تحتوي على أي طلب لـ ${label}. تحقّق من الملف قبل التوليد إن لم يكن ذلك مقصودًا.`,
+      sideReport: `هذا تقرير جانبي: لا يُسجَّل في سجل التقارير، ولا يؤثر على مقارنات تقرير ${HOSPITALS.kamc.code} ولا على متابعة المهام.`,
+      // Shown IN PLACE of the history panel outside KAMC mode: the panel charts the
+      // published KAMC reports.
+      historyHidden: `أرقام التقارير المنشورة تخص تقرير ${HOSPITALS.kamc.code}، لذلك لا تظهر في هذا التقرير.`,
+      // KAMC + SGH: the per-run number overrides are not offered (decision 8).
+      noOverrides: `تعديل الأرقام يدويًا غير متاح في تقرير ${HOSPITALS.kamc.code} + ${HOSPITALS.sgh.code}.`,
+      overridesCleared: 'أُلغيت التعديلات اليدوية على الأرقام لأن نوع التقرير تغيّر.',
+      scopeCleared: 'أُلغي نطاق التقرير لأن نوع التقرير تغيّر.',
+      // A non-KAMC build failed: the screen shows the KAMC report and says so.
+      failed: (label) => `تعذّر حساب أرقام تقرير ${label}، فعُرض تقرير ${HOSPITALS.kamc.code} بدلاً منه.`,
+      // The generate click found a different report type than the one on screen.
+      changed: 'تغيّر نوع التقرير قبل التوليد ولم يُولَّد شيء — راجع التقرير المعروض.',
+    },
     panelsTitle: 'نقاط الشريحة الثانية',
     panelSupport: 'الدعم المطلوب',
     panelCompleted: 'المهام المنجزة',
@@ -323,6 +372,17 @@ export const STR = {
     // the operator must not read them as part of the side report. {date} = the chosen
     // report date they are evaluated at.
     lateLabsUnscoped: 'ملفات المختبرات أدناه لا يُطبَّق عليها نطاق التقرير المخصص: تشمل جميع الطلبات كما في {date}.',
+    // The generate screen's head names the report being produced (all three types).
+    reportType: (label) => `نوع التقرير: ${label}`,
+    // SGH / KAMC + SGH run, above the per-lab "Late & Due" section: those chase lists
+    // are built from KAMC's orders only (SGH has no Test Menu, so no lateness yet).
+    lateLabsKamcOnly: `ملفات المختبرات أدناه تخص طلبات ${HOSPITALS.kamc.code} فقط: لا توجد مدد إنجاز (TAT) لطلبات ${HOSPITALS.sgh.code} بعد.`,
+  },
+  settings: {
+    // «اختبار الاتصال» success line: the row count per reported hospital (the test pulls
+    // every hospital's rows; a third hospital is counted, never reported).
+    connectionByHospital: (kamc, sgh, other) => `${HOSPITALS.kamc.code} ${kamc} · ${HOSPITALS.sgh.code} ${sgh}`
+      + (other ? ` · مستشفيات أخرى ${other}` : ''),
   },
   router: {
     missingScreen: 'هذه الشاشة قيد الإنشاء.',
@@ -415,17 +475,42 @@ export function formatRangeAr(fromIso, toIso) {
  * @param {string} variantPrefix e.g. 'تقرير مسبار' | 'تقرير مسبار الداخلي'
  * @param {string} dateStr 'YYYY-MM-DD'
  * @param {string} ext 'pptx' | 'pdf'
+ * `hospital` (optional, the report type — see hospitalFileTag below): absent/'kamc' →
+ * no tag (the historic names); 'sgh' / 'both' → ' - SGH -' / ' - KAMC SGH -' after the
+ * prefix. The scope rules above apply on top, unchanged.
  * @param {Object} [scope] model/scope.js scope (normalizeScope output)
+ * @param {('kamc'|'sgh'|'both')} [hospital] the report type (model.hospital)
  * @returns {string} e.g. 'تقرير مسبار 19072026.pptx',
- *   'تقرير مسبار 11092026-23092026 (مخصص).pptx'
+ *   'تقرير مسبار 11092026-23092026 (مخصص).pptx', 'تقرير مسبار - KAMC SGH - 08102026.pptx'
  */
-export function buildFileName(variantPrefix, dateStr, ext, scope) {
-  if (!isScoped(scope)) return `${variantPrefix} ${compactDate(dateStr)}.${ext}`;
+export function buildFileName(variantPrefix, dateStr, ext, scope, hospital) {
+  const head = `${variantPrefix}${hospitalFileTag(hospital)}`;
+  if (!isScoped(scope)) return `${head} ${compactDate(dateStr)}.${ext}`;
   // Read the range off the NORMALISED scope — the same view isScoped just judged — so a
   // half-valid pair can never put one date in the name of a report it did not scope.
   const n = normalizeScope(scope);
   const datePart = (n.from && n.to)
     ? `${compactDate(n.from)}-${compactDate(n.to)}`
     : compactDate(dateStr);
-  return `${variantPrefix} ${datePart} (مخصص).${ext}`;
+  return `${head} ${datePart} (مخصص).${ext}`;
+}
+
+/**
+ * The report-type tag of a file name (2026-10-11, CONTRACT decision 9). The KAMC report
+ * — 'kamc' or absent (every caller that predates the report types, the automation
+ * included) — has NO tag: its names stay byte-identical. SGH and KAMC + SGH insert their
+ * hospital codes between the prefix and the date the way the user's own reference deck
+ * is named (`Misbar_Weekly_Report_-_KAMC_SGH_-_2026-10-08`): ' - SGH -' / ' - KAMC SGH -'.
+ * Without it an SGH deck and the KAMC deck of the same day would share a name and one
+ * would overwrite (or be mistaken for) the other in Downloads.
+ * An UNKNOWN value THROWS: a typo must never produce the KAMC report's file name for
+ * another report.
+ * @param {('kamc'|'sgh'|'both'|undefined|null)} hospital
+ * @returns {string} '' for KAMC, else ' - <codes> -'
+ */
+export function hospitalFileTag(hospital) {
+  if (hospital == null || hospital === 'kamc') return '';
+  if (hospital === 'sgh') return ` - ${HOSPITALS.sgh.code} -`;
+  if (hospital === 'both') return ` - ${HOSPITALS.kamc.code} ${HOSPITALS.sgh.code} -`;
+  throw new Error(`buildFileName: unknown report type ${JSON.stringify(hospital)}`);
 }

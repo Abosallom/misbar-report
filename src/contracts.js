@@ -5,9 +5,11 @@
  * Normalized order line (grain = one test on one order). Produced by ingest/csv.js
  * from the 30-col KAMC export (plus the optional ordering-hospital columns since
  * 2026-09-28) and by ingest/grafana.js, and mirrored by test/fixtures/golden-orders.js.
- * Ingest returns rows of EVERY ordering hospital; only KAMC rows count (user
- * instruction 2026-10-07) — model/hospital.js splitByHospital makes that cut where
- * the app consumes rows, keyed on `orderingFacilityId` / `hospital` below.
+ * Ingest returns rows of EVERY ordering hospital; model/hospital.js takeOrders sorts them
+ * where the app takes rows in, keyed on `hospital` first, then `orderingFacilityId` (below;
+ * a foreign id always makes a third hospital):
+ * KAMC rows → state.parsed.orders, SGH rows → state.parsed.ordersByHospital.sgh, any
+ * third hospital → never counted (only listed in state.parsed.excludedHospitals).
  * All dates are 'YYYY-MM-DD' or 'YYYY-MM-DD HH:MM:SS' strings or null.
  * @typedef {Object} OrderRow
  * @property {string}      orderDate   - Order date (date-only)
@@ -26,15 +28,21 @@
  * @property {string|null} [shipmentId]           - Shipment identifier ('Shipment ID'). Operational id, not PHI.
  * @property {string|null} [orderingFacilityId]   - Ordering facility id ('Ordering facility ID'; when that column
  *   is absent or blank, the hospital id column 'facility_id' / 'Facility ID', which carries the same id).
- *   Operational id, not PHI. It is the ORDERING HOSPITAL's id — model/hospital.js isKamcRow decides
- *   KAMC vs not on it (KAMC_FACILITY_ID '31763'; SGH is '1037').
+ *   Operational id, not PHI. It is the ORDERING HOSPITAL's id — model/hospital.js hospitalOf falls
+ *   back to it when `hospital` names neither reported hospital (KAMC '31763', SGH '1037'). Any OTHER
+ *   non-blank id = a third hospital WHATEVER `hospital` says (a different «King Abdullah …» or
+ *   «Saudi German …» hospital is told apart by its own id).
  * @property {string|null} [performingFacilityId] - Performing facility id ('Performing facility id'); absent from the CSV export → null.
  * @property {string|null} [hospital] - Ordering HOSPITAL name ('facility_name' on Grafana, 'Facility Name'
  *   in the CSV; header matched ignoring case, spaces and underscores — ingest/csv.js
  *   findHospitalColumns), whitespace-collapsed. NOT the lab: that is `facility` ('Performing
  *   facility name'). An organisation name, not patient data. null/absent on files and snapshots
- *   that predate the column — those rows are all KAMC. Used ONLY to tell hospitals apart
- *   (model/hospital.js) and for an app-screen notice; a hospital name never goes on a slide.
+ *   that predate the column — a row with neither this nor an id is KAMC. Decides the row's
+ *   hospital FIRST between the two reported hospitals (model/hospital.js hospitalOf:
+ *   /king\s*abdul…/ → KAMC, /saudi\s*german/ → SGH; King ABDULAZIZ Medical City → third) unless the
+ *   id is a foreign one (above), and feeds the app-screen third-hospital notice. The row's own spelling never goes on a
+ *   slide: the KAMC report prints no hospital name at all, and the SGH / KAMC+SGH decks print
+ *   the registry's names (HOSPITALS code / arName), as the user's reference deck does.
  * @property {string|null} [dob] - Patient date of birth ('DOB', 'YYYY-MM-DD HH:MM:SS').
  *   THE ONE PATIENT FIELD THIS SHAPE CARRIES, and only on ONE path: ingest/csv.js
  *   (the manual «ملف الطلبات (CSV)» upload) sets it so the per-lab late-tests Excel
@@ -115,6 +123,17 @@
  * ReportModel = EngineOutput + editable content; the single input to build-spec.
  * @typedef {Object} ReportModel
  * @property {string} reportDate - 'YYYY-MM-DD'
+ * @property {('kamc'|'sgh'|'both')} [hospital] - which report type this model is
+ *   (model/hospital.js HOSPITAL_MODES). ABSENT ⇒ 'kamc': the historic single-hospital
+ *   report, built from state.parsed.orders — every model built before the hospital
+ *   registry, and every model the unattended automation builds. 'sgh' = the same shape
+ *   built from SGH's rows only (no Test Menu: no TAT/late/turnaround/country, flagged
+ *   by `noTestMenu: true`). 'both' = a DIFFERENT shape { hospital, reportDate,
+ *   reportOptions, kamc, sgh, combined } (model/hospital-report.js buildBothModel)
+ *   that build-spec dispatches to the KAMC+SGH design. Only an unscoped 'kamc' model
+ *   ever writes the published history (snapshot / snapshotHistory / taskLog).
+ * @property {boolean} [noTestMenu] - set on an SGH model: its hospital has no Test Menu,
+ *   so late / turnaround / country are UNKNOWN (printed «–»), not zero.
  * @property {EngineOutput} kpi
  * @property {{supportRequired:string[], completedTasks:string[], plannedTasks:string[]}} panels - slide-2 bullets (auto-drafted, user-edited)
  * @property {TrackerTask[]} tasksCurrent  - slide 7 rows (status != مغلق, external)

@@ -4,10 +4,11 @@
 // fetch is injectable (fetchImpl) and there are NO vendor/ or DOM imports.
 // PII (patient/staff fields) is read but NEVER copied into OrderRow or persisted.
 // Rows of EVERY ordering hospital are returned (and so encrypted into the snapshot by
-// scripts/fetch-kamc.mjs): the KAMC-only cut is model/hospital.js splitByHospital,
-// applied where the app consumes rows, so the ignored hospital's history is kept.
-import { normFacility } from '../contracts.js?v=v2026-10-07.1';
-import { MAPPED_COLUMNS, findHospitalColumns } from './csv.js?v=v2026-10-07.1';
+// scripts/fetch-kamc.mjs): which hospital a row belongs to (KAMC, SGH, or a third one
+// that is never counted) is decided by model/hospital.js takeOrders where the app takes
+// rows in, so every hospital's history is kept.
+import { normFacility } from '../contracts.js?v=v2026-10-11.1';
+import { MAPPED_COLUMNS, findHospitalColumns } from './csv.js?v=v2026-10-11.1';
 
 // ---- cell coercers (mirror csv.js semantics; Grafana cells may be null/number/string) ----
 const clean = (v) => {

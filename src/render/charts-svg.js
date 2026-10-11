@@ -4,6 +4,8 @@
 //   line         — two series (circle/diamond markers, dashed option), value-axis title 'الأيام',
 //                  gaps for null values (chart2)
 //   barH         — horizontal bars, category labels on the RTL (right) side, value labels (chart3)
+// plus the BOTH-hospitals kinds (doughnut, barStacked100, colStackedTotal) — see the
+// section header further down; their PPTX twins are native charts written by pptx-renderer.
 // All output is self-contained SVG markup with real Cairo text. Colors/sizes mirror the
 // original ppt/charts/chart{1,2,3}.xml. Coordinates are px (inches * 96).
 //
@@ -29,7 +31,7 @@
 // explicitly with `opts.catDir = 'ltr'` on that chart element. There is
 // exactly one knob (CAT_DIR / opts.catDir) so the two layers cannot fight
 // silently.
-import { COLORS as C } from '../theme.js?v=v2026-10-07.1';
+import { COLORS as C } from '../theme.js?v=v2026-10-11.1';
 
 const PXIN = 96;
 /** Default category progression for this (Arabic) deck: index 0 on the right. */
@@ -269,6 +271,313 @@ function barH(el) {
   return svg(W, H, s);
 }
 
+// ===========================================================================
+// BOTH-hospitals chart kinds (SlideSpec chart kinds doughnut / barStacked100 / colStackedTotal)
+// ---------------------------------------------------------------------------
+// These three kinds mirror the reference deck's NATIVE PowerPoint charts, which
+// pptx-renderer writes as real chart XML. The SVG here must therefore follow
+// PowerPoint's own geometry, not the looser house style of the legacy kinds above:
+//   · font sizes are POINTS converted to px (the legacy kinds pass pt values as px);
+//   · `opts.layout` is PowerPoint's manualLayout INNER plot box (fractions of the frame);
+//   · bar thickness = band / (1 + gap/100) — PowerPoint's gapWidth definition;
+//   · outlines ("seams") are stroked CENTRED on the shape edge, like DrawingML <a:ln>.
+// Bold labels need no extra font: pdf-export's embedded Cairo is the variable font
+// ('100 900'), which already serves weight 700.
+const PT2PX = 96 / 72;
+
+/**
+ * Excel number-format subset used by the deck's chart labels, shared with
+ * pptx-renderer (which needs the same text for its pre-formatted rich labels):
+ * 'General', '0', '0.0', '#,##0', '#,##0.0', '0%', literal prefix/suffix, and
+ * ';'-separated sections (positive;negative;zero). An EMPTY section prints nothing,
+ * so '#,##0;;;' hides zeros and negatives exactly as PowerPoint does.
+ * Non-finite / null values format to '' (a blank cell never gets a label).
+ */
+export function fmtCode(v, code = 'General') {
+  if (v == null || v === '' || !Number.isFinite(Number(v))) return '';
+  const n = Number(v);
+  const secs = String(code == null ? 'General' : code).split(';');
+  let sec = secs[0];
+  let val = n;
+  let neg = false;
+  if (secs.length > 1) {
+    // Excel: 2 sections = [pos&zero; neg]; 3+ sections = [pos; neg; zero]. A negative
+    // in its own section prints WITHOUT the minus (the section supplies any sign).
+    if (n < 0) { sec = secs[1]; val = -n; } else if (n === 0 && secs.length > 2) sec = secs[2];
+  } else if (n < 0) { neg = true; val = -n; }
+  if (sec === '') return '';
+  const out = fmtSection(val, sec);
+  return neg ? '-' + out : out;
+}
+
+function fmtSection(val, sec) {
+  if (/^general$/i.test(sec.trim())) {
+    return Number.isInteger(val) ? String(val) : String(Number(val.toPrecision(10)));
+  }
+  const m = /[#0,.]*[#0][#0,.]*/.exec(sec);
+  const lit = (s) => s.replace(/\\(.)/g, '$1').replace(/"([^"]*)"/g, '$1');
+  if (!m) return lit(sec);
+  const core = m[0];
+  const pre = lit(sec.slice(0, m.index));
+  let post = sec.slice(m.index + core.length);
+  const pct = post.includes('%');
+  const dot = core.indexOf('.');
+  const decimals = dot < 0 ? 0 : core.slice(dot + 1).replace(/[^0#]/g, '').length;
+  const grouping = core.slice(0, dot < 0 ? core.length : dot).includes(',');
+  const x = pct ? val * 100 : val;
+  // toLocaleString rounds half away from zero, the way Excel/PowerPoint do.
+  const num = x.toLocaleString('en-US', { useGrouping: grouping, minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+  post = lit(post);
+  return pre + num + post;
+}
+
+/**
+ * PowerPoint-like automatic value-axis scale for a non-negative series: 5 % head-room
+ * above the data maximum, rounded up to a 1/2/5 x 10^n major unit (515 -> 0..600 step
+ * 100, the reference monthly chart). `min`/`max` overrides win.
+ */
+export function autoScale(dataMax, { min, max, major } = {}) {
+  const lo = Number.isFinite(min) ? min : 0;
+  let hi0 = Number.isFinite(max) ? max : Math.max(lo + 1, (dataMax > lo ? dataMax : lo + 1) * 1.05);
+  const range = hi0 - lo;
+  let unit = major;
+  if (!(unit > 0)) {
+    const pow = Math.pow(10, Math.floor(Math.log10(range)));
+    const r = range / pow;
+    unit = r > 5 ? pow : r > 2 ? pow / 2 : pow / 5;
+  }
+  const hi = Number.isFinite(max) ? max : Math.ceil(hi0 / unit - 1e-9) * unit;
+  return { min: lo, max: hi, major: unit };
+}
+
+const seamAttr = (line) => (line && line.color
+  ? ` stroke="${line.color}" stroke-width="${+(((line.pt != null ? line.pt : 0.75)) * PT2PX).toFixed(3)}"`
+  : '');
+/** Default INNER plot boxes (fractions of the frame) — shared with pptx-renderer so a
+ *  spec without opts.layout draws the same plot in both renderers. */
+export const DEFAULT_LAYOUT = {
+  doughnut: { x: 0, y: 0, w: 1, h: 1 },
+  barStacked100: { x: 0, y: 0, w: 1, h: 1 },              // axes hidden (reference funnel)
+  barStacked100Axes: { x: 0.02, y: 0.02, w: 0.72, h: 0.96 }, // category labels visible
+  colStackedTotal: { x: 0.02, y: 0.07, w: 0.86, h: 0.83 }, // reference monthly chart
+};
+const finiteOrNull = (v) => { const x = Number(v); return v != null && v !== '' && Number.isFinite(x) ? x : null; };
+/** colStackedTotal: the total per category — `total.values[i]` when given, else the sum
+ *  of the positive series values (what PowerPoint stacks). Shared with pptx-renderer,
+ *  which writes the same numbers into the invisible total series. */
+export function stackTotals(el) {
+  const tot = el.total || null;
+  return (el.categories || []).map((_, i) => {
+    const given = tot && tot.values ? finiteOrNull(tot.values[i]) : null;
+    if (given != null) return given;
+    return (el.series || []).reduce((p, se) => p + Math.max(0, finiteOrNull(se.values?.[i]) || 0), 0);
+  });
+}
+const layoutBox = (el, W, H, def) => {
+  const L = el.opts?.layout || def;
+  return { x: L.x * W, y: L.y * H, w: L.w * W, h: L.h * H };
+};
+function svgBold(W, H, body) {
+  return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg" font-family="Cairo, sans-serif" style="display:block">${body}</svg>`;
+}
+// label text: size in POINTS; baseline y; centred unless opts.anchor
+function ptTxt(x, y, s, sizePt, o = {}) {
+  return txt(+x.toFixed(2), +y.toFixed(2), s, +(sizePt * PT2PX).toFixed(3), o);
+}
+
+// ---------------------------------------------------------------------------
+// doughnut — ring of point slices, clockwise from 12 o'clock + firstSliceAng.
+function doughnut(el) {
+  const W = el.w * PXIN, H = el.h * PXIN;
+  const box = layoutBox(el, W, H, DEFAULT_LAYOUT.doughnut);
+  const R = Math.min(box.w, box.h) / 2;
+  const cx = box.x + box.w / 2, cy = box.y + box.h / 2;
+  const hole = Math.max(0, Math.min(90, el.opts?.hole != null ? el.opts.hole : 50)) / 100;
+  const r = R * hole;
+  const ser = (el.series && el.series[0]) || { values: [] };
+  // PowerPoint plots |v| for pie-family charts; blanks are 0.
+  const vals = (ser.values || []).map((v) => (Number.isFinite(Number(v)) && v != null ? Math.abs(Number(v)) : 0));
+  const sum = vals.reduce((a, b) => a + b, 0);
+  const pt = (rad, deg) => {
+    const a = (deg * Math.PI) / 180;
+    return [cx + rad * Math.sin(a), cy - rad * Math.cos(a)];
+  };
+  const f = (n) => +n.toFixed(3);
+  const ring = (fill, stroke) => `<path d="M ${f(cx)} ${f(cy - R)} A ${f(R)} ${f(R)} 0 1 1 ${f(cx)} ${f(cy + R)} A ${f(R)} ${f(R)} 0 1 1 ${f(cx)} ${f(cy - R)} Z M ${f(cx)} ${f(cy - r)} A ${f(r)} ${f(r)} 0 1 0 ${f(cx)} ${f(cy + r)} A ${f(r)} ${f(r)} 0 1 0 ${f(cx)} ${f(cy - r)} Z" fill="${fill}" fill-rule="evenodd"${stroke}/>`;
+  let s = '';
+  if (!(sum > 0)) {
+    // All-zero card: PowerPoint draws nothing; the spec may ask for a neutral full ring.
+    if (el.opts?.emptyColor) s += ring(el.opts.emptyColor, '');
+    return svgBold(W, H, s);
+  }
+  let a = Number(el.opts?.firstSliceAng) || 0;
+  vals.forEach((v, i) => {
+    if (!(v > 0)) return;
+    const sweep = (360 * v) / sum;
+    const fill = (ser.colors && ser.colors[i]) || ser.color || C.navy;
+    const stroke = seamAttr(ser.line);
+    if (sweep >= 359.999) { s += ring(fill, stroke); a += sweep; return; }
+    const [x1, y1] = pt(R, a), [x2, y2] = pt(R, a + sweep);
+    const [x3, y3] = pt(r, a + sweep), [x4, y4] = pt(r, a);
+    const large = sweep > 180 ? 1 : 0;
+    s += `<path d="M ${f(x1)} ${f(y1)} A ${f(R)} ${f(R)} 0 ${large} 1 ${f(x2)} ${f(y2)} L ${f(x3)} ${f(y3)} A ${f(r)} ${f(r)} 0 ${large} 0 ${f(x4)} ${f(y4)} Z" fill="${fill}"${stroke}/>`;
+    a += sweep;
+  });
+  return svgBold(W, H, s);
+}
+
+// ---------------------------------------------------------------------------
+// barStacked100 — horizontal 100 %-stacked bars (the reference funnel). Each category
+// is normalised to its own sum of all series; with catAxis.reverse (default) index 0
+// is the TOP band, with valAxis.reverse (default) segments start at the RIGHT edge and
+// grow leftward in series order (RTL), exactly PowerPoint's maxMin/maxMin pair.
+function barStacked100(el) {
+  const W = el.w * PXIN, H = el.h * PXIN;
+  const o = el.opts || {};
+  const catAx = o.catAxis || {}, valAx = o.valAxis || {};
+  const catRev = catAx.reverse !== false;
+  const valRev = valAx.reverse !== false;
+  const catHidden = catAx.hidden !== false;
+  const box = layoutBox(el, W, H, catHidden ? DEFAULT_LAYOUT.barStacked100 : DEFAULT_LAYOUT.barStacked100Axes);
+  const cats = el.categories || [];
+  const n = Math.max(1, cats.length);
+  const band = box.h / n;
+  const gap = o.gap != null ? o.gap : 100;
+  const thick = band / (1 + gap / 100);
+  const series = el.series || [];
+  let s = '';
+  let labels = '';
+  cats.forEach((cat, i) => {
+    const top = box.y + (catRev ? i : n - 1 - i) * band;
+    const y = top + (band - thick) / 2;
+    const vals = series.map((se) => { const v = Number(se.values?.[i]); return Number.isFinite(v) && v > 0 ? v : 0; });
+    const total = vals.reduce((p, q) => p + q, 0);
+    let acc = 0;
+    series.forEach((se, si) => {
+      const v = vals[si];
+      if (!(total > 0) || !(v > 0)) return;
+      const w = (v / total) * box.w;
+      const x = valRev ? box.x + box.w - acc - w : box.x + acc;
+      s += `<rect x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${w.toFixed(2)}" height="${thick.toFixed(2)}" fill="${se.color}"${seamAttr(se.line)}/>`;
+      const lb = se.labels;
+      if (lb && lb.show !== false && !(lb.hide || []).includes(i)) {
+        const t = fmtCode(se.values?.[i], lb.format || 'General');
+        const size = lb.size || 8;
+        if (t) labels += ptTxt(x + w / 2, y + thick / 2 + size * PT2PX * 0.35, t, size, { fill: lb.color || C.slate900, bold: !!lb.bold });
+      }
+      acc += w;
+    });
+    if (!catHidden) {
+      const lab = catAx.label || {};
+      const size = lab.size || 8;
+      const lx = valRev ? box.x + box.w + 4 : box.x - 4;
+      labels += ptTxt(lx, top + band / 2 + size * PT2PX * 0.35, cat, size, { anchor: valRev ? 'start' : 'end', fill: lab.color || LABEL, bold: !!lab.bold });
+    }
+  });
+  if (o.legend === 'bottom') labels += legend(series, W, H - 8);
+  return svgBold(W, H, s + labels);
+}
+
+// ---------------------------------------------------------------------------
+// colStackedTotal — stacked columns + an invisible "total" series whose labels sit
+// above each stack (the reference monthly chart). Category index 0 is the RIGHTMOST
+// column (catAxis.reverse, default — the deck-wide RTL rule; legacy opts.catDir:'ltr'
+// also turns it off) and the value axis then sits on the RIGHT, as in PowerPoint.
+function colStackedTotal(el) {
+  const W = el.w * PXIN, H = el.h * PXIN;
+  const o = el.opts || {};
+  const catAx = o.catAxis || {}, valAx = o.valAxis || {};
+  const catRev = catAx.reverse != null ? !!catAx.reverse : o.catDir !== 'ltr';
+  const box = layoutBox(el, W, H, DEFAULT_LAYOUT.colStackedTotal);
+  const cats = el.categories || [];
+  const n = Math.max(1, cats.length);
+  const series = el.series || [];
+  const tot = el.total || null;
+  const totals = stackTotals(el);
+  const dataMax = Math.max(0, ...totals);
+  const sc = autoScale(dataMax, { min: valAx.min, max: valAx.max, major: valAx.major });
+  const yOf = (v) => box.y + box.h - ((v - sc.min) / (sc.max - sc.min)) * box.h;
+  const slot = box.w / n;
+  const gap = o.gap != null ? o.gap : 150;
+  const bw = slot / (1 + gap / 100);
+  const slotLeft = (i) => box.x + (catRev ? n - 1 - i : i) * slot;
+  let grid = '', bars = '', labels = '', axes = '';
+  // value axis: gridlines + tick labels on the side the category axis crosses
+  const gridLine = valAx.grid === undefined ? { color: GRID, pt: 0.75 } : valAx.grid;
+  const valHidden = !!valAx.hidden;
+  const valLab = valAx.label || {};
+  const valSize = valLab.size || 8;
+  for (let t = sc.min, k = 0; t <= sc.max + 1e-9 && k < 100; t += sc.major, k++) {
+    const y = yOf(t);
+    if (gridLine) grid += `<line x1="${box.x.toFixed(2)}" y1="${y.toFixed(2)}" x2="${(box.x + box.w).toFixed(2)}" y2="${y.toFixed(2)}" stroke="${gridLine.color}" stroke-width="${(gridLine.pt || 0.75) * PT2PX}"/>`;
+    if (!valHidden) {
+      const lx = catRev ? box.x + box.w + 4 : box.x - 4;
+      axes += ptTxt(lx, y + valSize * PT2PX * 0.35, fmtCode(+t.toPrecision(12), valAx.format || 'General'), valSize, { anchor: catRev ? 'start' : 'end', fill: valLab.color || LABEL, bold: !!valLab.bold });
+    }
+  }
+  if (!valHidden && valAx.line) {
+    const ax = catRev ? box.x + box.w : box.x;
+    axes += `<line x1="${ax}" y1="${box.y}" x2="${ax}" y2="${box.y + box.h}" stroke="${valAx.line.color}" stroke-width="${(valAx.line.pt || 0.75) * PT2PX}"/>`;
+  }
+  // stacks
+  cats.forEach((cat, i) => {
+    const bx = slotLeft(i) + (slot - bw) / 2;
+    let acc = 0;
+    series.forEach((se) => {
+      const v = finiteOrNull(se.values?.[i]);
+      if (!(v > 0)) return;
+      const y1 = yOf(acc + v), y0 = yOf(acc);
+      bars += `<rect x="${bx.toFixed(2)}" y="${y1.toFixed(2)}" width="${bw.toFixed(2)}" height="${(y0 - y1).toFixed(2)}" fill="${se.color}"${seamAttr(se.line)}/>`;
+      const lb = se.labels;
+      if (lb && lb.show !== false && !(lb.hide || []).includes(i)) {
+        const t = fmtCode(v, lb.format || 'General');
+        const size = lb.size || 8;
+        if (t) labels += ptTxt(bx + bw / 2, (y0 + y1) / 2 + size * PT2PX * 0.35, t, size, { fill: lb.color || C.slate900, bold: !!lb.bold });
+      }
+      acc += v;
+    });
+    // total label ABOVE the stack (PowerPoint dLblPos 't' on the invisible line point);
+    // an optional second line (e.g. the SGH count) sits under it, nearest the stack.
+    if (tot) {
+      const tl = { size: 9, bold: true, color: C.slate900, format: '#,##0', ...(tot.labels || {}) };
+      if (tl.show === false || (tl.hide || []).includes(i)) return;
+      const t1 = fmtCode(totals[i], tl.format);
+      if (!t1) return;
+      const sec = tot.second || null;
+      const t2 = sec && sec.values ? fmtCode(sec.values[i], sec.format || tl.format) : '';
+      const cxm = bx + bw / 2;
+      let base = yOf(totals[i]) - 4;
+      if (t2) {
+        const s2 = sec.size || 8;
+        labels += ptTxt(cxm, base, t2, s2, { fill: sec.color || C.slate900, bold: sec.bold !== false });
+        base -= s2 * PT2PX * 1.2;
+      }
+      labels += ptTxt(cxm, base, t1, tl.size, { fill: tl.color, bold: !!tl.bold });
+    }
+  });
+  // category axis: line at the value origin, tick marks between categories, labels
+  if (!catAx.hidden) {
+    const yb = yOf(Math.max(sc.min, Math.min(0, sc.max)));
+    const line = catAx.line === undefined ? { color: AXIS, pt: 0.75 } : catAx.line;
+    if (line) axes += `<line x1="${box.x.toFixed(2)}" y1="${yb.toFixed(2)}" x2="${(box.x + box.w).toFixed(2)}" y2="${yb.toFixed(2)}" stroke="${line.color}" stroke-width="${(line.pt || 0.75) * PT2PX}"/>`;
+    const tick = catAx.tick || 'out';
+    if (tick !== 'none' && line) {
+      for (let k = 0; k <= n; k++) {
+        const x = box.x + k * slot;
+        const y2 = tick === 'in' ? yb - 4 : yb + 4;
+        axes += `<line x1="${x.toFixed(2)}" y1="${yb.toFixed(2)}" x2="${x.toFixed(2)}" y2="${y2.toFixed(2)}" stroke="${line.color}" stroke-width="${(line.pt || 0.75) * PT2PX}"/>`;
+      }
+    }
+    const lab = catAx.label || {};
+    const size = lab.size || 9;
+    cats.forEach((cat, i) => {
+      axes += ptTxt(slotLeft(i) + slot / 2, box.y + box.h + 5 + size * PT2PX * 0.95, cat, size, { rtl: true, fill: lab.color || C.slate900, bold: !!lab.bold });
+    });
+  }
+  if (o.legend === 'bottom') axes += legend(series, W, H - 8);
+  return svgBold(W, H, grid + bars + axes + labels);
+}
+
 // ---------------------------------------------------------------------------
 function legend(series, W, y) {
   // RTL legend: entries run right → left, so series[0] is the RIGHTMOST entry
@@ -301,6 +610,9 @@ export function renderChartSVG(el) {
     case 'colClustered': return colClustered(el);
     case 'line': return line(el);
     case 'barH': return barH(el);
+    case 'doughnut': return doughnut(el);
+    case 'barStacked100': return barStacked100(el);
+    case 'colStackedTotal': return colStackedTotal(el);
     default: return svg(el.w * PXIN, el.h * PXIN, txt(el.w * PXIN / 2, el.h * PXIN / 2, 'chart:' + el.kind, 10));
   }
 }

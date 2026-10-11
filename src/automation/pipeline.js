@@ -25,22 +25,35 @@
 // the review screen writes, so reading it back would publish whatever (possibly scoped)
 // model the operator left there whenever the engine step skipped or failed. So the
 // unattended run is the FULL report, or no report.
-import { STR, todayISO, buildFileName } from '../i18n/ar.js?v=v2026-10-07.1';
-import { VARIANTS, normTest } from '../contracts.js?v=v2026-10-07.1';
-import { getGenLibs } from '../vendor-loader.js?v=v2026-10-07.1';
+//
+// REPORT TYPES (2026-10-11): the review screen can also produce an SGH report or a
+// KAMC + SGH ("BOTH") report (model.hospital 'sgh' | 'both'; absent ⇒ 'kamc', every
+// model that predates the report types). Both are SIDE reports exactly like a scoped one,
+// and this file honours model.hospital in the same three places — recordRunSnapshot
+// (writes nothing), applyWindowDeltas (each hospital's chips with its own policy) and
+// buildFileDefs (the hospital tag in the file names). The UNATTENDED run stays the KAMC
+// report: it reads state.parsed.orders — the KAMC rows only (model/hospital.js
+// takeOrders) — in every step, never parsed.ordersByHospital and never the operator's
+// state.reportHospital, and stepGenerate refuses any model that is not KAMC.
+import { STR, todayISO, buildFileName } from '../i18n/ar.js?v=v2026-10-11.1';
+import { VARIANTS, normTest } from '../contracts.js?v=v2026-10-11.1';
+import { getGenLibs } from '../vendor-loader.js?v=v2026-10-11.1';
 // STATIC on purpose, unlike the injected model modules below: isScoped gates the
 // published-history write, and neither guarded fallback is safe — "absent ⇒ unscoped"
 // would let a side report overwrite the history, "absent ⇒ scoped" would silently stop
 // recording full reports. scope.js is pure (no DOM, no vendor bundle), and ar.js above
 // already depends on it for the «(مخصص)» file-name suffix, so this adds no new failure mode.
-import { isScoped } from '../model/scope.js?v=v2026-10-07.1';
-// ONE HOSPITAL ONLY (2026-10-07): the feed now carries a second hospital's orders, and
-// until the user decides how to treat them only the current hospital's count. STATIC for
-// isScoped's reason: there is no safe degraded answer — "absent ⇒ keep every row" would
-// put the other hospital's orders into an UNATTENDED morning report nobody reviews. A
-// load failure abandons the run (main.js catches the import) — no report, never a wrong
-// one. hospital.js is pure (no DOM, no vendor bundle).
-import { takeKamcOrders } from '../model/hospital.js?v=v2026-10-07.1';
+import { isScoped } from '../model/scope.js?v=v2026-10-11.1';
+// THE HOSPITAL DOOR (2026-10-07, report types 2026-10-11): the feed carries KAMC's and
+// SGH's orders (and possibly a third hospital's). takeOrders puts the KAMC rows in
+// parsed.orders — the ONLY rows this unattended run ever reads — SGH's beside them in
+// parsed.ordersByHospital (read by the review screen's SGH / KAMC + SGH reports only),
+// and drops any third hospital. STATIC for isScoped's reason: there is no safe degraded
+// answer — "absent ⇒ keep every row" would put another hospital's orders into an
+// UNATTENDED morning report nobody reviews. A load failure abandons the run (main.js
+// catches the import) — no report, never a wrong one. hospital.js is pure (no DOM, no
+// vendor bundle).
+import { takeOrders } from '../model/hospital.js?v=v2026-10-11.1';
 
 /* ------------------------------------------------------------------ *
  * Shared micro-helpers (same idioms the screens use)
@@ -108,7 +121,22 @@ function fmtHHMM(iso) {
 // from all rows would print lab X's cards with the whole programme's weekly activity.
 // An EMPTY scopedRows array is honoured, never widened to all rows — a scope that
 // matched nothing keeps the engine's deltas (the stamper's no-rows path), not everyone's.
-export function applyWindowDeltas(model, state, store, stampWindowDeltas) {
+//
+// REPORT TYPES (2026-10-11). A KAMC model (model.hospital 'kamc' or absent) takes the
+// path above, unchanged. An SGH or KAMC + SGH model must NEVER be stamped with KAMC's TAT
+// table or fall back to state.parsed.orders (the KAMC rows): its chips come from
+// model/hospital-report.js — stampHospitalDeltas (SGH: its own rows, the no-Test-Menu
+// policy) or stampBothDeltas (each hospital from its own rows, then `combined`) — the
+// very functions the review screen stamps with, so the preview and the deck agree.
+// `hospitalReport` is that module, handed in by the caller (screen-generate's guarded
+// import) like the stamper itself; absent, the model keeps the chips it was built with
+// (buildBothModel stamps at build time; the review screen stamped the SGH model).
+export function applyWindowDeltas(model, state, store, stampWindowDeltas, hospitalReport) {
+  const hospital = model && model.hospital != null ? model.hospital : 'kamc';
+  if (hospital !== 'kamc') {
+    applyHospitalDeltas(model, store, hospital, hospitalReport);
+    return;
+  }
   if (typeof stampWindowDeltas !== 'function' || !model || !model.kpi) return;
   const settings = (store && store.settings) || {};
   try {
@@ -121,6 +149,27 @@ export function applyWindowDeltas(model, state, store, stampWindowDeltas) {
     });
   } catch (e) {
     console.warn('[generate] stampWindowDeltas failed; keeping engine deltas', e);
+  }
+}
+
+/** applyWindowDeltas' SGH / KAMC + SGH half (see there). Same mode source as the KAMC
+ *  half (the raw stored value — the stampers normalise it); same "degrade, never throw". */
+function applyHospitalDeltas(model, store, hospital, hr) {
+  if (!hr) return;
+  const settings = (store && store.settings) || {};
+  const mode = settings.reportOptions && settings.reportOptions.deltaMode;
+  try {
+    if (hospital === 'both') {
+      if (typeof hr.stampBothDeltas === 'function') hr.stampBothDeltas(model, { settings, mode });
+    } else if (typeof hr.stampHospitalDeltas === 'function') {
+      // An array (even empty) only — never undefined, which the stamper would not widen
+      // either, but the intent is pinned here: an SGH deck's chips count SGH rows or none.
+      hr.stampHospitalDeltas(model, {
+        rows: Array.isArray(model.scopedRows) ? model.scopedRows : [], settings, mode,
+      });
+    }
+  } catch (e) {
+    console.warn('[generate] hospital delta stamp failed; keeping the built chips', e);
   }
 }
 
@@ -156,6 +205,14 @@ export function shouldAutoDownloadFiles({ settings, mobile } = {}) {
   // must keep auto-downloading); anything else is read for truthiness, so the store's
   // coerce-tolerant import path and a hand-edited backup both land on a real boolean.
   return ro.autoDownloadFiles == null ? true : !!ro.autoDownloadFiles;
+}
+
+/** Is this model the KAMC report — the one report that is recorded and the only one the
+ *  unattended run may publish? model.hospital 'kamc', or absent (every model built before
+ *  the report types existed). Anything else — 'sgh', 'both', a typo — is not. A null
+ *  model has no hospital to disagree with (recordRunSnapshot's own guards handle it). */
+export function isKamcReport(model) {
+  return !model || model.hospital == null || model.hospital === 'kamc';
 }
 
 /** Variant → the model task list THAT variant's deck publishes (build-spec.js:1213). */
@@ -207,9 +264,17 @@ export function recordRunSnapshot({
   //     below prevents for a failed variant).
   // FAIL CLOSED: a scope that cannot even be read is not provably the full report, and a
   // missed write heals on the next full run while a polluted history does not.
+  //
+  // THE SAME FOR EVERY REPORT TYPE BUT KAMC (2026-10-11): an SGH or KAMC + SGH deck is a
+  // side report too. snapshot / snapshotHistory are KAMC's published series (the engine's
+  // delta baseline and the history panel read them as KAMC's), and the taskLog grace
+  // belongs to the KAMC report's audience. Only model.hospital 'kamc' — or ABSENT, every
+  // model that predates the report types, the automation's included — records; any other
+  // value, unknown ones included, writes nothing (fail closed, as above).
   let scoped;
   try { scoped = isScoped(model && model.scope); } catch { scoped = true; }
   if (scoped) return;
+  if (!isKamcReport(model)) return;
 
   try {
     const k = (model && model.kpi) || {};
@@ -318,7 +383,7 @@ function installFastTimers() {
 // Build the SlideSpec per VARIANT — the variant changes slide-5 content
 // (task rows), so one shared spec would leak internal tasks into NUPCO files.
 async function buildVariantSpec(model, variant) {
-  const mod = await tryImport('../slidespec/build-spec.js?v=v2026-10-07.1');
+  const mod = await tryImport('../slidespec/build-spec.js?v=v2026-10-11.1');
   const fn = pickFn(mod, ['buildSpec', 'build', 'makeSpec', 'toSpec']);
   if (!fn) return null;
   let spec = fn(model, { variant });
@@ -344,7 +409,7 @@ async function toBlob(result, kind) {
 // renderPptx(spec, {variant, PptxGenJS}) -> Promise<Blob>
 async function makePptx(spec, variant, libs) {
   if (!spec) return null;
-  const mod = await tryImport('../render/pptx-renderer.js?v=v2026-10-07.1');
+  const mod = await tryImport('../render/pptx-renderer.js?v=v2026-10-11.1');
   const fn = pickFn(mod, ['renderPptx', 'buildPptx', 'toPptx', 'makePptx', 'render']);
   if (!fn) return null;
   const r = await fn(spec, { variant, PptxGenJS: libs.PptxGenJS });
@@ -356,9 +421,9 @@ async function makePptx(spec, variant, libs) {
 // the host and before capture starts — screen-generate clones them into live thumbnails.
 async function makePdf(spec, variant, libs, host, onProgress, onSlides) {
   if (!spec) return null;
-  const rMod = await tryImport('../render/html-renderer.js?v=v2026-10-07.1');
+  const rMod = await tryImport('../render/html-renderer.js?v=v2026-10-11.1');
   const renderSlides = pickFn(rMod, ['renderSlides', 'renderSpec', 'renderHtml', 'render']);
-  const pMod = await tryImport('../render/pdf-export.js?v=v2026-10-07.1');
+  const pMod = await tryImport('../render/pdf-export.js?v=v2026-10-11.1');
   const exportPdf = pickFn(pMod, ['exportPdf', 'renderPdf', 'toPdf', 'buildPdf', 'render']);
   if (!renderSlides || !exportPdf) return null;
   host.innerHTML = '';
@@ -387,14 +452,18 @@ async function makePdf(spec, variant, libs, host, onProgress, onSlides) {
  *   historic names, byte for byte; scoped = the range and/or «(مخصص)» suffix
  *   (i18n/ar.js buildFileName). Both callers pass model.scope, so the rows painted
  *   before generation and the files produced can never disagree on a name.
+ * @param {('kamc'|'sgh'|'both')} [hospital] - the model's report type (model.hospital).
+ *   Absent/'kamc' = no tag (the historic names); 'sgh' / 'both' insert the hospital
+ *   codes (ar.js hospitalFileTag). Same set of four files in every report type.
  */
-export function buildFileDefs(dateStr, scope) {
+export function buildFileDefs(dateStr, scope, hospital) {
   const date = dateStr || todayISO();
+  const name = (prefix, ext) => buildFileName(prefix, date, ext, scope, hospital);
   return [
-    { id: 'internal-pptx', variant: 'internal', kind: 'pptx', label: STR.generate.fileInternalPptx, icon: '📊', name: buildFileName(VARIANTS.internal.filePrefix, date, 'pptx', scope) },
-    { id: 'nupco-pptx', variant: 'nupco', kind: 'pptx', label: STR.generate.fileNupcoPptx, icon: '📊', name: buildFileName(VARIANTS.nupco.filePrefix, date, 'pptx', scope) },
-    { id: 'internal-pdf', variant: 'internal', kind: 'pdf', label: STR.generate.fileInternalPdf, icon: '📄', name: buildFileName(VARIANTS.internal.filePrefix, date, 'pdf', scope) },
-    { id: 'nupco-pdf', variant: 'nupco', kind: 'pdf', label: STR.generate.fileNupcoPdf, icon: '📄', name: buildFileName(VARIANTS.nupco.filePrefix, date, 'pdf', scope) },
+    { id: 'internal-pptx', variant: 'internal', kind: 'pptx', label: STR.generate.fileInternalPptx, icon: '📊', name: name(VARIANTS.internal.filePrefix, 'pptx') },
+    { id: 'nupco-pptx', variant: 'nupco', kind: 'pptx', label: STR.generate.fileNupcoPptx, icon: '📊', name: name(VARIANTS.nupco.filePrefix, 'pptx') },
+    { id: 'internal-pdf', variant: 'internal', kind: 'pdf', label: STR.generate.fileInternalPdf, icon: '📄', name: name(VARIANTS.internal.filePrefix, 'pdf') },
+    { id: 'nupco-pdf', variant: 'nupco', kind: 'pdf', label: STR.generate.fileNupcoPdf, icon: '📄', name: name(VARIANTS.nupco.filePrefix, 'pdf') },
   ];
 }
 
@@ -431,8 +500,9 @@ export async function produceReportFiles({ model, ctx, onProgress, host, signal 
     try { onProgress(evt); } catch (e) { console.warn('[generate] onProgress failed', e); }
   };
   const date = (model && model.reportDate) || todayISO();
-  // model.scope is undefined on runAutomation's model → the historic file names.
-  const fileDefs = buildFileDefs(date, model && model.scope);
+  // model.scope and model.hospital are undefined on runAutomation's model → the
+  // historic file names.
+  const fileDefs = buildFileDefs(date, model && model.scope, model && model.hospital);
 
   let ownHost = null;
   let renderHost = host || null;
@@ -531,6 +601,7 @@ const MSG = Object.freeze({
   engineFailed: 'تعذّر حساب المؤشرات',
   noModel: 'لا يوجد نموذج تقرير',
   scopedModel: 'نموذج التقرير مخصص — التشغيل الآلي ينشئ التقرير الكامل فقط',
+  notKamcModel: 'نموذج التقرير ليس تقرير KAMC — التشغيل الآلي ينشئ تقرير KAMC فقط',
   noFiles: 'تعذّر إنشاء ملفات التقرير',
   noLabFiles: 'لا توجد ملفات مختبرات',
   noLateLabs: 'لا توجد فحوصات متأخرة أو مستحقة',
@@ -548,26 +619,26 @@ const PULL_REUSE_MS = 15000;
 
 /** Default heavy dependencies — every one overridable through `deps` (tests inject fakes). */
 const DEFAULT_DEPS = Object.freeze({
-  loadGrafana: () => import('../ingest/grafana.js?v=v2026-10-07.1'),
-  loadEngine: () => tryImport('../engine/engine.js?v=v2026-10-07.1'),
-  loadReportModel: () => import('../model/report-model.js?v=v2026-10-07.1'),
-  loadDeltaBaseline: () => tryImport('../model/delta-baseline.js?v=v2026-10-07.1'),
+  loadGrafana: () => import('../ingest/grafana.js?v=v2026-10-11.1'),
+  loadEngine: () => tryImport('../engine/engine.js?v=v2026-10-11.1'),
+  loadReportModel: () => import('../model/report-model.js?v=v2026-10-11.1'),
+  loadDeltaBaseline: () => tryImport('../model/delta-baseline.js?v=v2026-10-11.1'),
   // The delta-chip stamper. Guarded like the rest: a build without it degrades to the
   // engine's own clamped deltas instead of failing this module at load time.
-  loadDeltaWindow: () => tryImport('../model/delta-window.js?v=v2026-10-07.1'),
-  loadTaskLifecycle: () => tryImport('../model/task-lifecycle.js?v=v2026-10-07.1'),
-  loadLateLabs: () => import('../export/late-labs.js?v=v2026-10-07.1'),
-  loadTatSuggest: () => tryImport('../ingest/tat-suggest.js?v=v2026-10-07.1'),
-  loadTatLoinc: () => tryImport('../seeds/tat-lookup.js?v=v2026-10-07.1'),
+  loadDeltaWindow: () => tryImport('../model/delta-window.js?v=v2026-10-11.1'),
+  loadTaskLifecycle: () => tryImport('../model/task-lifecycle.js?v=v2026-10-11.1'),
+  loadLateLabs: () => import('../export/late-labs.js?v=v2026-10-11.1'),
+  loadTatSuggest: () => tryImport('../ingest/tat-suggest.js?v=v2026-10-11.1'),
+  loadTatLoinc: () => tryImport('../seeds/tat-lookup.js?v=v2026-10-11.1'),
   // Track 5's module; absent until it ships → the emails step reports 'skip'.
-  loadEmlDraft: () => tryImport('../export/eml-draft.js?v=v2026-10-07.1'),
+  loadEmlDraft: () => tryImport('../export/eml-draft.js?v=v2026-10-11.1'),
   // The encrypted send-out catalogue. Guarded: absent module or a failed decrypt
   // means the deck simply omits the two send-out slides.
-  loadSendoutMaster: () => tryImport('../ingest/sendout-master.js?v=v2026-10-07.1'),
+  loadSendoutMaster: () => tryImport('../ingest/sendout-master.js?v=v2026-10-11.1'),
   // The vendor contact book (To: per lab + the standard CC block). Guarded: a
   // build without it just means drafts fall back to the Settings map alone.
-  loadLabContacts: () => tryImport('../seeds/lab-contacts.js?v=v2026-10-07.1'),
-  loadDownload: () => tryImport('../ui/late-labs-section.js?v=v2026-10-07.1'),
+  loadLabContacts: () => tryImport('../seeds/lab-contacts.js?v=v2026-10-11.1'),
+  loadDownload: () => tryImport('../ui/late-labs-section.js?v=v2026-10-11.1'),
   produceReportFiles,
   now: () => Date.now(),
 });
@@ -648,6 +719,10 @@ function computeUnmatched(orders, tatLookup) {
  */
 async function acceptSuggestedTats(D, store, state) {
   const settings = store.settings || {};
+  // KAMC ROWS ONLY, and it must stay so: settings.tatLookup is ONE global table keyed by
+  // test NAME. An SGH test name here could gain a HIGH-confidence LOINC suggestion from a
+  // KAMC test and be written into it unattended — SGH would then silently have a TAT.
+  // parsed.orders is the KAMC rows (model/hospital.js takeOrders); never ordersByHospital.
   const orders = (state.parsed && state.parsed.orders) || [];
   if (!orders.length || typeof store.setTat !== 'function') return 0;
   const unmatched = computeUnmatched(orders, settings.tatLookup);
@@ -731,9 +806,10 @@ export async function runAutomation({
   // Live snapshot / Grafana pull — the SAME sequence the upload screen's
   // fetchLive() runs: direct public-dashboard query first, and on a CORS/network
   // TypeError fall back to the encrypted snapshot when a data key is configured.
-  // Both land through takeKamcOrders(), so every later step (engine, deck, lab workbooks,
-  // drafts, the TAT auto-accept) sees the current hospital's orders only — the
-  // unattended run counts exactly what the screens count.
+  // Both land through takeOrders(), so every later step (engine, deck, lab workbooks,
+  // drafts, the TAT auto-accept) reads parsed.orders — the KAMC rows only — and the
+  // unattended run is exactly the KAMC report the screens make. SGH's rows sit beside
+  // them in parsed.ordersByHospital, which no step here reads.
   async function stepPull() {
     const settings = theStore.settings || {};
     const gcfg = settings.grafana || {};
@@ -744,7 +820,7 @@ export async function runAutomation({
     // Rows that landed seconds ago (the screen's own fetch, or a previous run)
     // are reused rather than re-fetched — heroDataAt carries the DATA's age, so a
     // stale snapshot still triggers a real pull. Already split: every writer of the
-    // orders (here and the upload screen) goes through takeKamcOrders.
+    // orders (here and the upload screen) goes through takeOrders.
     const have = theState.parsed.orders;
     if (have && have.length && theState.heroDataAt) {
       const age = D.now() - Date.parse(theState.heroDataAt);
@@ -761,7 +837,7 @@ export async function runAutomation({
       // Preferred path: direct browser → Grafana query (when configured).
       if (!directConfigured) throw new TypeError('direct source not configured');
       const res = await mod.fetchKamcOrders(gcfg, { fromMs: mod.yearStartMs(asOf), toMs: D.now() });
-      const kept = takeKamcOrders(theState.parsed, res.rows);
+      const kept = takeOrders(theState.parsed, res.rows);
       theState.heroDataAt = new Date(D.now()).toISOString(); // freshness for 'لمحة اليوم'
       theState.files.csv = { name: `${STR.upload.grafanaSourceName} ${new Date(D.now()).toLocaleString('en-GB')}` };
       message = STR.upload.grafanaOk.replace('{n}', String(kept.length)); // the KEPT count
@@ -772,7 +848,7 @@ export async function runAutomation({
         const snap = await mod.fetchKamcSnapshot(dataKey);
         // The snapshot keeps EVERY hospital's rows (scripts/fetch-kamc.mjs does not
         // filter, so they are there when the user decides) — the split happens here.
-        const kept = takeKamcOrders(theState.parsed, snap.rows);
+        const kept = takeOrders(theState.parsed, snap.rows);
         theState.heroDataAt = snap.fetchedAt; // snapshot's real age, not load time
         const t = fmtHHMM(snap.fetchedAt);
         theState.files.csv = { name: `${STR.upload.grafanaSnapshotName} ${t}`.trim() };
@@ -783,10 +859,15 @@ export async function runAutomation({
     }
     // Say what was left out in the step's own line — an unattended run has no upload
     // screen notice in front of anyone. Aggregates only (count + hospital name).
+    // Third hospitals only (takeOrders); SGH's lines are not excluded, but they are not
+    // in THIS run's report either — said so the morning line never implies otherwise.
     const excluded = theState.parsed.excludedHospitals || [];
     if (excluded.length) {
       message = `${message} — ${excluded.map((h) => STR.upload.hospitalExcludedShort(h.count, h.name || h.id)).join('، ')}`;
     }
+    const obh = theState.parsed.ordersByHospital;
+    const sghCount = (obh && Array.isArray(obh.sgh)) ? obh.sgh.length : 0;
+    if (sghCount) message = `${message} — ${STR.upload.sghNotAutomated(sghCount)}`;
 
     if (opts.autoAcceptTat) {
       try {
@@ -865,6 +946,10 @@ export async function runAutomation({
     let scoped;
     try { scoped = isScoped(model.scope); } catch { scoped = true; }
     if (scoped) return { status: 'error', message: MSG.scopedModel };
+    // Same belt and braces for the report type: stepEngine builds the KAMC report from
+    // parsed.orders and never sets model.hospital, so a non-KAMC model here is a bug —
+    // refuse it rather than publish an SGH / KAMC + SGH deck as the morning report.
+    if (!isKamcReport(model)) return { status: 'error', message: MSG.notKamcModel };
     const produced = await D.produceReportFiles({
       model, ctx: ctx || { state: theState, store: theStore }, onProgress: null, host: null, signal,
     });

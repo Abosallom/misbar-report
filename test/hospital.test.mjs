@@ -1,7 +1,10 @@
 // test/hospital.test.mjs — run with:  node --test
-// The KAMC-only cut (model/hospital.js) and how the ordering-hospital columns reach
-// OrderRow through the manual CSV path (ingest/csv.js). The Grafana path's mapping is
-// in test/grafana.test.mjs (it shares csv.js findHospitalColumns).
+// The LEGACY two-way KAMC cut (model/hospital.js isKamcRow / splitByHospital, kept as
+// they were), takeKamcOrders (now the takeOrders door: SGH is a reported hospital, so it
+// is no longer "excluded") and how the ordering-hospital columns reach OrderRow through
+// the manual CSV path (ingest/csv.js). The Grafana path's mapping is in
+// test/grafana.test.mjs (it shares csv.js findHospitalColumns); the hospital registry,
+// name-first classification and the no-Test-Menu fail-safes are in test/core-*.test.mjs.
 // SYNTHETIC rows only — every order id, lab and patient value below is made up. The two
 // hospital name/id pairs are the source's own spellings (organisations, not patients):
 // KAMC 31763 'King Abdul ah Medical City' (sic) and SGH 1037 'Saudi German Hospital
@@ -256,6 +259,9 @@ test('takeKamcOrders: writes orders + excludedHospitals together; untouched arra
   assert.equal(parsed.orders, allKamc);
   assert.deepEqual(parsed.excludedHospitals, []);
 
+  // UPDATED 2026-10-11 (three report types): takeKamcOrders is now the takeOrders door.
+  // parsed.orders is still the KAMC rows, but SGH is a REPORTED hospital — its rows go to
+  // parsed.ordersByHospital.sgh, not to the third-hospital notice.
   const mixed = [
     row('00990000022', { orderingFacilityId: '1037', hospital: SGH_NAME }),
     allKamc[0],
@@ -263,7 +269,10 @@ test('takeKamcOrders: writes orders + excludedHospitals together; untouched arra
   const got = takeKamcOrders(parsed, mixed);
   assert.deepEqual(got, [allKamc[0]]);
   assert.equal(parsed.orders, got);
-  assert.deepEqual(parsed.excludedHospitals, [{ id: '1037', name: SGH_NAME, count: 1 }]);
+  assert.deepEqual(parsed.ordersByHospital.sgh, [mixed[0]]);
+  assert.deepEqual(parsed.excludedHospitals, []);
+  takeKamcOrders(parsed, [...mixed, row('00990000023', { orderingFacilityId: '9001', hospital: 'Other Clinic' })]);
+  assert.deepEqual(parsed.excludedHospitals, [{ id: '9001', name: 'Other Clinic', count: 1 }], 'a third hospital still is');
 
   // Never throws on a bad source: empty orders, no notice.
   assert.deepEqual(takeKamcOrders(parsed, undefined), []);

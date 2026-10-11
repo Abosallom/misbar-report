@@ -2,17 +2,23 @@
 // The file-producing core now lives in automation/pipeline.js (produceReportFiles) so
 // an unattended run makes byte-identical files; this screen drives it and paints the
 // very same progress bar, file rows and live slide thumbnails it always has.
-import { STR, todayISO, formatDateAr, formatRangeAr } from '../i18n/ar.js?v=v2026-10-07.1';
-import { el, progressBar, toast } from './components.js?v=v2026-10-07.1';
-import { resetRunData } from '../state.js?v=v2026-10-07.1';
-import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-10-07.1';
-import { autoDraft, splitTaskLists } from '../model/drafts.js?v=v2026-10-07.1';
-import { buildLateLabsSection, triggerDownload } from './late-labs-section.js?v=v2026-10-07.1';
+import { STR, todayISO, formatDateAr, formatRangeAr } from '../i18n/ar.js?v=v2026-10-11.1';
+import { el, progressBar, toast } from './components.js?v=v2026-10-11.1';
+import { resetRunData } from '../state.js?v=v2026-10-11.1';
+import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-10-11.1';
+import { autoDraft, splitTaskLists } from '../model/drafts.js?v=v2026-10-11.1';
+import { buildLateLabsSection, triggerDownload } from './late-labs-section.js?v=v2026-10-11.1';
 import {
   applyWindowDeltas, buildFileDefs, produceReportFiles, recordRunSnapshot,
   shouldAutoDownloadFiles,
-} from '../automation/pipeline.js?v=v2026-10-07.1';
-import { isScoped, hasRange, normalizeScope } from '../model/scope.js?v=v2026-10-07.1';
+} from '../automation/pipeline.js?v=v2026-10-11.1';
+import { isScoped, hasRange, normalizeScope } from '../model/scope.js?v=v2026-10-11.1';
+
+/** The report type a model is (model.hospital; absent ⇒ 'kamc', every model that predates
+ *  the report types — the fallback below and the automation's included). */
+const hospitalOf = (model) => (model && model.hospital != null ? model.hospital : 'kamc');
+/** Its label as the review screen's pills print it (STR.review.hospital.modes). */
+const hospitalLabel = (h) => (STR.review.hospital.modes[h] || String(h));
 
 async function tryImport(path) { try { return await import(path); } catch { return null; } }
 const isMobile = () => /iP(hone|ad|od)|Android/i.test(navigator.userAgent);
@@ -157,19 +163,45 @@ export function scopeShareLine(scope) {
  */
 export function shareText(model, date, fileCount) {
   const V = (key, computed) => (Number.isFinite(model.overrides && model.overrides[key]) ? model.overrides[key] : computed);
-  const k = model.kpi || {};
-  const b = k.buckets || {};
   const num = (v) => (Number.isFinite(v) ? v : 0);
-  const total = num(V('total', k.totals && k.totals.total));
-  const completed = num(V('completed', b.completed));
-  const awaiting = num(V('awaitingResults', b.awaitingResults));
-  const late = num(V('lateNoResult', b.lateNoResult));
-  const rejected = num(V('rejected', b.rejected));
-  const cancelled = num(V('cancelledNote', k.cancelledNote));
+  const hospital = hospitalOf(model);
+  // REPORT TYPES (2026-10-11). KAMC: the text is exactly what it always was. SGH / KAMC +
+  // SGH: a line names the report type (the pasted text travels without the deck), and
+  // the numbers follow the deck's own rules — a KAMC + SGH number is the two hospitals'
+  // results summed (model/hospital-report.js), and lateness exists only where a Test
+  // Menu does (KAMC): an SGH report prints «–» for it, never the engine's 0.
+  let total; let completed; let awaiting; let late; let rejected; let cancelled;
+  if (hospital === 'both') {
+    // No overrides in this report type (decision 8): the sub-models' own numbers.
+    const subs = [model.kamc, model.sgh].map((m) => (m && m.kpi) || {});
+    const sum = (f) => subs.reduce((s, k) => s + num(f(k)), 0);
+    const c = model.combined || {};
+    total = sum((k) => k.totals && k.totals.total);
+    completed = sum((k) => k.buckets && k.buckets.completed);
+    awaiting = sum((k) => k.buckets && k.buckets.awaitingResults);
+    rejected = sum((k) => k.buckets && k.buckets.rejected);
+    cancelled = sum((k) => k.cancelledNote);
+    // Late = the Test-Menu hospitals only, exactly as the deck's late card counts it.
+    late = `${num(c.cards && c.cards.lateNoResult && c.cards.lateNoResult.combined)} (${STR.review.hospital.modes.kamc})`;
+  } else {
+    const k = model.kpi || {};
+    const b = k.buckets || {};
+    total = num(V('total', k.totals && k.totals.total));
+    completed = num(V('completed', b.completed));
+    awaiting = num(V('awaitingResults', b.awaitingResults));
+    // SGH (no Test Menu): «–» unless the operator typed a late figure — then the typed
+    // number, exactly as the deck's late card does (build-spec.js: a finite manual
+    // lateNoResult override wins over the SGH dash), so the pasted text and the deck agree.
+    late = (hospital === 'kamc' || !model.noTestMenu || Number.isFinite(model.overrides && model.overrides.lateNoResult))
+      ? num(V('lateNoResult', b.lateNoResult)) : '–';
+    rejected = num(V('rejected', b.rejected));
+    cancelled = num(V('cancelledNote', k.cancelledNote));
+  }
   const pct = total ? Math.round((completed / total) * 100) : 0;
   const scope = normalizeScope(model.scope); // same view isScoped/hasRange judge by
   const when = (hasRange(scope) && formatRangeAr(scope.from, scope.to)) || formatDateAr(date) || date;
   return `تقرير مسبار الأسبوعي — ${when}\n` +
+    (hospital !== 'kamc' ? `${STR.generate.reportType(hospitalLabel(hospital))}\n` : '') +
     (isScoped(scope) ? `${scopeShareLine(scope)}\n` : '') +
     `• إجمالي الطلبات: ${total}\n` +
     `• فحوصات مكتملة (تشمل المرفوضة): ${completed} (${pct}%)\n` +
@@ -182,10 +214,11 @@ export function shareText(model, date, fileCount) {
 
 function buildShareCard(model, date, fileCount) {
   const text = shareText(model, date, fileCount);
-  const scoped = isScoped(model.scope); // one more line → one more textarea row
+  // One more line each for a scope and a non-KAMC report type → one more textarea row.
+  const extra = (isScoped(model.scope) ? 1 : 0) + (hospitalOf(model) !== 'kamc' ? 1 : 0);
 
   const ta = el('textarea', {
-    dir: 'rtl', readOnly: true, rows: scoped ? 7 : 6, value: text,
+    dir: 'rtl', readOnly: true, rows: 6 + extra, value: text,
     style: 'width:100%;box-sizing:border-box;resize:vertical;font-family:inherit;font-size:.9rem;line-height:1.8;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-light);color:var(--slate-500)',
   });
 
@@ -236,14 +269,20 @@ export async function render(container, ctx) {
   // recordSnapshot (below) still appends this run's published numbers to snapshotHistory
   // for the history panel — for a FULL report only; a scoped one writes nothing.
   // Both modules are guarded → engine deltas if either is absent.
-  const dwMod = await tryImport('../model/delta-window.js?v=v2026-10-07.1');
-  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-10-07.1');
+  // An SGH / KAMC + SGH model is re-stamped by model/hospital-report.js (each hospital
+  // with its own policy — applyWindowDeltas routes it); guarded like the other two.
+  const dwMod = await tryImport('../model/delta-window.js?v=v2026-10-11.1');
+  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-10-11.1');
+  const hrMod = hospitalOf(model) !== 'kamc'
+    ? await tryImport('../model/hospital-report.js?v=v2026-10-11.1')
+    : null;
   const recordSnapshot = dbMod && dbMod.recordSnapshot;
-  applyWindowDeltas(model, state, store, dwMod && dwMod.stampWindowDeltas);
+  applyWindowDeltas(model, state, store, dwMod && dwMod.stampWindowDeltas, hrMod);
 
   // Same four definitions produceReportFiles will walk — one shared source, and the SAME
-  // scope argument it passes, so a painted row name is always the downloaded file's name.
-  const fileDefs = buildFileDefs(date, model.scope);
+  // scope + report-type arguments it passes, so a painted row name is always the
+  // downloaded file's name.
+  const fileDefs = buildFileDefs(date, model.scope, model.hospital);
 
   const rowEls = {};
   const fileList = el('div', { class: 'gen-files' }, fileDefs.map((f) => {
@@ -267,8 +306,16 @@ export async function render(container, ctx) {
 
   const subtitleEl = el('p', { text: STR.generate.subtitle });
   const keepOpenEl = el('p', { class: 'small muted', text: '⏳ ' + STR.generate.keepOpen });
+  // WHICH report is being produced — KAMC, SGH or KAMC + SGH — said in the head, before
+  // the first file lands (the file names carry the tag too, but are easy to skim past).
+  // Inline style: `.screen__head p` outranks .small/.muted (same as the review head note).
+  const reportTypeEl = el('p', {
+    role: 'note', style: 'margin-top:4px;font-weight:700;color:var(--navy)',
+    text: STR.generate.reportType(hospitalLabel(hospitalOf(model))),
+  });
   const head = el('div', { class: 'screen__head' }, [
     el('h1', { text: STR.generate.title }),
+    reportTypeEl,
     subtitleEl,
     keepOpenEl,
   ]);
@@ -345,7 +392,7 @@ export async function render(container, ctx) {
     // model — guarded import, so an older/partial build just keeps the numbers path.
     // A SCOPED model is a side report: recordRunSnapshot returns before either write
     // (see its guard), so it is still called unconditionally here — one owner of the rule.
-    const tlMod = await tryImport('../model/task-lifecycle.js?v=v2026-10-07.1');
+    const tlMod = await tryImport('../model/task-lifecycle.js?v=v2026-10-11.1');
     recordRunSnapshot({
       model, store, state, date, recordSnapshot,
       recordShownTasks: tlMod && tlMod.recordShownTasks,
@@ -386,6 +433,8 @@ export async function render(container, ctx) {
       // Scoped run: say, at the moment of success, that nothing was recorded — an
       // operator who expects this deck in the history panel must not go looking for it.
       isScoped(model.scope) ? el('p', { class: 'small muted', text: STR.review.scope.sideReport }) : null,
+      // The same for an SGH / KAMC + SGH deck: a side report, recorded nowhere.
+      hospitalOf(model) !== 'kamc' ? el('p', { class: 'small muted', text: STR.review.hospital.sideReport }) : null,
       el('p', {
         class: 'small muted',
         style: 'margin-top:6px',
@@ -434,6 +483,16 @@ export async function render(container, ctx) {
     resultHost.appendChild(el('p', {
       class: 'small muted', style: 'margin:16px 0 0;text-align:right',
       text: STR.generate.lateLabsUnscoped.replace('{date}', formatDateAr(labsAsOf) || labsAsOf),
+    }));
+  }
+  // REPORT TYPES: the chase lists stay KAMC's whatever report was generated — SGH has no
+  // Test Menu, so no line of it can be late or due, and handing SGH rows to the workbook
+  // builder would merge a lab both hospitals use into one workbook. Said, so an SGH /
+  // KAMC + SGH run does not read them as its own.
+  if (hospitalOf(model) !== 'kamc') {
+    resultHost.appendChild(el('p', {
+      class: 'small muted', style: 'margin:16px 0 0;text-align:right',
+      text: STR.generate.lateLabsKamcOnly,
     }));
   }
   try {

@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { webcrypto } from 'node:crypto';
 
 import { fetchKamcOrders, fetchKamcSnapshot, yearStartMs } from '../src/ingest/grafana.js';
-import { splitByHospital } from '../src/model/hospital.js';
+import { splitByHospital, takeOrders, hospitalOf } from '../src/model/hospital.js';
 
 // ---- 30-field schema, EXACT names/types matching the real public-dashboard panel ----
 const FIELDS = [
@@ -251,6 +251,34 @@ test('fetchKamcOrders — maps facility_name → hospital and facility_id → or
   const { kept, excluded } = splitByHospital(rows);
   assert.deepEqual(kept, [rows[0]]);
   assert.deepEqual(excluded, [{ id: '1037', name: 'Saudi German Hospital Alzahraa Branch', count: 2 }]);
+});
+
+// 2026-10-11 (three report types): SGH is a REPORTED hospital, classified by facility_name
+// first. The live field shapes land in the right hospital through the app's door, and a
+// frame whose name field is spelled differently (or arrives with NO id at all) still does.
+test('fetchKamcOrders → takeOrders: KAMC in parsed.orders, SGH beside it — by facility_name, with or without an id', async () => {
+  const kamc = { ...A1, 'Ordering facility ID': '31763', facility_name: 'King Abdul ah Medical City', facility_id: 31763 };
+  const sgh = {
+    ...A2, 'Order ID': '00990000001001', 'Ordering facility ID': null,
+    facility_name: 'Saudi German Hospital  Alzahraa Branch', facility_id: 1037,
+  };
+  const payload = { results: { A: { frames: [makeFrame([kamc, sgh], HOSPITAL_FIELDS)] } } };
+  const { rows } = await fetchKamcOrders(CFG, { fromMs: 1, toMs: 2, fetchImpl: stubFetch(payload) });
+  const parsed = { orders: null, excludedHospitals: null };
+  takeOrders(parsed, rows);
+  assert.deepEqual(parsed.orders, [rows[0]]);
+  assert.deepEqual(parsed.ordersByHospital.sgh, [rows[1]]);
+  assert.deepEqual(parsed.excludedHospitals, [], 'SGH is reported, not excluded');
+
+  // A name-only frame (a 'Facility Name' variant field, no id columns at all).
+  const NAME_ONLY_FIELDS = [...FIELDS, { name: 'Facility Name', type: 'string' }];
+  const k2 = { ...A1, 'Ordering facility ID': null, 'Facility Name': 'King Abdul ah Medical City' };
+  const s2 = { ...B1, 'Order ID': '00990000001003', 'Ordering facility ID': null, 'Facility Name': 'Saudi German Hospital  Alzahraa Branch' };
+  const p2 = { results: { A: { frames: [makeFrame([k2, s2], NAME_ONLY_FIELDS)] } } };
+  const out = await fetchKamcOrders(CFG, { fromMs: 1, toMs: 2, fetchImpl: stubFetch(p2) });
+  assert.deepEqual(out.errors, []);
+  assert.deepEqual(out.rows.map((r) => r.orderingFacilityId), [null, null]);
+  assert.deepEqual(out.rows.map(hospitalOf), ['kamc', 'sgh']);
 });
 
 test('fetchKamcOrders — reports missing expected fields (fail-soft)', async () => {
