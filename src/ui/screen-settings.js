@@ -8,17 +8,17 @@
 // mirror of the automation panel), live source (Grafana + cached-tracker), and
 // backup (export/import).
 
-import { SNAPSHOT_SEED, REPORT_OPTIONS_SEED, AUTOMATION_SEED } from '../seeds/defaults.js?v=v2026-10-13.4';
-import { normalizeDeltaMode } from '../model/delta-baseline.js?v=v2026-10-13.4';
+import { SNAPSHOT_SEED, REPORT_OPTIONS_SEED, AUTOMATION_SEED } from '../seeds/defaults.js?v=v2026-10-13.5';
+import { normalizeDeltaMode } from '../model/delta-baseline.js?v=v2026-10-13.5';
 // The connection test's per-hospital line (STR.settings) — ar.js is pure and DOM-free
 // (every other screen imports it), so module-smoke's bare-Node import still holds.
-import { STR } from '../i18n/ar.js?v=v2026-10-13.4';
+import { STR } from '../i18n/ar.js?v=v2026-10-13.5';
 // NAMESPACE import on purpose: the access tab reads lock.currentUser(), which is a
 // newer export. A named import would throw at link time on any build of lock.js that
 // predates it (and take the whole settings screen down); a namespace import lets the
 // tab degrade to 'unknown user' instead. lock.js is DOM-free at module scope, so this
 // stays importable in bare Node (test/module-smoke).
-import * as lock from './lock.js?v=v2026-10-13.4';
+import * as lock from './lock.js?v=v2026-10-13.5';
 // The project tracker document (tracker CONTRACT §1.3): the review editor's pending save
 // (flushed before this screen loads its working copy — its autosave would otherwise
 // write the stale cache back), and the one "is this a tagged tracker" rule.
@@ -26,8 +26,12 @@ import * as lock from './lock.js?v=v2026-10-13.4';
 // and this tab's radio share ONE option list and ONE normaliser (default = the seed's 'ar').
 import {
   trackerSaver, trackerMetaLine, TRACKER_LANG_OPTIONS, normalizeTrackerLang,
-} from './components.js?v=v2026-10-13.4';
-import { resolveProjectTracker } from '../model/report-model.js?v=v2026-10-13.4';
+  slideOrderList, slideOrderLabel,
+} from './components.js?v=v2026-10-13.5';
+// «ترتيب الشرائح» — the SAVED (fixed) slide order, reportOptions.slideOrder: the shared unit
+// vocabulary (model/slide-order.js, a pure leaf) and the review card's own list widget.
+import { SLIDE_ORDER_KEYS, normalizeSlideOrder } from '../model/slide-order.js?v=v2026-10-13.5';
+import { resolveProjectTracker } from '../model/report-model.js?v=v2026-10-13.5';
 
 const TABS = [
   { id: 'tat', label: 'مدة الفحوصات' },
@@ -89,6 +93,32 @@ export function slideFieldOn(slides, field) {
   if (typeof seed === 'boolean') return seed;
   return !field.optIn;
 }
+/** The Settings «ترتيب الشرائح» rows: EVERY unit (this list is the order every report type
+ *  starts from — each deck shows the units it has), in the saved order, each with where it
+ *  appears and whether its slide is switched off above (it keeps its place). The shipments
+ *  unit has no switch here: its slide is the scope's own choice in the review screen.
+ *  Pure; exported for node tests. */
+export function savedSlideOrderRows(ro) {
+  const r = (ro && typeof ro === 'object') ? ro : {};
+  const hints = (STR.review.slideOrder && STR.review.slideOrder.settingsHints) || {};
+  return normalizeSlideOrder(r.slideOrder).map((key) => {
+    const field = REPORT_SLIDE_FIELDS.find((f) => f.key === key);
+    return {
+      key, label: slideOrderLabel(key), hint: hints[key] || '',
+      hidden: field ? !slideFieldOn(r.slides, field) : false,
+    };
+  });
+}
+
+/** Store `order` as the saved slide order on `ro` (mutated — the tab's working doc). The
+ *  default order is stored ABSENT (the contract's "absent = default"), so a unit a later
+ *  version adds lands in its default place. */
+export function setSavedSlideOrder(ro, order) {
+  const o = normalizeSlideOrder(order);
+  if (o.every((k, i) => k === SLIDE_ORDER_KEYS[i])) delete ro.slideOrder;
+  else ro.slideOrder = o;
+}
+
 const REPORT_CARD_FIELDS = [
   { key: 'total', label: 'إجمالي الطلبات' },
   { key: 'awaitingDispatch', label: 'في انتظار الشحن' },
@@ -930,8 +960,37 @@ export function render(container, ctx) {
       // trackerLang post-dates every stored doc too: absent / unknown → the default ('ar'),
       // so the radio always has exactly one option checked.
       r.trackerLang = normalizeTrackerLang(r.trackerLang);
+      // The saved slide order: absent = the default; a stored value is kept only as a list
+      // (the store's backfill cleans it on load — this is the bare-doc guard).
+      if ('slideOrder' in r && !Array.isArray(r.slideOrder)) delete r.slideOrder;
       return r;
     }
+
+    // (b2) «ترتيب الشرائح» — the SAVED order, with the tab's autosave. The same widget as the
+    // review card; there a move is TEMPORARY (this one report), here it is the fixed order
+    // every new report and the automation use. Built before the slide checkboxes below so
+    // their changes can repaint the «مخفية» badges at once.
+    const SO = STR.review.slideOrder;
+    const orderDefaultBtn = h('button', { type: 'button', class: 'st-btn', text: SO.resetDefault });
+    const orderList = slideOrderList({
+      getRows: () => savedSlideOrderRows(ro()),
+      onMove: (next) => { setSavedSlideOrder(ro(), next); autosave(); paintOrderDefault(); },
+    });
+    function paintOrderDefault() {
+      orderDefaultBtn.disabled = !('slideOrder' in ro());
+    }
+    orderDefaultBtn.addEventListener('click', () => {
+      if (!('slideOrder' in ro())) return;
+      setSavedSlideOrder(ro(), SLIDE_ORDER_KEYS);
+      autosave();
+      orderList.paint();
+      paintOrderDefault();
+    });
+    paintOrderDefault();
+    // A temporary order of the report open in the review stays as it is (it is that report's
+    // own) — said here, so a Settings edit is not mistaken for a change to that report.
+    const tempNote = (state.slideOrder && Array.isArray(state.slideOrder.order))
+      ? h('p', { class: 'st-help', text: SO.settingsTempNote }) : null;
 
     // Radio group bound to a getter/setter (single value out of `options`);
     // autosaves like the checkbox fields. Mirrors the checkField row styling.
@@ -981,7 +1040,15 @@ export function render(container, ctx) {
         // (b) included slides
         groupHead('الشرائح المضمّنة'),
         ...REPORT_SLIDE_FIELDS.map((f) =>
-          checkField(f.label, () => slideFieldOn(ro().slides, f), (v) => { ro().slides[f.key] = v; })),
+          checkField(f.label, () => slideFieldOn(ro().slides, f), (v) => {
+            ro().slides[f.key] = v;
+            queueMicrotask(() => orderList.paint()); // after the autosave reload: the badge follows
+          })),
+        groupHead(SO.title),
+        h('p', { class: 'st-help', text: SO.settingsHelp }),
+        tempNote,
+        orderList.el,
+        h('div', { style: { margin: '4px 0 8px' } }, [orderDefaultBtn]),
         // (c) KPI cards
         groupHead('بطاقات المؤشرات'),
         // A field may carry an optional `hint` (one st-help line under its checkbox) —

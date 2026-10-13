@@ -1,5 +1,5 @@
 // ui/components.js — shared DOM helpers used by Track E screens.
-import { STR, formatDateAr } from '../i18n/ar.js?v=v2026-10-13.4';
+import { STR, formatDateAr } from '../i18n/ar.js?v=v2026-10-13.5';
 // The project tracker document's OWNER (shape, tag, due-date rule, new-row factory). STATIC,
 // like scope.js / hospital.js elsewhere: the module is pure (SheetJS is injected, never
 // imported), and the editor below must apply the parser's own rules — a website-typed
@@ -9,11 +9,11 @@ import { STR, formatDateAr } from '../i18n/ar.js?v=v2026-10-13.4';
 import {
   isProjectTracker, newTask as blankTrackerTask, normalizeDueText, TRACKER_FORMAT,
   TRACKER_LANGS, DEFAULT_TRACKER_LANG, normalizeTrackerLang as parseTrackerLang,
-} from '../ingest/task-tracker.js?v=v2026-10-13.4';
+} from '../ingest/task-tracker.js?v=v2026-10-13.5';
 // ONE status rule for the editor pill, the upload card's counts and the slide (its pill and
 // its overdue test): the slide builder's statusKey owns the alias table (English as the
 // workbook writes it, 'Deleyed' included, plus the Arabic words). Pure; imports theme only.
-import { statusKey as slideStatusKey } from '../slidespec/build-tracker.js?v=v2026-10-13.4';
+import { statusKey as slideStatusKey } from '../slidespec/build-tracker.js?v=v2026-10-13.5';
 
 /** Tiny hyperscript helper. */
 export function el(tag, props = {}, children = []) {
@@ -980,4 +980,122 @@ export function trackerEditor({ tracker: initial, lang: initialLang, onChange, o
       renderList();
     },
   };
+}
+
+/* ---------- «ترتيب الشرائح» — the slide-order list (2026-10-13, slide-order CONTRACT §7) ----------
+ * ONE widget for the review screen's per-report card and the Settings tab's saved order, so the
+ * two can never offer different gestures. It moves whole UNITS (model/slide-order.js keys —
+ * the send-out pair, the tracker with all its pages); the cover and thanks are shown as locked
+ * rows because they never move. BUTTONS ONLY (▲ / ▼ / «إلى الأعلى»), the tracker editor's
+ * pattern: there is no drag-and-drop anywhere in the app, HTML5 drag does nothing on iOS
+ * Safari, and a drag without buttons is not keyboard-accessible anyway. The widget owns no
+ * order: the caller hands it the rows (getRows) and receives the new key sequence (onMove). */
+
+/** A unit's Arabic name: its «الشرائح» chip label, else the slide-order card's own name for
+ *  the two units without a chip (shipments, definitions), else the key itself. */
+export function slideOrderLabel(key) {
+  const R = STR.review || {};
+  return (R.slideToggles && R.slideToggles[key])
+    || (R.slideOrder && R.slideOrder.units && R.slideOrder.units[key])
+    || String(key);
+}
+
+/** `keys` with `key` moved one place (delta < 0 = up / earlier). A NEW array, or null when the
+ *  move is impossible (unknown key, already at that end) — so a caller never records a no-op. */
+export function moveSlideUnit(keys, key, delta) {
+  if (!Array.isArray(keys)) return null;
+  const i = keys.indexOf(key);
+  const j = i + (delta < 0 ? -1 : 1);
+  if (i < 0 || j < 0 || j >= keys.length) return null;
+  const next = [...keys];
+  [next[i], next[j]] = [next[j], next[i]];
+  return next;
+}
+
+/** `keys` with `key` first («إلى الأعلى»). A NEW array, or null when it already is / unknown. */
+export function slideUnitToTop(keys, key) {
+  if (!Array.isArray(keys)) return null;
+  const i = keys.indexOf(key);
+  if (i <= 0) return null;
+  return [key, ...keys.filter((k) => k !== key)];
+}
+
+/**
+ * The list. Rows are re-read from getRows() on every paint().
+ * @param {{
+ *   getRows: () => {key:string, label?:string, hidden?:boolean, empty?:boolean, hint?:string}[],
+ *   onMove: (nextKeys:string[], movedKey:string) => void,
+ * }} o  onMove gets the rows' keys in their new order (the caller merges them into the full
+ *        order — model/slide-order.js mergeVisibleOrder — and stores it); the list repaints
+ *        itself afterwards and announces the moved unit's new position.
+ * @returns {{el:HTMLElement, paint:()=>void}}
+ */
+export function slideOrderList({ getRows, onMove }) {
+  const T = STR.review.slideOrder;
+  const listEl = el('ol', { class: 'sord' });
+  // The polite announcement of a move («… الآن في الموضع 2 من 5»): a screen reader user
+  // pressing ▲ hears where the unit landed instead of a silent list rebuild.
+  const live = el('p', { class: 'sord-live', role: 'status', 'aria-live': 'polite' });
+  const root = el('div', { class: 'sord-wrap' }, [listEl, live]);
+  let rows = [];
+
+  const lockedRow = (label) => el('li', { class: 'sord-row sord-row--locked', 'aria-label': T.lockedAria(label) }, [
+    el('span', { class: 'sord-lock', 'aria-hidden': 'true', text: '🔒' }),
+    el('span', { class: 'sord-row__label', text: label }),
+    el('span', { class: 'sord-badge', 'aria-hidden': 'true', text: T.locked }),
+  ]);
+
+  function move(row, next) {
+    if (!next) return;
+    if (typeof onMove === 'function') onMove(next, row.key);
+    paint();
+    live.textContent = T.position(row.label || slideOrderLabel(row.key), next.indexOf(row.key) + 1, next.length);
+  }
+
+  function unitRow(row, i, n) {
+    const label = row.label || slideOrderLabel(row.key);
+    const keys = rows.map((r) => r.key);
+    const btn = (act, text, aria, disabled, onClick, cls = 'trk-iconbtn') => el('button', {
+      type: 'button', class: cls, text, title: aria, 'aria-label': aria, disabled,
+      dataset: { sordKey: row.key, sordAct: act }, onClick,
+    });
+    return el('li', { class: 'sord-row' + (row.hidden || row.empty ? ' is-muted' : ''), dataset: { unit: row.key } }, [
+      el('span', { class: 'sord-row__label' }, [
+        el('span', { text: label }),
+        row.hint ? el('span', { class: 'sord-row__hint', text: row.hint }) : null,
+      ]),
+      row.hidden ? el('span', {
+        class: 'sord-badge', title: (T.hiddenTitles && T.hiddenTitles[row.key]) || T.hiddenTitle, text: T.hidden,
+      }) : null,
+      !row.hidden && row.empty ? el('span', { class: 'sord-badge', title: T.emptyTitle, text: T.empty }) : null,
+      el('span', { class: 'sord-row__actions' }, [
+        btn('up', '▲', T.upAria(label), i === 0, () => move({ ...row, label }, moveSlideUnit(keys, row.key, -1))),
+        btn('down', '▼', T.downAria(label), i === n - 1, () => move({ ...row, label }, moveSlideUnit(keys, row.key, +1))),
+        btn('top', T.toTop, T.toTopAria(label), i === 0, () => move({ ...row, label }, slideUnitToTop(keys, row.key)), 'sord-top'),
+      ]),
+    ]);
+  }
+
+  // Repaint keeping the focused control — the tracker editor's rule (trackerEditor renderList):
+  // a move rebuilds the rows, which must not throw a keyboard user out of the list. A unit
+  // moved to an end comes back with the pressed button DISABLED, which cannot take focus:
+  // use the opposite move instead.
+  function paint() {
+    const a = typeof document !== 'undefined' ? document.activeElement : null;
+    const keep = a && a.dataset && a.dataset.sordKey && listEl.contains(a)
+      ? { key: a.dataset.sordKey, act: a.dataset.sordAct } : null;
+    rows = (typeof getRows === 'function' ? getRows() : null) || [];
+    listEl.innerHTML = '';
+    listEl.appendChild(lockedRow(T.cover));
+    rows.forEach((r, i) => listEl.appendChild(unitRow(r, i, rows.length)));
+    listEl.appendChild(lockedRow(T.thanks));
+    if (!keep) return;
+    const at = (act) => listEl.querySelector(`[data-sord-key="${CSS.escape(keep.key)}"][data-sord-act="${act}"]`);
+    let target = at(keep.act);
+    if (target && target.disabled) target = at(keep.act === 'down' ? 'up' : 'down');
+    if (target && !target.disabled) target.focus();
+  }
+
+  paint();
+  return { el: root, paint };
 }

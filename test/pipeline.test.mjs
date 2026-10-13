@@ -14,6 +14,7 @@ import {
 // The lifecycle module is pure and tiny — injected through the same deps seam so the
 // taskLog cases assert the REAL key/entry shape rather than a re-implementation.
 import * as taskLifecycle from '../src/model/task-lifecycle.js';
+import { slideOrderOf, normalizeSlideOrder } from '../src/model/slide-order.js';
 
 const { taskKey } = taskLifecycle;
 
@@ -626,4 +627,38 @@ test('automation.autoDownload:false downloads nothing even with autoDownloadFile
   const settings = { reportOptions: { autoDownloadFiles: true } };
   assert.equal(shouldAutoDownloadFiles({ settings, mobile: false }), true);
   assert.equal(AUTOMATION_DEFAULTS.autoDownload, false, 'automation is opt-in, never inferred');
+});
+
+/* ------------------------------------------------------------------ *
+ * Slide order — the unattended run publishes the SAVED order only.
+ *
+ * The review screen's one-report order lives in the app state (state.slideOrder) and is
+ * overlaid onto ITS model as model.slideOrder. The automation builds its own model from
+ * settings, so neither may reach the published deck: what the run renders must be
+ * settings.reportOptions.slideOrder (absent → the default).
+ * ------------------------------------------------------------------ */
+
+test('the automation publishes with the SAVED slide order — never the review\'s one-report order', async () => {
+  const SAVED = ['compliance', 'tracker', 'execFunnel', 'shipments', 'monthly', 'sendout', 'challenges', 'definitions'];
+  const TEMP = ['challenges', 'definitions', 'execFunnel', 'shipments', 'monthly', 'sendout', 'compliance', 'tracker'];
+  const handed = [];
+  const store = makeStore({ reportOptions: { slides: {}, kpiCards: {}, labels: {}, deltaMode: 'week', slideOrder: SAVED } });
+  const state = makeState();
+  // A review session left a one-report order behind: in the state AND on its pinned model.
+  state.slideOrder = { order: TEMP, epoch: 0 };
+  state.reportModel = { reportDate: '2026-07-20', slideOrder: TEMP, reportOptions: { slideOrder: TEMP } };
+  const deps = fakeDeps({ produceReportFiles: async ({ model }) => { handed.push(model); return [{ def: { name: 'report.pptx' }, blob: { size: 2 } }]; } });
+  const res = await run({ store, state, deps });
+  assert.equal(statusOf(res, 'generate'), 'done');
+  assert.equal(handed.length, 1);
+  const [model] = handed;
+  assert.equal('slideOrder' in model, false, 'no one-report order on the run\'s model');
+  assert.equal(model.reportOptions, store.settings.reportOptions, 'the settings\' reportOptions, verbatim');
+  assert.deepEqual(slideOrderOf(model), SAVED, 'the deck builders read the saved order');
+  // And with no saved order, the default — still never the state's one.
+  const handed2 = [];
+  const store2 = makeStore({ reportOptions: { slides: {}, kpiCards: {}, labels: {}, deltaMode: 'week' } });
+  const deps2 = fakeDeps({ produceReportFiles: async ({ model: m }) => { handed2.push(m); return [{ def: { name: 'report.pptx' }, blob: { size: 2 } }]; } });
+  await run({ store: store2, state, deps: deps2 });
+  assert.deepEqual(slideOrderOf(handed2[0]), normalizeSlideOrder(undefined));
 });

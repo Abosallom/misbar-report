@@ -5,11 +5,11 @@
 // build-spec reads from the very same predicate. A local re-derivation here is exactly
 // how a filename would one day say «مخصص» while the cover says nothing (or the reverse).
 // scope.js is pure (no DOM, no vendor, no ar.js back-edge), so this adds no cycle.
-import { isScoped, normalizeScope } from '../model/scope.js?v=v2026-10-13.4';
+import { isScoped, normalizeScope } from '../model/scope.js?v=v2026-10-13.5';
 // The hospital registry's short codes (KAMC / SGH) are what the file-name tag, the report
 // type pills and the share text print — read from the ONE registry, never re-typed here.
 // hospital.js is pure (no imports at all), so this adds no cycle either.
-import { HOSPITALS } from '../model/hospital.js?v=v2026-10-13.4';
+import { HOSPITALS } from '../model/hospital.js?v=v2026-10-13.5';
 
 /** Join ids for a sentence: Arabic comma, tolerant of a bare string or a missing list. */
 const joinIds = (ids) => [].concat(ids == null ? [] : ids).map(String).join('، ');
@@ -327,6 +327,65 @@ export const STR = {
       challenges: 'التحديات والمخاطر',
       sendout: 'محلي/دولي',
     },
+    // «ترتيب الشرائح» (2026-10-13, slide-order CONTRACT decision 7): the review card that
+    // moves whole slide UNITS (model/slide-order.js SLIDE_ORDER_KEYS) and its Settings twin.
+    // A unit's name is its slide-toggle label above; `units` names the two units that have
+    // no toggle chip (components.js slideOrderLabel reads both, toggles first).
+    slideOrder: {
+      title: 'ترتيب الشرائح',
+      hint: 'غيّر موضع أي شريحة بالأزرار ▲ / ▼ / «إلى الأعلى». يُطبَّق التغيير على هذا التقرير وحده حتى تضغط «حفظ كترتيب ثابت».',
+      units: { shipments: 'تفاصيل الشحنات', definitions: 'منهجية الأرقام' },
+      cover: 'الغلاف',
+      thanks: 'الشكر',
+      locked: 'ثابتة',
+      lockedAria: (label) => `${label} — موضعها ثابت`,
+      hidden: 'مخفية',
+      hiddenTitle: 'مطفأة من «الشرائح» — تحتفظ بموضعها إن أُعيد تشغيلها',
+      // Per unit where «الشرائح» is NOT the switch (components.js slideOrderList): the
+      // methodology slide is opt-in from Settings only; the shipments slide has its own box
+      // in «نطاق التقرير».
+      hiddenTitles: {
+        definitions: 'مطفأة — تُفعَّل من الإعدادات («خيارات التقرير»)، وتحتفظ بموضعها',
+        shipments: 'مطفأة من مربع «شريحة تفاصيل الشحنات» في «نطاق التقرير» — تحتفظ بموضعها',
+      },
+      empty: 'بلا محتوى',
+      emptyTitle: 'لا محتوى لها في هذا التقرير — تحتفظ بموضعها',
+      statusTemp: 'ترتيب مؤقت لهذا التقرير فقط — لم يُحفظ',
+      statusTempHint: 'يُستخدم في الملفات الأربعة لهذا التقرير، وأي تقرير جديد يعود إلى الترتيب الثابت.',
+      statusSaved: 'الترتيب الثابت المحفوظ',
+      statusSavedHint: 'يُستخدم في كل تقرير جديد وفي التشغيل الآلي.',
+      defaultTag: '(الترتيب الافتراضي)',
+      pillTemp: 'مؤقت',
+      pillSaved: 'ثابت',
+      save: 'حفظ كترتيب ثابت',
+      restoreSaved: 'استعادة الترتيب الثابت',
+      resetDefault: 'الترتيب الافتراضي',
+      savedToast: 'حُفظ ترتيب الشرائح كترتيب ثابت — يُستخدم في كل تقرير جديد.',
+      saveFailed: 'تعذّر حفظ ترتيب الشرائح.',
+      restoredToast: 'عاد الترتيب الثابت المحفوظ.',
+      // Generate clicked after the data was reloaded under the screen: the temporary order
+      // belonged to the old load and is gone — nothing is generated until the operator has
+      // seen the saved order on the preview.
+      dataChanged: 'تغيّرت البيانات — عاد الترتيب الثابت. راجع الترتيب ثم أعد التوليد.',
+      defaultToast: 'طُبّق الترتيب الافتراضي على هذا التقرير فقط — اضغط «حفظ كترتيب ثابت» لاعتماده.',
+      up: 'لأعلى',
+      down: 'لأسفل',
+      toTop: 'إلى الأعلى',
+      upAria: (label) => `نقل «${label}» لأعلى`,
+      downAria: (label) => `نقل «${label}» لأسفل`,
+      toTopAria: (label) => `نقل «${label}» إلى أول الشرائح`,
+      position: (label, i, n) => `«${label}» الآن في الموضع ${i} من ${n}`,
+      // Settings «خيارات التقرير» — the same list, editing the SAVED order.
+      settingsHelp: 'هذا هو الترتيب الثابت: يُستخدم في كل تقرير جديد وفي التشغيل الآلي. الغلاف أولاً والشكر أخيراً دائماً. لتغيير ترتيب تقرير واحد فقط استخدم بطاقة «ترتيب الشرائح» في شاشة المراجعة.',
+      settingsTempNote: 'للتقرير الحالي ترتيب مؤقت في شاشة المراجعة — يبقى كما هو لهذا التقرير وحده.',
+      settingsHints: {
+        shipments: 'في التقرير المخصّص بشحنات فقط',
+        sendout: 'شريحتان تنتقلان معاً',
+        tracker: 'قد تمتد لعدة صفحات تنتقل معاً',
+        challenges: 'تقرير المستشفى الواحد فقط',
+        definitions: 'تقرير المستشفى الواحد فقط، عند تفعيلها',
+      },
+    },
     // Editable KPI overrides (per-run, never saved to settings).
     kpiEditTitle: 'المؤشرات (قابلة للتحرير)',
     kpiEditHint: 'القيم محسوبة تلقائياً — عدّل أي رقم لتجاوزه في هذا التقرير فقط.',
@@ -495,6 +554,8 @@ export const STR = {
     lateLabsUnscoped: 'ملفات المختبرات أدناه لا يُطبَّق عليها نطاق التقرير المخصص: تشمل جميع الطلبات كما في {date}.',
     // The generate screen's head names the report being produced (all three types).
     reportType: (label) => `نوع التقرير: ${label}`,
+    // Head note while the review's «ترتيب الشرائح» card holds an unsaved (temporary) order.
+    tempSlideOrder: 'ترتيب الشرائح: مؤقت لهذا التقرير فقط (لم يُحفظ كترتيب ثابت).',
     // SGH / KAMC + SGH run, above the per-lab "Late & Due" section: those chase lists
     // are built from KAMC's orders only (SGH has no Test Menu, so no lateness yet).
     lateLabsKamcOnly: `ملفات المختبرات أدناه تخص طلبات ${HOSPITALS.kamc.code} فقط: لا توجد مدد إنجاز (TAT) لطلبات ${HOSPITALS.sgh.code} بعد.`,

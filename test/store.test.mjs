@@ -1975,3 +1975,87 @@ test('importing a pre-v9 backup does not hide the turnaround block again', () =>
   }));
   assert.equal(store.loadSettings().reportOptions.kpiCards.turnaround, true, '1 coerces to true');
 });
+
+// ---- reportOptions.slideOrder (the SAVED, fixed slide order — model/slide-order.js) -------
+// ABSENT means "the default order", so it is never seeded and never backfilled (a unit added
+// in a later version must land in its default place, not be frozen out by a stored copy of
+// today's list). A present value is cleaned; an import REPLACES the device's order.
+const CUSTOM_ORDER = ['tracker', 'execFunnel', 'shipments', 'monthly', 'sendout', 'compliance', 'challenges', 'definitions'];
+
+test('slideOrder: never seeded, and a stored doc without one stays without one', () => {
+  fresh();
+  const s = store.loadSettings();
+  assert.equal('slideOrder' in s.reportOptions, false, 'the first-run doc carries no order (= default)');
+  assert.equal('slideOrder' in REPORT_OPTIONS_SEED, false, 'the seed has none either');
+  const mock = fresh();
+  mock.setItem(SETTINGS_KEY, JSON.stringify({ schemaVersion: store.SCHEMA_VERSION, reportOptions: { slides: {} } }));
+  assert.equal('slideOrder' in store.loadSettings().reportOptions, false, 'backfill does not fill a missing order');
+});
+
+test('slideOrder: load keeps a valid order, normalises a dirty one, removes a non-list', () => {
+  const load = (slideOrder) => {
+    const mock = fresh();
+    mock.setItem(SETTINGS_KEY, JSON.stringify({ schemaVersion: store.SCHEMA_VERSION, reportOptions: { slideOrder } }));
+    return store.loadSettings().reportOptions;
+  };
+  assert.deepEqual(load(CUSTOM_ORDER).slideOrder, CUSTOM_ORDER, 'a valid custom order survives a load verbatim');
+  // Unknown / duplicate / retired 'action' / non-string entries dropped; the missing units
+  // come back at their default neighbourhood (here: challenges + definitions TRAIL the
+  // default order, so they stay at the end — they do not follow the tracker to the front).
+  assert.deepEqual(
+    load(['tracker', 'action', 'bogus', 7, 'tracker', 'execFunnel', 'shipments', 'monthly', 'sendout', 'compliance']).slideOrder,
+    CUSTOM_ORDER,
+  );
+  for (const junk of ['tracker', { a: 1 }, 42, null, true]) {
+    assert.equal('slideOrder' in load(junk), false, `${JSON.stringify(junk)} is removed (back to the default)`);
+  }
+});
+
+test('importSettings: slideOrder must be a list of strings (bounded); unknown names are dropped, not rejected', () => {
+  fresh();
+  store.loadSettings();
+  const imp = (slideOrder) => store.importSettings(JSON.stringify({ schemaVersion: store.SCHEMA_VERSION, reportOptions: { slideOrder } }));
+  for (const bad of ['tracker', { 0: 'tracker' }, 3, null, ['tracker', 5], Array(65).fill('tracker')]) {
+    assert.throws(() => imp(bad), /reportOptions\.slideOrder غير صالح/, `${JSON.stringify(bad).slice(0, 40)} is rejected`);
+  }
+  // A backup from a newer version (a unit this one does not know) still imports.
+  imp(['tracker', 'futureUnit', 'action', 'execFunnel', 'tracker']);
+  assert.deepEqual(
+    store.loadSettings().reportOptions.slideOrder,
+    CUSTOM_ORDER,
+    'normalised by pickImportKeys: unknown / retired / duplicate names gone, a full permutation',
+  );
+});
+
+test('importSettings: an imported slideOrder REPLACES the device order — the default (absent) one included', async () => {
+  fresh();
+  const doc = store.loadSettings();
+  store.saveSettings({ ...doc, reportOptions: { ...doc.reportOptions, slideOrder: CUSTOM_ORDER } });
+  const B = ['challenges', 'compliance', 'sendout', 'monthly', 'shipments', 'execFunnel', 'tracker', 'definitions'];
+  store.importSettings(JSON.stringify({ schemaVersion: store.SCHEMA_VERSION, reportOptions: { slideOrder: B } }));
+  assert.deepEqual(store.loadSettings().reportOptions.slideOrder, B, 'exactly the backup\'s order, never a union with the device\'s');
+  // A backup with no reportOptions at all says nothing about the layout: the order stays.
+  store.importSettings(JSON.stringify({ schemaVersion: store.SCHEMA_VERSION, displayNames: {} }));
+  assert.deepEqual(store.loadSettings().reportOptions.slideOrder, B, 'no reportOptions → the device\'s order stays');
+  // A backup whose reportOptions has no order is a DEFAULT-order backup (absent = default):
+  // restoring it brings back the default, it does not keep this device's custom order.
+  store.importSettings(JSON.stringify({ schemaVersion: store.SCHEMA_VERSION, reportOptions: { deltaMode: 'week' } }));
+  assert.equal('slideOrder' in store.loadSettings().reportOptions, false, 'reportOptions without an order → back to the default (absent)');
+  // The real flow: device A on the default order exports; device B (custom order) imports it.
+  fresh();
+  store.loadSettings();
+  const defaultBackup = await store.exportSettings().blob.text();
+  assert.equal('slideOrder' in JSON.parse(defaultBackup).reportOptions, false, 'a default-order export carries no order');
+  fresh();
+  const docB = store.loadSettings();
+  store.saveSettings({ ...docB, reportOptions: { ...docB.reportOptions, slideOrder: B } });
+  store.importSettings(defaultBackup);
+  assert.equal('slideOrder' in store.loadSettings().reportOptions, false, 'device B is back on the default order');
+  store.saveSettings({ ...store.loadSettings(), reportOptions: { ...store.loadSettings().reportOptions, slideOrder: B } });
+  // export → import round trip is identity for the order.
+  const exported = await store.exportSettings().blob.text();
+  fresh();
+  store.loadSettings();
+  store.importSettings(exported);
+  assert.deepEqual(store.loadSettings().reportOptions.slideOrder, B);
+});

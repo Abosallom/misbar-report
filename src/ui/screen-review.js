@@ -1,18 +1,29 @@
 // ui/screen-review.js — review/edit report content with a live slide preview (Track E).
-import { STR, todayISO, formatDateAr, formatRangeAr } from '../i18n/ar.js?v=v2026-10-13.4';
+import { STR, todayISO, formatDateAr, formatRangeAr } from '../i18n/ar.js?v=v2026-10-13.5';
 import {
   el, editableTable, toast, trackerEditor, trackerSaver, saveTrackerToStore, createProjectTracker,
   trackerLangControl, normalizeTrackerLang, DEFAULT_TRACKER_LANG,
-} from './components.js?v=v2026-10-13.4';
-import { buildMockEngineOutput, isMockTracker } from './screen-upload.js?v=v2026-10-13.4';
+  slideOrderList, slideOrderLabel,
+} from './components.js?v=v2026-10-13.5';
+// SLIDE ORDER (2026-10-13, slide-order CONTRACT). The unit vocabulary and its rules are the
+// shared leaf module's (the deck builders sort by the very same functions, so this card and
+// the deck can never disagree about what moves where); WHEN a temporary order is in force is
+// state.js's (bound to the load, like the scope). Both are pure and import nothing heavy.
+import {
+  SLIDE_ORDER_KEYS, normalizeSlideOrder, slideOrderOf, unitOfSlideId, mergeVisibleOrder,
+} from '../model/slide-order.js?v=v2026-10-13.5';
+import {
+  tempSlideOrder, setTempSlideOrder, clearTempSlideOrder, overlayTempSlideOrder, tempSlideOrderUnits,
+} from '../state.js?v=v2026-10-13.5';
+import { buildMockEngineOutput, isMockTracker } from './screen-upload.js?v=v2026-10-13.5';
 // THE PROJECT TRACKER (2026-10-13, tracker CONTRACT §1.3/§1.6): the report carries the
 // «ملف متابعة المشروع» document as model.projectTracker, resolved by the model layer's
 // ONE rule (the run's tagged tracker, else the tagged cache, else null — never the old
 // untagged shape, never a mock). Static: report-model.js is pure, and sendout.js — its
 // only import — is already imported below.
-import { resolveProjectTracker } from '../model/report-model.js?v=v2026-10-13.4';
-import { analyseSendout, hasMaster, AR_COUNTRY } from '../model/sendout.js?v=v2026-10-13.4';
-import { buildHistoryPanel } from './history-table.js?v=v2026-10-13.4';
+import { resolveProjectTracker } from '../model/report-model.js?v=v2026-10-13.5';
+import { analyseSendout, hasMaster, AR_COUNTRY } from '../model/sendout.js?v=v2026-10-13.5';
+import { buildHistoryPanel } from './history-table.js?v=v2026-10-13.5';
 // REPORT SCOPE (2026-09-29). STATIC, not guarded like delta-window below: scope decides
 // WHICH ROWS every number is computed from, and there is no safe degraded answer — a
 // build that silently ignored a chosen scope would publish the full programme's numbers
@@ -21,16 +32,16 @@ import { buildHistoryPanel } from './history-table.js?v=v2026-10-13.4';
 import {
   EMPTY_SCOPE, normalizeScope, isScoped, hasRange, parseShipmentIds, labOptions,
   findShipments, applyScope, shipmentDetails,
-} from '../model/scope.js?v=v2026-10-13.4';
+} from '../model/scope.js?v=v2026-10-13.5';
 import {
   normalizeDeltaMode, isWeekDeltaMode, DEFAULT_DELTA_MODE,
-} from '../model/delta-baseline.js?v=v2026-10-13.4';
+} from '../model/delta-baseline.js?v=v2026-10-13.5';
 // REPORT TYPES (2026-10-11): KAMC + SGH (the main weekly report, default) / KAMC / SGH.
 // STATIC for scope.js's reason: WHICH hospital's rows a report reads has no safe degraded
 // answer, and hospital.js is pure (no imports at all). The per-hospital MODEL builders
 // (model/hospital-report.js) are a guarded import inside render(), like the engine they
 // depend on — absent, an SGH / KAMC + SGH build throws and modelFor says so.
-import { HOSPITALS, HOSPITAL_MODES, rowsForMode } from '../model/hospital.js?v=v2026-10-13.4';
+import { HOSPITALS, HOSPITAL_MODES, rowsForMode } from '../model/hospital.js?v=v2026-10-13.5';
 
 /* small local module helpers (kept local to avoid cross-screen coupling) */
 async function tryImport(path) { try { return await import(path); } catch { return null; } }
@@ -119,7 +130,120 @@ export function reportOptionsFromSettings(settings) {
     // doc written before R2 keeps auto-downloading exactly as it always did.
     autoDownloadFiles: ro.autoDownloadFiles != null ? !!ro.autoDownloadFiles : base.autoDownloadFiles,
     trackerLang: normalizeTrackerLang(ro.trackerLang),
+    // The SAVED (fixed) slide order — carried only when one is stored: ABSENT means the
+    // default (model/slide-order.js), so a unit added in a later version lands in its default
+    // place instead of being frozen out by a copy written here. The TEMPORARY order never
+    // lives in reportOptions (this object is rebuilt from settings on every render): it is
+    // overlaid as model.slideOrder (state.js overlayTempSlideOrder).
+    ...(Array.isArray(ro.slideOrder) ? { slideOrder: normalizeSlideOrder(ro.slideOrder) } : {}),
   };
+}
+
+/* The persisted reportOptions after a review-screen edit (chips, labels, delta pills, the
+ * auto-download box, the tracker language): the STORED doc's keys first (`cur` — this screen
+ * only knows the keys it renders, so a straight overwrite would drop the rest), then the
+ * screen's own. NEVER slideOrder from `ro`: the saved order is written only by the
+ * «ترتيب الشرائح» card's «حفظ كترتيب ثابت» and by Settings, and a temporary order must never
+ * ride into settings on a chip click — so the stored order (cur.slideOrder, or its absence)
+ * passes through untouched. Pure; exported for node tests (the guard is pinned there). */
+export function mergeReportOptions(cur, ro) {
+  const base = (cur && typeof cur === 'object') ? cur : {};
+  const r = (ro && typeof ro === 'object') ? ro : {};
+  return {
+    ...base,
+    excludeNoTat: !!r.excludeNoTat,
+    slides: { ...(base.slides || {}), ...(r.slides || {}) },
+    kpiCards: { ...(base.kpiCards || {}), ...(r.kpiCards || {}) },
+    // labels is a full replace — deleting a label override must actually delete it.
+    labels: { ...(r.labels || {}) },
+    deltaMode: normalizeDeltaMode(r.deltaMode),
+    // R2 — written as a real boolean so the settings mirror, the store validator and
+    // pipeline.js shouldAutoDownloadFiles all read one shape.
+    autoDownloadFiles: r.autoDownloadFiles !== false,
+    // The tracker card's language pills — the same key Settings' radio writes.
+    trackerLang: normalizeTrackerLang(r.trackerLang),
+  };
+}
+
+/* ---------- «ترتيب الشرائح» — pure planning for the review card (exported for node tests) ---------- */
+
+const sameSlideOrderAs = (a, b) => {
+  const x = normalizeSlideOrder(a);
+  const y = normalizeSlideOrder(b);
+  return x.every((k, i) => k === y[i]);
+};
+
+/** The UNITS a report type's deck can show, in no particular order (the card sorts them by
+ *  the order in force). KAMC + SGH: the exec slide (always on there) + its four toggles —
+ *  build-spec-both.js emits nothing else. KAMC / SGH: every unit, the shipments unit only
+ *  when the scope picked shipments (build-spec.js showShipmentSlide's data gate; its own
+ *  on/off box is the «مخفية» badge below). */
+export function slideOrderUnitsFor(hospital, scope) {
+  if (hospital === 'both') return SLIDE_ORDER_KEYS.filter((k) => k === 'execFunnel' || BOTH_SLIDE_TOGGLES.has(k));
+  let ships = false;
+  try { ships = isScoped(scope) && normalizeScope(scope).shipments.length > 0; } catch { ships = false; }
+  return SLIDE_ORDER_KEYS.filter((k) => k !== 'shipments' || ships);
+}
+
+/** Is a unit switched OFF for this deck — the «الشرائح» chip (or the shipment-slide box, or
+ *  the opt-in definitions slide not turned on)? Mirrors build-spec.js / build-spec-both.js
+ *  on(): the KAMC + SGH deck ignores the exec toggle and has no opt-in set. */
+export function slideUnitHidden(key, { hospital, slides, scope } = {}) {
+  if (key === 'shipments') return !!(scope && scope.shipmentSlide === false);
+  if (hospital === 'both') return key !== 'execFunnel' && !!(slides && slides[key] === false);
+  if (key === 'definitions') return !(slides && slides.definitions === true);
+  return !!(slides && slides[key] === false);
+}
+
+/** The card's rows: this deck's units in the order in force. A switched-off unit KEEPS its
+ *  row and place (badge «مخفية»); a unit that is on but rendered nothing in the last preview
+ *  (`present`, the unit keys of that spec — no tracker document, no challenge content, no
+ *  send-out data) is marked `empty`. `present` null = not built yet = nothing marked. */
+export function slideOrderRows({ hospital, scope, slides, order, present = null } = {}) {
+  const units = slideOrderUnitsFor(hospital, scope);
+  return normalizeSlideOrder(order).filter((k) => units.includes(k)).map((key) => {
+    const hidden = slideUnitHidden(key, { hospital, slides, scope });
+    return {
+      key, label: slideOrderLabel(key), hidden,
+      empty: !hidden && present instanceof Set ? !present.has(key) : false,
+    };
+  });
+}
+
+/** What the card says and which buttons work. `temp` = the temporary order (or null),
+ *  `saved` = the saved one (absent ⇒ default). */
+export function slideOrderStatus({ temp = null, saved } = {}) {
+  const temporary = Array.isArray(temp);
+  const current = normalizeSlideOrder(temporary ? temp : saved);
+  const isDefault = sameSlideOrderAs(current, SLIDE_ORDER_KEYS);
+  return { temporary, current, isDefault, canSave: temporary, canRestore: temporary, canReset: !isDefault };
+}
+
+/** The order «حفظ كترتيب ثابت» writes: the CURRENT (temporary) order of the units the
+ *  operator DECIDED on — `units`, every unit shown on a deck where a move was made
+ *  (state.js tempSlideOrderUnits; null = every unit) — put into the slots those units hold
+ *  in the SAVED order. NOT the deck on screen at save time: a move made on KAMC and saved
+ *  from KAMC + SGH (no challenges / definitions / shipments) must keep the moved units'
+ *  places. A unit no move ever showed keeps its saved place, even when Settings moved it
+ *  while this temporary order existed (model/slide-order.js mergeVisibleOrder). The one
+ *  exception is the default order itself (below). */
+export function slideOrderToSave(saved, current, units) {
+  // «الترتيب الافتراضي» then «حفظ»: the operator chose THE default — every unit's place,
+  // the ones this deck does not show included — so it is saved whole (stored ABSENT).
+  if (sameSlideOrderAs(current, SLIDE_ORDER_KEYS)) return [...SLIDE_ORDER_KEYS];
+  const decided = new Set(Array.isArray(units) ? units : SLIDE_ORDER_KEYS);
+  return mergeVisibleOrder(saved, normalizeSlideOrder(current).filter((k) => decided.has(k)));
+}
+
+/** reportOptions with `order` as the saved order. The default order is stored as ABSENT (the
+ *  contract's "absent = default"), so a unit added in a later version lands in its default
+ *  place for an operator who never chose otherwise. A new object; `ro` is not mutated. */
+export function withSavedSlideOrder(ro, order) {
+  const next = { ...((ro && typeof ro === 'object') ? ro : {}) };
+  const o = normalizeSlideOrder(order);
+  if (sameSlideOrderAs(o, SLIDE_ORDER_KEYS)) delete next.slideOrder;
+  else next.slideOrder = o;
+  return next;
 }
 
 // Editable KPI override registry. key === the ReportModel.overrides key build-spec
@@ -1023,7 +1147,7 @@ export async function render(container, ctx) {
   // any failure, which simply omits the two slides.
   if (state.sendoutMaster === undefined) {
     const dataKey = ((store.settings || {}).grafana || {}).dataKey || '';
-    const mod = await tryImport('../ingest/sendout-master.js?v=v2026-10-13.4');
+    const mod = await tryImport('../ingest/sendout-master.js?v=v2026-10-13.5');
     state.sendoutMaster = (mod && mod.loadSendoutMaster)
       ? await mod.loadSendoutMaster(dataKey)
       : null;
@@ -1039,11 +1163,11 @@ export async function render(container, ctx) {
   // so the app always takes the guarded import.
   const compute = typeof ctx.compute === 'function'
     ? ctx.compute
-    : pickFn(await tryImport('../engine/engine.js?v=v2026-10-13.4'), ['compute', 'runEngine', 'run']);
+    : pickFn(await tryImport('../engine/engine.js?v=v2026-10-13.5'), ['compute', 'runEngine', 'run']);
   // The SGH / KAMC + SGH model builders — guarded like the engine they depend on. Loaded
   // even in KAMC mode: the generate click and a report-type switch go through modelFor
   // with it, and a missing module must surface as modelFor's loud fallback, not a crash.
-  const hrMod = await tryImport('../model/hospital-report.js?v=v2026-10-13.4');
+  const hrMod = await tryImport('../model/hospital-report.js?v=v2026-10-13.5');
   const model = modelFor(state, store, compute, { hospitalReport: hrMod });
   // The report type ON SCREEN — the model's, which is the state's choice unless that
   // build failed and modelFor fell back to KAMC (it said so).
@@ -1072,6 +1196,12 @@ export async function render(container, ctx) {
   // would write the stale copy back over the fresher settings. This also backfills a model
   // drafted by older code (before reportOptions existed) and guarantees .labels exists.
   model.reportOptions = reportOptionsFromSettings(store.settings);
+  // …and the TEMPORARY slide order on top, as model.slideOrder (the deck builders read it
+  // before the saved one — model/slide-order.js slideOrderOf). It lives on state, bound to
+  // this load (after modelFor above, which moves the load epoch on new data), so a re-sourced
+  // reportOptions can never wipe it and a new load can never inherit it; a stale copy left
+  // on a carried-forward model is removed here.
+  overlayTempSlideOrder(model, state);
   if (!model.overrides) model.overrides = {};
   // THE WEEK'S ACTIVITY chips (2026-08-05). model/delta-window.js recomputes
   // model.kpi.deltas from the ROWS' OWN DATES over the window [Sunday, reportDate]
@@ -1081,7 +1211,7 @@ export async function render(container, ctx) {
   // Guarded import, exactly as the retired picker was: a build without the module
   // degrades to the engine's own deltas instead of throwing. Re-run below on a
   // report-date change and on a mode switch; being PURE, every re-run agrees.
-  const dwMod = await tryImport('../model/delta-window.js?v=v2026-10-13.4');
+  const dwMod = await tryImport('../model/delta-window.js?v=v2026-10-13.5');
   const stampWindow = dwMod && dwMod.stampWindowDeltas;
   // The chips need the parsed CSV rows: with no upload in this session (mock preview)
   // stampWindowDeltas leaves the engine's deltas alone and stamps no window, and the
@@ -1129,24 +1259,11 @@ export async function render(container, ctx) {
   // overwrite would drop any slide/card key (or future top-level key) the settings doc
   // carries but this screen never modelled. labels is a full replace — deleting a label
   // override must actually delete it. Overrides are per-run and are NEVER written here.
+  // The merge itself is mergeReportOptions (pure, tested): it never writes the slide order.
   const persistReportOptions = () => {
     try {
       const doc = store.loadSettings();
-      const cur = (doc.reportOptions && typeof doc.reportOptions === 'object') ? doc.reportOptions : {};
-      const ro = model.reportOptions;
-      doc.reportOptions = {
-        ...cur,
-        excludeNoTat: !!ro.excludeNoTat,
-        slides: { ...(cur.slides || {}), ...ro.slides },
-        kpiCards: { ...(cur.kpiCards || {}), ...ro.kpiCards },
-        labels: { ...(ro.labels || {}) },
-        deltaMode: normalizeDeltaMode(ro.deltaMode),
-        // R2 — written as a real boolean so the settings mirror, the store validator and
-        // pipeline.js shouldAutoDownloadFiles all read one shape.
-        autoDownloadFiles: ro.autoDownloadFiles !== false,
-        // The tracker card's language pills — the same key Settings' radio writes.
-        trackerLang: normalizeTrackerLang(ro.trackerLang),
-      };
+      doc.reportOptions = mergeReportOptions(doc.reportOptions, model.reportOptions);
       store.saveSettings(doc);
     } catch (e) { console.warn('[review] persist reportOptions failed', e); }
   };
@@ -1194,9 +1311,9 @@ export async function render(container, ctx) {
     // A range's END when one is active (the deck is dated 'to'), else the chosen date.
     model.reportDate = effectiveReportDate(state, model.scope);
     stampDeltas(); // re-window the chips for the current report date (pure → idempotent)
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-10-13.4');
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-10-13.5');
     const buildSpec = pickFn(specMod, ['buildSpec', 'build', 'makeSpec', 'toSpec']);
-    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-10-13.4');
+    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-10-13.5');
     const renderFn = pickFn(rendMod, ['renderSpec', 'renderSlides', 'renderHtml', 'render']);
 
     if (!buildSpec || !renderFn) {
@@ -1219,6 +1336,16 @@ export async function render(container, ctx) {
       syncPager();
       return;
     }
+    // «ترتيب الشرائح»: which units this very deck rendered (a unit that is on but empty —
+    // no tracker document, no challenge content — is marked on the card), and, after a move,
+    // the moved unit's first slide is the one to show (pendingSlide, applied below).
+    previewUnits = new Set(spec.map((x) => unitOfSlideId(x && x.id)).filter(Boolean));
+    if (pendingUnit) {
+      const at = spec.findIndex((x) => unitOfSlideId(x && x.id) === pendingUnit);
+      if (at >= 0) pendingSlide = at;
+      pendingUnit = null;
+    }
+    paintOrderCard();
     scaleEl.innerHTML = '';
     try {
       let r = renderFn(spec, { variant: 'internal' });
@@ -1242,6 +1369,8 @@ export async function render(container, ctx) {
     }
   }
   let pendingSlide = (restore && Number.isInteger(restore.slide)) ? restore.slide : null;
+  let pendingUnit = null;     // a unit just moved on the order card → show its first slide
+  let previewUnits = null;    // the unit keys the last preview rendered (null = none yet)
 
   let debTimer = null;
   const schedulePreview = () => { clearTimeout(debTimer); debTimer = setTimeout(renderPreview, 260); };
@@ -1342,6 +1471,7 @@ export async function render(container, ctx) {
   // operator's — is what the next render shows, or worse, what generate publishes.
   const pinShownModel = () => { state.reportModel = model; };
   let scopeCard = null; // the «نطاق التقرير» <details>, when rows exist (built below)
+  let orderCard = null; // the «ترتيب الشرائح» <details> (built below, beside the slide chips)
   function rerenderKeepingPlace(extra = {}) {
     clearTimeout(debTimer);
     clearTimeout(dateRefreshTimer);
@@ -1349,6 +1479,8 @@ export async function render(container, ctx) {
       scrollY: window.scrollY || 0,
       scopeOpen: !!(scopeCard && scopeCard.open),
       historyOpen,
+      orderOpen: !!(orderCard && orderCard.open),
+      orderTemp: !!tempSlideOrder(state),
       slide: curSlide,
       ...extra,
     };
@@ -1583,6 +1715,7 @@ export async function render(container, ctx) {
       model.reportOptions.slides[t.key] = model.reportOptions.slides[t.key] === false;
       paint();
       persistReportOptions();
+      paintOrderCard(); // the unit's «مخفية» badge follows at once (it keeps its place)
       schedulePreview();
     });
     paint();
@@ -1596,6 +1729,122 @@ export async function render(container, ctx) {
     ...slideTogglesFor(hospital).map(slideChip),
   ]);
 
+  /* ---------- «ترتيب الشرائح» — the slide-order card (2026-10-13, slide-order CONTRACT §5–7) ----------
+   * Between «الشرائح» and the live preview: WHICH slides, then in WHAT ORDER, then the result.
+   * TWO orders, never confused:
+   *   • the SAVED (fixed) one — settings.reportOptions.slideOrder, written only by «حفظ كترتيب
+   *     ثابت» here and by the Settings tab; every new report and the automation use it;
+   *   • the TEMPORARY one — state.slideOrder (state.js), made by any move here and used by
+   *     THIS report's preview and its four files only; it dies with the load, «تقرير جديد»
+   *     and the upload's «متابعة», and survives a type / scope / date switch, Settings, «رجوع».
+   * A move made on a deck that lacks some units (KAMC + SGH has no challenges…) leaves those
+   * units' places alone (mergeVisibleOrder). Every change redraws the preview at once. */
+  const SO = STR.review.slideOrder;
+  const savedSlideOrder = () => normalizeSlideOrder(model.reportOptions && model.reportOptions.slideOrder);
+  const orderUnits = () => slideOrderUnitsFor(hospital, model.scope);
+  const orderStatus = () => slideOrderStatus({ temp: tempSlideOrder(state), saved: savedSlideOrder() });
+  /** Adopt `full` (a whole order) for this report: temporary unless it IS the saved order.
+   *  `decided` = the units this change decided on (state.js setTempSlideOrder — what a later
+   *  «حفظ» stores, whichever deck is on screen then). */
+  function adoptSlideOrder(full, movedKey = null, decided = null) {
+    if (sameSlideOrderAs(full, savedSlideOrder())) clearTempSlideOrder(state);
+    else setTempSlideOrder(state, normalizeSlideOrder(full), decided);
+    overlayTempSlideOrder(model, state);
+    pendingUnit = movedKey;
+    paintOrderCard();
+    clearTimeout(debTimer);
+    renderPreview();
+  }
+  const orderList = slideOrderList({
+    getRows: () => slideOrderRows({
+      hospital, scope: model.scope, slides: model.reportOptions.slides,
+      order: slideOrderOf(model), present: previewUnits,
+    }),
+    onMove: (nextShown, key) => adoptSlideOrder(mergeVisibleOrder(slideOrderOf(model), nextShown), key, orderUnits()),
+  });
+  const orderPill = el('span', { class: 'sord-pill' });
+  const orderStatusEl = el('div', { class: 'sord-status', role: 'status' });
+  const orderSaveBtn = el('button', {
+    type: 'button', class: 'btn btn--primary btn--sm', text: SO.save,
+    onClick: () => {
+      const st = orderStatus();
+      if (!st.canSave) return;
+      const order = slideOrderToSave(savedSlideOrder(), st.current, tempSlideOrderUnits(state));
+      try {
+        const doc = store.loadSettings();
+        doc.reportOptions = withSavedSlideOrder(doc.reportOptions, order);
+        store.saveSettings(doc);
+      } catch (e) {
+        console.warn('[review] saving the slide order failed', e);
+        toast(SO.saveFailed, 'err');
+        return;
+      }
+      // The model's reportOptions object is shared with the chips and the labels editor —
+      // only its slideOrder is brought in line with what was just stored.
+      const stored = reportOptionsFromSettings(store.settings).slideOrder;
+      if (stored) model.reportOptions.slideOrder = stored;
+      else delete model.reportOptions.slideOrder;
+      clearTempSlideOrder(state);
+      overlayTempSlideOrder(model, state);
+      paintOrderCard();
+      clearTimeout(debTimer);
+      renderPreview();
+      toast(SO.savedToast, 'ok');
+    },
+  });
+  const orderRestoreBtn = el('button', {
+    type: 'button', class: 'btn btn--ghost btn--sm', text: SO.restoreSaved,
+    onClick: () => {
+      if (!orderStatus().canRestore) return;
+      adoptSlideOrder(savedSlideOrder());
+      toast(SO.restoredToast, 'ok');
+    },
+  });
+  const orderDefaultBtn = el('button', {
+    type: 'button', class: 'btn btn--ghost btn--sm', text: SO.resetDefault,
+    onClick: () => {
+      if (!orderStatus().canReset) return;
+      // TEMPORARY unless the saved order is the default; it decides EVERY unit's place.
+      adoptSlideOrder([...SLIDE_ORDER_KEYS], null, [...SLIDE_ORDER_KEYS]);
+      if (orderStatus().temporary) toast(SO.defaultToast, 'ok');
+    },
+  });
+  orderCard = el('details', { class: 'card sord-card' }, [
+    el('summary', { class: 'card__title sord-card__summary' }, [el('span', { text: SO.title }), orderPill]),
+    el('p', { class: 'small muted', style: 'margin:-4px 0 10px', text: SO.hint }),
+    orderStatusEl,
+    orderList.el,
+    el('div', { class: 'sord-actions' }, [orderSaveBtn, orderRestoreBtn, orderDefaultBtn]),
+  ]);
+  if (restore && restore.orderOpen) orderCard.open = true;
+  // Was a temporary order already in force at the last paint? A keep-place rerender hands
+  // it over (restore.orderTemp) so the operator's collapse survives it; a fresh entry into
+  // the screen starts false, so a temporary order opens the card once on arrival.
+  let orderWasTemp = !!(restore && restore.orderTemp);
+  function paintOrderCard() {
+    const st = orderStatus();
+    // Auto-open when a temporary order COMES INTO force (first move, or arriving with one):
+    // the operator must SEE that this report is not using the fixed order before generating
+    // it. Only on that change — paintOrderCard runs on every preview repaint (each chip,
+    // date, label edit), and re-opening there would undo the operator's collapse each time.
+    if (st.temporary && !orderWasTemp) orderCard.open = true;
+    orderWasTemp = st.temporary;
+    orderPill.textContent = st.temporary ? SO.pillTemp : SO.pillSaved;
+    orderPill.className = 'sord-pill' + (st.temporary ? ' is-temp' : '');
+    orderStatusEl.className = 'sord-status' + (st.temporary ? ' is-temp' : '');
+    orderStatusEl.textContent = '';
+    orderStatusEl.append(
+      el('strong', { text: `${st.temporary ? '⚠' : '✓'} ${st.temporary ? SO.statusTemp : SO.statusSaved}`
+        + (!st.temporary && st.isDefault ? ` ${SO.defaultTag}` : '') }),
+      el('span', { class: 'sord-status__hint', text: st.temporary ? SO.statusTempHint : SO.statusSavedHint }),
+    );
+    orderSaveBtn.disabled = !st.canSave;
+    orderRestoreBtn.disabled = !st.canRestore;
+    orderDefaultBtn.disabled = !st.canReset;
+    orderList.paint();
+  }
+  paintOrderCard();
+
   // Labels editor (collapsible, collapsed by default). One field per LABEL_NAMES key,
   // placeholder = DEFAULT_LABELS[key], value = reportOptions.labels[key] (empty =
   // default). Registry lives in build-spec.js — graceful if not exported yet.
@@ -1603,7 +1852,7 @@ export async function render(container, ctx) {
     el('summary', { class: 'card__title', style: 'cursor:pointer', text: STR.review.labelsCardTitle }),
   ]);
   (async () => {
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-10-13.4');
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-10-13.5');
     const LABEL_NAMES = specMod && specMod.LABEL_NAMES;
     const DEFAULT_LABELS = (specMod && specMod.DEFAULT_LABELS) || {};
     if (!LABEL_NAMES || typeof LABEL_NAMES !== 'object') {
@@ -1649,6 +1898,9 @@ export async function render(container, ctx) {
       clearTimeout(dateRefreshTimer);
       pinShownModel();
       const epoch = state.scopeEpoch;
+      // Read BEFORE modelFor: a reload under the screen moves the load epoch there, and the
+      // temporary slide order dies with it (state.js tempSlideOrder) — checked below.
+      const hadTempOrder = !!tempSlideOrder(state);
       const m = modelFor(state, store, compute, { hospitalReport: hrMod });
       // …but it must still be the REPORT on screen. A click-time rebuild can come back
       // with a different scope: the scoped build failed and modelFor fell back to the full
@@ -1669,6 +1921,15 @@ export async function render(container, ctx) {
         rerenderKeepingPlace(); // no pin: m, already in state.reportModel, is the one to show
         return;
       }
+      // The SLIDE ORDER is part of it too: a temporary order shown on the card but dropped
+      // by that reload would publish the saved order the operator is not looking at. Stop,
+      // say so, and show the report with the saved order first.
+      if (hadTempOrder && !tempSlideOrder(state)) {
+        toast(`${STR.common.warning}: ${STR.review.slideOrder.dataChanged}`, 'warn');
+        genButton.disabled = false;
+        rerenderKeepingPlace();
+        return;
+      }
       // A report type whose hospital has no rows in the loaded data is never generated
       // (hospitalAvailability) — re-checked at click time: the data may have been
       // reloaded under the screen since the button was painted.
@@ -1683,6 +1944,9 @@ export async function render(container, ctx) {
       const s = store.settings || {};
       m.scorecard = s.scorecard || m.scorecard;
       m.displayNames = s.displayNames || m.displayNames;
+      // The slide order on screen goes with it: the temporary one when set (all four files
+      // follow it), else the saved one model.reportOptions already carries.
+      overlayTempSlideOrder(m, state);
       state.reportModel = m;
       navigate('generate');
     },
@@ -2229,7 +2493,7 @@ export async function render(container, ctx) {
   const controls = el('div', { class: 'review-controls' }, [
     deltaArea, historyHost, dateField, trackerCard, ...manualCards, kpiCard, labelsHost, generateBtn,
   ]);
-  const preview = el('div', { class: 'review-preview' }, [slideToggleRow, previewFrame]);
+  const preview = el('div', { class: 'review-preview' }, [slideToggleRow, orderCard, previewFrame]);
 
   // THIRD hospitals' orders the upload left out (state.parsed.excludedHospitals — neither
   // KAMC nor SGH; set beside every write of the orders, see state.js): one muted line

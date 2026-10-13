@@ -85,6 +85,7 @@ function freshParsed() {
  *   engineOutput:import('./contracts.js').EngineOutput|null,
  *   reportModel:import('./contracts.js').ReportModel|null,
  *   reportHospital:('kamc'|'sgh'|'both'),
+ *   slideOrder:{order:string[], epoch:number, units:string[]|null}|null,
  *   edits:Object,
  *   reportDate:string|null,
  *   settings:import('./contracts.js').Settings|null,
@@ -101,6 +102,16 @@ export const state = {
   // report itself), and back to 'both' — KAMC + SGH, the MAIN weekly report — on
   // «تقرير جديد». KAMC-only / SGH-only are the special single-hospital reports.
   reportHospital: 'both',
+  // THE TEMPORARY SLIDE ORDER (2026-10-13, slide-order CONTRACT decision 5): a reorder made
+  // on the review screen's «ترتيب الشرائح» card and NOT saved as the fixed order. A choice
+  // about ONE report, exactly like the scope: memory only, never in settings (the SAVED order
+  // is settings.reportOptions.slideOrder), never read by the unattended automation. Bound to
+  // the load it was made on (`epoch` = state.scopeEpoch then — see tempSlideOrder below), so
+  // ANY new data load drops it; also dropped by «تقرير جديد» (resetRunData) and by the upload
+  // screen's «متابعة» (clearTempSlideOrder); a page reload drops it because state is memory.
+  // It SURVIVES a report-type switch, a scope / date change, a Settings visit and «رجوع» from
+  // generate — none of those is a new report.
+  slideOrder: null,
   edits: {},
   reportDate: null,
   settings: null,
@@ -114,6 +125,75 @@ export function resetRunData() {
   state.engineOutput = null;
   state.reportModel = null;
   state.reportHospital = 'both'; // the main report (see the field above)
+  state.slideOrder = null; // a new report starts from the SAVED fixed order (see the field above)
   state.edits = {};
   state.reportDate = null;
+}
+
+/* ---- the temporary slide order (see state.slideOrder above) ----
+ * Pure helpers over a state-SHAPED object passed in (never this module's singleton), so the
+ * review screen, the generate screen, the upload screen, the dev harness and node tests all
+ * apply one rule to whichever state they hold. No imports on purpose: the order's own
+ * vocabulary (model/slide-order.js) is applied by the callers — this file only owns WHEN a
+ * temporary order is in force. */
+
+/** The load a temporary order belongs to: the review screen's scope epoch (screen-review.js
+ *  currentScope — bumped on every new data load, 0 while nothing is loaded). */
+const loadEpochOf = (st) => (st && Number.isInteger(st.scopeEpoch) ? st.scopeEpoch : 0);
+
+/** The temporary order in force for THIS load, or null. A temporary order made against an
+ *  earlier load is dropped here (st.slideOrder = null), the same way the scope dies with its
+ *  data. Call it AFTER the review's modelFor (which moves the epoch on a new load). */
+export function tempSlideOrder(st) {
+  const t = st && st.slideOrder;
+  if (!t) return null;
+  if (!Array.isArray(t.order) || t.epoch !== loadEpochOf(st)) {
+    st.slideOrder = null;
+    return null;
+  }
+  return t.order;
+}
+
+/** Make `order` this load's temporary order (a copy); null / a non-array clears it.
+ *  `units` = the units the operator DECIDED on with this change (the units of the deck the
+ *  move was made on; every unit for «الترتيب الافتراضي»), accumulated over the temporary
+ *  order's life in `.units` — «حفظ كترتيب ثابت» stores those units' places and keeps every
+ *  other unit beside its saved neighbours (screen-review.js slideOrderToSave →
+ *  slide-order.js mergeVisibleOrder), not at a fixed index. WHY not the deck on
+ *  screen at save time: a move made on KAMC and saved from KAMC + SGH (which lacks
+ *  challenges / definitions / shipments) would otherwise throw those moves away. Omitted
+ *  `units` = unknown = every unit (`.units` null), the safe reading for a save. */
+export function setTempSlideOrder(st, order, units = null) {
+  if (!st) return;
+  if (!Array.isArray(order)) { st.slideOrder = null; return; }
+  const cur = tempSlideOrder(st) ? st.slideOrder : null; // a stale one (earlier load) starts afresh
+  const prev = !cur ? [] : (Array.isArray(cur.units) ? cur.units : null);
+  const touched = prev === null || !Array.isArray(units) ? null : [...new Set([...prev, ...units])];
+  st.slideOrder = { order: [...order], epoch: loadEpochOf(st), units: touched };
+}
+
+/** The units the temporary order decided on (see setTempSlideOrder): an array, or null when
+ *  that is every unit OR there is no temporary order (check tempSlideOrder first). */
+export function tempSlideOrderUnits(st) {
+  if (!tempSlideOrder(st)) return null;
+  const u = st.slideOrder.units;
+  return Array.isArray(u) ? [...u] : null;
+}
+
+/** Drop the temporary order («متابعة», «استعادة الترتيب الثابت», a save as fixed). */
+export function clearTempSlideOrder(st) {
+  if (st) st.slideOrder = null;
+}
+
+/** Overlay the temporary order onto a ReportModel as model.slideOrder (what the deck builders
+ *  read first — model/slide-order.js slideOrderOf), or REMOVE a stale one so the saved order
+ *  (model.reportOptions.slideOrder) applies. Never touches model.reportOptions: the review
+ *  re-sources that from settings on every render. Returns the order in force, or null. */
+export function overlayTempSlideOrder(model, st) {
+  const order = tempSlideOrder(st);
+  if (model && typeof model === 'object') {
+    if (order) model.slideOrder = [...order];
+    else delete model.slideOrder;
+  }
+  return order;
 }

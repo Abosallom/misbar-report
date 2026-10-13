@@ -20,17 +20,17 @@
 // throws on write; on failure we fall back to an in-memory doc and expose
 // isEphemeral() so the UI can warn the user their edits will not persist.
 
-import { SETTINGS_KEY } from './contracts.js?v=v2026-10-13.4';
-import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-10-13.4';
-import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-10-13.4';
+import { SETTINGS_KEY } from './contracts.js?v=v2026-10-13.5';
+import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-10-13.5';
+import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-10-13.5';
 import {
   HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED, GRAFANA_SEED, REPORT_OPTIONS_SEED,
   SNAPSHOT_HISTORY_SEED, AUTOMATION_SEED, TASK_LOG_SEED,
-} from './seeds/defaults.js?v=v2026-10-13.4';
-import { DELTA_MODES, canonicalDeltaMode } from './model/delta-baseline.js?v=v2026-10-13.4';
+} from './seeds/defaults.js?v=v2026-10-13.5';
+import { DELTA_MODES, canonicalDeltaMode } from './model/delta-baseline.js?v=v2026-10-13.5';
 import {
   sanitizeTaskLog, recordShownTasks, TASK_LOG_LIMIT, TASK_KEY_MAX,
-} from './model/task-lifecycle.js?v=v2026-10-13.4';
+} from './model/task-lifecycle.js?v=v2026-10-13.5';
 // The ProjectTracker shape has ONE owner — the module that produces it. The store only
 // asks "is this the tagged document?" and "give me its clean copy", exactly as it
 // defers the taskLog entry shape to task-lifecycle.js above. The same module owns the
@@ -39,7 +39,10 @@ import {
 import {
   TRACKER_FORMAT, isProjectTracker, normalizeProjectTracker, normalizeTrackerLang, TRACKER_LANGS,
   backfillTaskFields,
-} from './ingest/task-tracker.js?v=v2026-10-13.4';
+} from './ingest/task-tracker.js?v=v2026-10-13.5';
+// The slide-order vocabulary (reportOptions.slideOrder) has one owner too: the leaf module
+// the deck builders sort by. The store only cleans, caps and normalises with it.
+import { normalizeSlideOrder, SLIDE_ORDER_MAX } from './model/slide-order.js?v=v2026-10-13.5';
 
 export const SCHEMA_VERSION = 9;
 
@@ -142,6 +145,18 @@ function backfillReportOptions(doc) {
   // the English per cell, so a tracker without Arabic columns renders as it did. No
   // schema bump — like every key above, only a MISSING / invalid value is filled.
   ro.trackerLang = normalizeTrackerLang(ro.trackerLang) || seed.trackerLang;
+  // slideOrder (2026-10-13, the operator's SAVED slide order — model/slide-order.js). The
+  // one key here that is NEVER filled: ABSENT means "the default order", so a slide unit
+  // added in a later version lands in its default place instead of being frozen out by a
+  // stored copy of today's list (and the seed carries none, keeping the first-run doc and
+  // its deck exactly as before). A present value is only CLEANED: a non-list (hand-edited
+  // or corrupt storage) is removed, back to the default; a list is normalised to a full
+  // permutation (unknown / duplicate / retired 'action' keys dropped, missing units put
+  // back at their default neighbourhood).
+  if ('slideOrder' in ro) {
+    if (Array.isArray(ro.slideOrder)) ro.slideOrder = normalizeSlideOrder(ro.slideOrder);
+    else delete ro.slideOrder;
+  }
 }
 
 /**
@@ -997,6 +1012,16 @@ function validateImport(doc) {
         `حقل reportOptions.trackerLang غير صالح: يجب أن يكون ${TRACKER_LANGS.map((m) => `'${m}'`).join(' أو ')}.`,
       );
     }
+    // slideOrder: a list of slide-unit NAMES. Only the container shape (and a length cap,
+    // so a hostile backup cannot store an unbounded list) is enforced; an unknown name is
+    // NOT an error — pickImportKeys drops it, which keeps a backup from a newer version
+    // (with units this one does not know) importable.
+    if ('slideOrder' in ro) {
+      const so = ro.slideOrder;
+      if (!Array.isArray(so) || so.length > SLIDE_ORDER_MAX || so.some((k) => typeof k !== 'string')) {
+        throw new Error('حقل reportOptions.slideOrder غير صالح: يجب أن يكون قائمة بأسماء الشرائح.');
+      }
+    }
     if ('slides' in ro && !isPlainObject(ro.slides)) {
       throw new Error('حقل reportOptions.slides غير صالح: يجب أن يكون كائناً.');
     }
@@ -1176,7 +1201,7 @@ function pickImportKeys(doc) {
     out.grafana = picked;
   }
   if (isPlainObject(out.reportOptions)) {
-    // Whitelist exactly {excludeNoTat, autoDownloadFiles, deltaMode, trackerLang,
+    // Whitelist exactly {excludeNoTat, autoDownloadFiles, deltaMode, trackerLang, slideOrder,
     // slides(REPORT_OPTION_SLIDE_KEYS), kpiCards(REPORT_OPTION_CARD_KEYS), labels}. Flags coerce to booleans; only string label values
     // survive; unknown slide/card subkeys are discarded.
     const ro = out.reportOptions;
@@ -1194,6 +1219,12 @@ function pickImportKeys(doc) {
     // Same for the tracker slides' language: canonical value or dropped.
     const tl = normalizeTrackerLang(ro.trackerLang);
     if (tl != null) picked.trackerLang = tl;
+    // The saved slide order, normalised (unknown / duplicate / 'action' names dropped,
+    // missing units back at their default place). deepMergeImportWins CLONES arrays, so a
+    // backup that carries an order REPLACES this device's one — never a union of the two.
+    // A backup whose reportOptions carries NO order is a default-order backup (absent =
+    // default) and resets this device's order: importSettings' post-merge fixup.
+    if (Array.isArray(ro.slideOrder)) picked.slideOrder = normalizeSlideOrder(ro.slideOrder);
     if (isPlainObject(ro.slides)) {
       const s = {};
       for (const k of REPORT_OPTION_SLIDE_KEYS) if (k in ro.slides) s[k] = !!ro.slides[k];
@@ -1419,6 +1450,17 @@ export function importSettings(jsonText) {
   // editedAt or fileName beside someone else's tasks, or the old tracker's
   // challenges/risks beside the new document).
   if ('cachedTracker' in incoming) merged.cachedTracker = clone(incoming.cachedTracker);
+  // The saved slide order REPLACES too, and ABSENCE is a value here: the default order is
+  // stored ABSENT (see backfillReportOptions), so a backup from a device on the default order
+  // has reportOptions without slideOrder. Unlike every other reportOptions key — always
+  // present in an export, because backfill fills it — "absent" must not mean "keep this
+  // device's": restoring that backup would otherwise keep a custom order it never had. No
+  // version gate: a backup from before the key existed was on the default order as well. A
+  // backup with no reportOptions at all says nothing about the layout and leaves it alone.
+  if (isPlainObject(incoming.reportOptions) && !('slideOrder' in incoming.reportOptions)
+      && isPlainObject(merged.reportOptions)) {
+    delete merged.reportOptions.slideOrder;
+  }
   // The taskLog merge is a per-key UNION, so two in-bounds logs can produce an
   // out-of-bounds one. Re-apply the cap the validator enforces (see capTaskLog),
   // and ONLY when the union actually overflowed — an in-bounds import must merge

@@ -27,6 +27,9 @@
 // PRESENTATION OPTIONS (all read from the model, safe defaults when absent):
 //   m.reportOptions.labels[key]   overrides DEFAULT_LABELS static text (byte-stable when absent)
 //   m.reportOptions.slides[key]   toggles the 5 middle slides (cover/thanks always render)
+//   m.reportOptions.slideOrder    the SAVED unit order; m.slideOrder (the review screen's
+//                                 one-report order) wins over it. Absent → today's order,
+//                                 byte-identical (model/slide-order.js, buildSpec)
 //   m.reportOptions.kpiCards[key] toggles the 7 exec KPI cards (row geometry repacks)
 //                                 + the 'turnaround' block on the monthly slide (an
 //                                   explicit-true key, seeded true since round 6 — see
@@ -63,16 +66,19 @@
 // standing rule, unchanged for it). The SGH and BOTH decks print exactly the names the
 // reference deck prints («SGH», «مستشفى الألماني السعودي») — the reference supersedes the
 // old rule for those two report types only.
-import { COLORS as C, GEOM } from '../theme.js?v=v2026-10-13.4';
-import { AR_COUNTRY, AR_COUNTRY_SHORT, reflabShort } from '../model/sendout.js?v=v2026-10-13.4';
-import { isScoped, hasRange } from '../model/scope.js?v=v2026-10-13.4';
+import { COLORS as C, GEOM } from '../theme.js?v=v2026-10-13.5';
+import { AR_COUNTRY, AR_COUNTRY_SHORT, reflabShort } from '../model/sendout.js?v=v2026-10-13.5';
+import { isScoped, hasRange } from '../model/scope.js?v=v2026-10-13.5';
 // The project-tracker slides (shared with build-spec-both.js; a leaf module, no cycle).
-import { buildTrackerSlides, TRACKER_LABELS } from './build-tracker.js?v=v2026-10-13.4';
+import { buildTrackerSlides, TRACKER_LABELS } from './build-tracker.js?v=v2026-10-13.5';
+// Slide ORDER (a leaf module, no cycle): the unit order the operator saved or chose for
+// this one report — see buildSpec's middleDefs.
+import { orderUnits, slideOrderOf } from '../model/slide-order.js?v=v2026-10-13.5';
 // NAMESPACE import on purpose: build-spec-both.js may import helpers back from this file
 // (an ESM cycle). A namespace binding is only read inside buildSpec, at CALL time, when
 // both modules have finished evaluating — and it tolerates either a named
 // `buildBothSpec` export (the contract's name) or a default export.
-import * as bothSpecModule from './build-spec-both.js?v=v2026-10-13.4';
+import * as bothSpecModule from './build-spec-both.js?v=v2026-10-13.5';
 
 // EXPLICIT-TRUE kpiCards KEYS. reportOptions.kpiCards normally reads "on unless === false"
 // (see buildExec's cardDefs filter). The keys in this set INVERT that: they render only
@@ -2638,7 +2644,15 @@ export function buildSpec(reportModel, { variant = 'internal' } = {}) {
     // the sequential footer numbering like the other middle slides.
     { key: 'definitions', build: () => [buildDefinitions(m)] },
   ];
-  const middle = middleDefs.filter((x) => on(x.key)).flatMap((x) => x.build());
+  // SLIDE ORDER (model/slide-order.js, user request 2026-10-13). The literal order above is
+  // the DEFAULT; slideOrderOf picks the report's temporary order, else the saved one. The
+  // DEFS are sorted — before filter/flatMap — so a multi-page unit (shipments + its
+  // continuations, the send-out pair, the tracker pages) moves as one block and the
+  // post-pass below numbers the pages 1..n in the NEW order. With no order set the sort is
+  // the identity, which keeps every deck byte-identical to the pre-order one. Cover and
+  // thanks are not units: they stay first and last. The comments above that say where a
+  // slide "sits" describe the default order.
+  const middle = orderUnits(middleDefs, slideOrderOf(m)).filter((x) => on(x.key)).flatMap((x) => x.build());
   // SCOPED-REPORT PILL on every content slide (see scopeTag — it shares the footer strip
   // with the page number), pushed in the same pass as the page number and BEFORE it, so
   // the page number stays each slide's last element. buildCover adds the cover's own.

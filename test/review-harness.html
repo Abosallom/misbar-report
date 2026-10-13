@@ -57,8 +57,26 @@
         array too. Then press «توليد»: the handed-over model must carry YOUR edits, never
         «AUTOMATION»; with a scope on and «+ سحب», generate must refuse and show the full
         report instead of publishing it unseen.
+    «ترتيب الشرائح» (2026-10-13) — the order card sits between «الشرائح» and the preview:
+    «إعدادات: ترتيب ثابت …»  a Settings edit of the SAVED order (متابعة المشروع first ⇄
+        default — the default is stored ABSENT), then back to review: a temporary order made
+        on the card must SURVIVE it; without one the deck follows the new saved order.
+    «متابعة (رفع)»  the upload screen's «متابعة»: the model and the temporary order go.
+    «تقرير جديد»  the generate screen's «تقرير جديد» (+ the next upload): a fresh model and
+        a NEW orders array — the card must read «الترتيب الثابت المحفوظ» again.
+    «توليد» then shows what generate would build; the live line's «الترتيب → generate» is
+        the order all four files would use (the handed-over model's slideOrderOf).
+    «إعادة تحميل البيانات» must drop a temporary order too (a new load).
+    Review-round checks: «إلى الأعلى» on a unit on KAMC, switch to «KAMC + SGH», «حفظ كترتيب
+        ثابت», back to KAMC — the unit must still be where you put it (the save stores the
+        units of the deck the MOVE was made on). With a temporary order, «تشغيل آلي + سحب»
+        then «توليد»: generate must refuse with «تغيّرت البيانات — عاد الترتيب الثابت…» and
+        show the saved order; a second «توليد» hands it over «(ثابت)». Collapse the card
+        while a temporary order is on, then toggle a «الشرائح» chip: it must stay collapsed.
+  Query ?order=tracker seeds a SAVED order with «متابعة المشروع» first.
   The live line under the bar reads state.scope, the model's scope, the numbers and the
-  compute-run count after every render and every click.
+  compute-run count after every render and every click, and the slide order: temporary
+  (state.slideOrder), saved (settings) and the model's.
   STALE MODULES: python's http.server sends no cache headers, so after editing a source
   file a plain reload can run the browser's heuristically-cached copy of it (seen here
   with engine.js). Hard-reload, or open the page with a fresh query (…&r=2).
@@ -89,6 +107,10 @@
   <button id="h-set-excl" type="button"></button>
   <button id="h-set-cancel" type="button"></button>
   <span class="sep" aria-hidden="true"></span>
+  <button id="h-order-saved" type="button"></button>
+  <button id="h-continue" type="button">متابعة (رفع)</button>
+  <button id="h-new-report" type="button">تقرير جديد</button>
+  <span class="sep" aria-hidden="true"></span>
   <button id="h-auto" type="button">تشغيل آلي (النموذج فقط)</button>
   <button id="h-auto-pull" type="button">تشغيل آلي + سحب</button>
   <label><input id="h-fail" type="checkbox"> فشل الحساب المخصص</label>
@@ -110,6 +132,9 @@
   import { GOLDEN_ORDERS } from './fixtures/golden-orders.js';
   import { takeOrders } from '../src/model/hospital.js';
   import { buildMockTracker } from '../src/ui/screen-upload.js';
+  import { clearTempSlideOrder } from '../src/state.js';
+  import { SLIDE_ORDER_KEYS, normalizeSlideOrder, slideOrderOf } from '../src/model/slide-order.js';
+  import { slideOrderLabel } from '../src/ui/components.js';
 
   const params = new URLSearchParams(location.search);
   const REPORT_DATE = /^\d{4}-\d{2}-\d{2}$/.test(params.get('date') || '') ? params.get('date') : '2026-07-09';
@@ -119,6 +144,9 @@
   const WITH_TRACKER = params.get('tracker') !== '0';
   const HOSPITAL = ['both', 'kamc', 'sgh'].includes(params.get('hospital')) ? params.get('hospital') : 'kamc';
   const TRACKER_LANG = ['ar', 'en', 'both'].includes(params.get('lang')) ? params.get('lang') : null;
+  // ?order=tracker — a SAVED slide order with the tracker unit first (synthetic choice).
+  const TRACKER_FIRST = ['tracker', ...SLIDE_ORDER_KEYS.filter((k) => k !== 'tracker')];
+  const SAVED_ORDER = params.get('order') === 'tracker' ? TRACKER_FIRST : null;
   const UNATTRIBUTED = 'غير محدد'; // engine.js byLab caption for a blank facility
   const app = document.getElementById('app');
   const statusEl = document.getElementById('harness-status');
@@ -214,7 +242,10 @@
       cachedTracker: null,
       // ?lang= seeds a stored trackerLang; without it no reportOptions is stored at all
       // (an install from before the option — the screens must read 'ar').
-      ...(TRACKER_LANG ? { reportOptions: { trackerLang: TRACKER_LANG } } : {}),
+      ...((TRACKER_LANG || SAVED_ORDER) ? { reportOptions: {
+        ...(TRACKER_LANG ? { trackerLang: TRACKER_LANG } : {}),
+        ...(SAVED_ORDER ? { slideOrder: SAVED_ORDER } : {}),
+      } } : {}),
     };
   }
 
@@ -331,6 +362,11 @@
     bits.push(`متابعة: ${live ? `${live.tasks.length} مهمة` : 'لا يوجد'} · المحفوظ: ${ct ? `${ct.tasks.length} مهمة، آخر تعديل ${ct.editedAt || '—'}` : 'لا يوجد'} · في النموذج ${m && m.projectTracker === live ? 'الوثيقة نفسها' : 'نسخة أخرى!'}`);
     const translated = live ? live.tasks.filter((x) => String(x.taskAr || '').trim()).length : 0;
     bits.push(`لغة الشريحة: النموذج ${(m && m.reportOptions && m.reportOptions.trackerLang) || '—'} · المحفوظ ${(s.reportOptions && s.reportOptions.trackerLang) || '—'} · مترجمة ${translated} من ${live ? live.tasks.length : 0}`);
+    const orderText = (o) => normalizeSlideOrder(o).map(slideOrderLabel).join(' › ');
+    const temp = state.slideOrder && state.slideOrder.order;
+    bits.push(`ترتيب مؤقت: ${temp ? orderText(temp) : 'لا يوجد'} (حمولة ${state.slideOrder ? state.slideOrder.epoch : '—'} / الحالية ${state.scopeEpoch || 0})`);
+    bits.push(`الترتيب الثابت: ${s.reportOptions && Array.isArray(s.reportOptions.slideOrder) ? orderText(s.reportOptions.slideOrder) : 'غير محفوظ (الافتراضي)'}`);
+    bits.push(`ترتيب النموذج: ${m ? orderText(slideOrderOf(m)) : '—'}`);
     if (ambiguous) bits.push(`صف غامض: الشحنة ${ambiguous.shipment} · ${ambiguous.lab} = ${labTotal(k, ambiguous.lab)}`);
     liveEl.textContent = bits.join(' • ');
   }
@@ -347,7 +383,9 @@
     const tracker = t ? `${t.tasks.length} مهمة (الأولى: ${(t.tasks[0] && t.tasks[0].task) || '—'})` : 'لا يوجد';
     return `→ generate: التاريخ ${m.reportDate} • ${scoped ? 'مخصص' : 'كامل'} • الإجمالي ${m.kpi && m.kpi.totals ? m.kpi.totals.total : '?'}`
       + ` • شحنات ${(m.shipmentDetails || []).length} • الدعم المطلوب: ${support} • متابعة المشروع: ${tracker}`
-      + ` (لغة ${(m.reportOptions && m.reportOptions.trackerLang) || '—'}) • ${names}`;
+      + ` (لغة ${(m.reportOptions && m.reportOptions.trackerLang) || '—'}) • ${names}`
+      + ` • الترتيب → generate: ${normalizeSlideOrder(slideOrderOf(m)).map(slideOrderLabel).join(' › ')}`
+      + ` (${Array.isArray(m.slideOrder) ? 'مؤقت' : 'ثابت'})`;
   }
 
   /* Router stand-in: 'generate' only reports what the screen handed over (the model the
@@ -403,6 +441,9 @@
     document.getElementById('h-set-tat').textContent = removedTat ? 'إعدادات: أعِد TAT الفحص الأكثر' : 'إعدادات: احذف TAT الفحص الأكثر';
     document.getElementById('h-set-excl').textContent = `إعدادات: استبعاد بدون TAT (${s.reportOptions && s.reportOptions.excludeNoTat ? 'مفعّل' : 'معطّل'})`;
     document.getElementById('h-set-cancel').textContent = cancelBumped ? 'إعدادات: أعِد ثوابت الإلغاء' : 'إعدادات: ثوابت الإلغاء +50';
+    const savedOrder = s.reportOptions && s.reportOptions.slideOrder;
+    document.getElementById('h-order-saved').textContent = Array.isArray(savedOrder)
+      ? 'إعدادات: ترتيب ثابت = الافتراضي' : 'إعدادات: ترتيب ثابت = المتابعة أولاً';
   }
   document.getElementById('h-set-tat').addEventListener('click', () => editSettings((doc) => {
     if (removedTat) { doc.tatLookup[removedTat.key] = removedTat.days; removedTat = null; return; }
@@ -420,6 +461,34 @@
     cancelBumped = Object.keys(cbm)[0] || '2026-01';
     cbm[cancelBumped] = Number(cbm[cancelBumped] || 0) + 50;
   }, 'عُدّلت ثوابت الإلغاء التاريخية ثم عودة للمراجعة — الشريحة الشهرية للتقرير الكامل تتبعها'));
+
+  /* ---- «ترتيب الشرائح»: the SAVED order in Settings, «متابعة», «تقرير جديد» ---- */
+  // Settings' own write (screen-settings.js setSavedSlideOrder): the default is stored ABSENT.
+  document.getElementById('h-order-saved').addEventListener('click', () => editSettings((doc) => {
+    const ro = { ...(doc.reportOptions || {}) };
+    if (Array.isArray(ro.slideOrder)) delete ro.slideOrder; else ro.slideOrder = TRACKER_FIRST;
+    doc.reportOptions = ro;
+  }, 'عُدّل الترتيب الثابت في الإعدادات ثم عودة للمراجعة — أي ترتيب مؤقت يبقى كما هو؛ بدونه تتبع المعاينة الترتيب الجديد'));
+  // The upload screen's «متابعة» (screen-upload.js runEngineAndGo).
+  document.getElementById('h-continue').addEventListener('click', () => {
+    state.reportModel = null;
+    clearTempSlideOrder(state);
+    statusEl.textContent = '«متابعة» من شاشة الرفع: نموذج جديد ويعود الترتيب الثابت';
+    rerender();
+  });
+  // «تقرير جديد» (state.js resetRunData — on the harness's own state) and the next upload:
+  // the run's model / order / type go, and the rows come in as a NEW load.
+  document.getElementById('h-new-report').addEventListener('click', () => {
+    state.reportModel = null;
+    state.reportHospital = HOSPITAL;
+    clearTempSlideOrder(state);
+    rows = loadRows();
+    takeOrders(state.parsed, rows);
+    state.engineOutput = uploadEngineOutput(state.parsed.orders, store.settings);
+    window.__harness.rows = rows;
+    statusEl.textContent = '«تقرير جديد» ثم رفع جديد: يجب أن تقرأ البطاقة «الترتيب الثابت المحفوظ»';
+    rerender();
+  });
 
   /* ---- an automation run sharing `state` while the review screen stays open ---- */
   function automationRun(withPull) {

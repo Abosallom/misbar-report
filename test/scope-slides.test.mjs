@@ -393,6 +393,30 @@ test('SHIPMENTS: 13 shipments paginate 12 + 1, titled (1/2) (2/2), totals only o
   assert.deepEqual(content, content.map((_, i) => String(i + 1)));
 });
 
+// SLIDE ORDER (model/slide-order.js): the shipments unit moves with ALL its pages, and the
+// scoped pill still precedes the page number on every content slide in the new order.
+test('SHIPMENTS + slide order: moved last, both pages stay adjacent before thanks, titled (1/2) (2/2), pill then number', () => {
+  const det = ids(13).map((id, i) => detail(id, { completed: i + 1 }));
+  const order = ['execFunnel', 'monthly', 'sendout', 'compliance', 'tracker', 'challenges', 'definitions', 'shipments'];
+  for (const variant of VARIANTS) {
+    const m = scoped({ shipments: ids(13) }, det);
+    const spec = build({ ...m, reportOptions: { ...(m.reportOptions || {}), slideOrder: order } }, variant);
+    assert.deepEqual(spec.map((s) => s.id),
+      ['cover', 'execFunnel', 'monthly', 'compliance', 'tracker', 'tracker-cont-1', 'challenges', 'shipments', 'shipments-cont-1', 'thanks']);
+    assert.ok(texts(slideById(spec, 'shipments')).includes('تفاصيل الشحنات (1/2)'));
+    assert.ok(texts(slideById(spec, 'shipments-cont-1')).includes('تفاصيل الشحنات (2/2)'));
+    const content = spec.slice(1, -1);
+    assert.deepEqual(content.map((s) => s.elements.at(-1).text), content.map((_, i) => String(i + 1)));
+    for (const s of content) {
+      const pills = pillsOf(s);
+      assert.equal(pills.length, 1, `${variant} ${s.id}: one pill`);
+      assert.equal(s.elements.indexOf(pills[0].text), s.elements.length - 2, `${variant} ${s.id}: the pill right before the page number`);
+    }
+    // The one-report order (model.slideOrder) moves it the same way.
+    assert.deepEqual(build({ ...m, slideOrder: order }, variant).map((s) => s.id), spec.map((s) => s.id));
+  }
+});
+
 test('SHIPMENTS: status wording and colours — single buckets and a mixed list', () => {
   const det = [
     detail('S1', { completed: 3, rejected: 1 }),

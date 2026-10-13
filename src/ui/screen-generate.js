@@ -2,17 +2,17 @@
 // The file-producing core now lives in automation/pipeline.js (produceReportFiles) so
 // an unattended run makes byte-identical files; this screen drives it and paints the
 // very same progress bar, file rows and live slide thumbnails it always has.
-import { STR, todayISO, formatDateAr, formatRangeAr } from '../i18n/ar.js?v=v2026-10-13.4';
-import { el, progressBar, toast } from './components.js?v=v2026-10-13.4';
-import { resetRunData } from '../state.js?v=v2026-10-13.4';
-import { buildMockEngineOutput } from './screen-upload.js?v=v2026-10-13.4';
-import { resolveProjectTracker } from '../model/report-model.js?v=v2026-10-13.4';
-import { buildLateLabsSection, triggerDownload } from './late-labs-section.js?v=v2026-10-13.4';
+import { STR, todayISO, formatDateAr, formatRangeAr } from '../i18n/ar.js?v=v2026-10-13.5';
+import { el, progressBar, toast } from './components.js?v=v2026-10-13.5';
+import { resetRunData, overlayTempSlideOrder } from '../state.js?v=v2026-10-13.5';
+import { buildMockEngineOutput } from './screen-upload.js?v=v2026-10-13.5';
+import { resolveProjectTracker } from '../model/report-model.js?v=v2026-10-13.5';
+import { buildLateLabsSection, triggerDownload } from './late-labs-section.js?v=v2026-10-13.5';
 import {
   applyWindowDeltas, buildFileDefs, produceReportFiles, recordRunSnapshot,
   shouldAutoDownloadFiles,
-} from '../automation/pipeline.js?v=v2026-10-13.4';
-import { isScoped, hasRange, normalizeScope } from '../model/scope.js?v=v2026-10-13.4';
+} from '../automation/pipeline.js?v=v2026-10-13.5';
+import { isScoped, hasRange, normalizeScope } from '../model/scope.js?v=v2026-10-13.5';
 
 /** The report type a model is (model.hospital; absent ⇒ 'kamc': a legacy KAMC-only model —
  *  every model that predates the report types, and the fallback below, whose numbers are
@@ -250,6 +250,13 @@ function buildShareCard(model, date, fileCount) {
 export async function render(container, ctx) {
   const { state, store, navigate } = ctx;
   const model = state.reportModel || fallbackModel(state, store);
+  // SLIDE ORDER (slide-order CONTRACT decision 6): the model handed over by the review carries
+  // the order on screen — the temporary one as model.slideOrder, else the saved one in
+  // model.reportOptions — and all four files are built from it (pipeline.js → buildSpec reads
+  // model/slide-order.js slideOrderOf). Re-applied here so a review model can never ship a
+  // temporary order that was dropped since (a new load, «استعادة»); a DIRECT jump with no
+  // review model (fallbackModel) gets none, so its settings.reportOptions — the saved order.
+  const tempOrder = state.reportModel ? overlayTempSlideOrder(model, state) : null;
   const date = model.reportDate || todayISO();
   model.reportDate = model.reportDate || date;
   // Delta chips = THE WEEK'S ACTIVITY (2026-08-05). Recompute kpi.deltas from the rows'
@@ -268,10 +275,10 @@ export async function render(container, ctx) {
   // Both modules are guarded → engine deltas if either is absent.
   // An SGH / KAMC + SGH model is re-stamped by model/hospital-report.js (each hospital
   // with its own policy — applyWindowDeltas routes it); guarded like the other two.
-  const dwMod = await tryImport('../model/delta-window.js?v=v2026-10-13.4');
-  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-10-13.4');
+  const dwMod = await tryImport('../model/delta-window.js?v=v2026-10-13.5');
+  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-10-13.5');
   const hrMod = hospitalOf(model) !== 'kamc'
-    ? await tryImport('../model/hospital-report.js?v=v2026-10-13.4')
+    ? await tryImport('../model/hospital-report.js?v=v2026-10-13.5')
     : null;
   const recordSnapshot = dbMod && dbMod.recordSnapshot;
   applyWindowDeltas(model, state, store, dwMod && dwMod.stampWindowDeltas, hrMod);
@@ -310,9 +317,15 @@ export async function render(container, ctx) {
     role: 'note', style: 'margin-top:4px;font-weight:700;color:var(--navy)',
     text: STR.generate.reportType(hospitalLabel(hospitalOf(model))),
   });
+  // An unsaved (temporary) slide order is said once more where the files are made.
+  const tempOrderEl = tempOrder ? el('p', {
+    role: 'note', style: 'margin-top:4px;font-size:.85rem;font-weight:700;color:var(--warn-text,#92400E)',
+    text: STR.generate.tempSlideOrder,
+  }) : null;
   const head = el('div', { class: 'screen__head' }, [
     el('h1', { text: STR.generate.title }),
     reportTypeEl,
+    tempOrderEl,
     subtitleEl,
     keepOpenEl,
   ]);

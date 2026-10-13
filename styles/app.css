@@ -361,6 +361,59 @@ input, select, textarea { font-family: inherit; font-size: 1rem; }
 }
 .unmatched-row.is-saved { opacity: .55; }
 
+/* ---------- «ترتيب الشرائح» slide-order list (ui/components.js slideOrderList) ----------
+   The review card (preview column, between the slide chips and the preview) and the
+   Settings «خيارات التقرير» twin. One row per UNIT + locked cover / thanks rows; buttons
+   only (▲ / ▼ / «إلى الأعلى»), 44px rows so they are thumb-sized at phone width, and the
+   label wraps instead of pushing the buttons off-screen (no horizontal scroll at 360px). */
+.sord-card__summary { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.sord-pill {
+  font-size: .7rem; font-weight: 700; padding: 1px 9px; border-radius: 999px; white-space: nowrap;
+  background: var(--bg-lighter); color: var(--slate-600); border: 1px solid var(--border-dark);
+}
+.sord-pill.is-temp { background: var(--warn-bg, #FEF3C7); color: var(--warn-text, #92400E); border-color: var(--amber); }
+.sord-status {
+  display: flex; flex-direction: column; gap: 2px; margin: 0 0 10px; padding: 8px 10px;
+  border-radius: var(--radius-sm); font-size: .84rem; overflow-wrap: anywhere;
+  background: var(--bg-light); color: var(--slate-600); border: 1px solid var(--border);
+}
+.sord-status.is-temp { background: var(--warn-bg, #FEF3C7); color: var(--warn-text, #92400E); border-color: var(--amber); }
+.sord-status__hint { font-size: .78rem; font-weight: 400; }
+.sord { list-style: none; margin: 0; padding: 0; }
+.sord-row {
+  display: flex; align-items: center; gap: 6px; min-height: 44px; padding: 3px 4px 3px 8px;
+  margin-bottom: 6px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--white);
+}
+.sord-row--locked { background: var(--bg-lighter); color: var(--slate-500); border-style: dashed; padding-inline-end: 10px; }
+.sord-lock { flex: 0 0 auto; font-size: .8rem; opacity: .7; }
+.sord-row__label { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; font-weight: 700; font-size: .86rem; overflow-wrap: anywhere; }
+.sord-row__hint { font-weight: 400; font-size: .74rem; color: var(--slate-500); }
+.sord-row.is-muted .sord-row__label { color: var(--slate-500); }
+.sord-badge {
+  flex: 0 0 auto; font-size: .7rem; font-weight: 700; padding: 1px 8px; border-radius: 999px; white-space: nowrap;
+  background: var(--bg-light); color: var(--slate-600); border: 1px solid var(--border-dark);
+}
+.sord-row__actions { flex: 0 0 auto; display: flex; align-items: center; gap: 2px; }
+.sord-top {
+  min-height: 36px; padding: 0 8px; border: 1px solid var(--border-dark); border-radius: 6px;
+  background: var(--white); color: var(--brand-ink); font: inherit; font-size: .76rem; font-weight: 700;
+  cursor: pointer; white-space: nowrap;
+}
+.sord-top:hover:not(:disabled) { background: var(--bg-light); }
+.sord-top:disabled { opacity: .3; cursor: default; }
+.sord-top:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+.sord-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+/* The move announcement is for screen readers only (the list itself shows the result). */
+.sord-live {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0;
+  overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+}
+@media (max-width: 400px) {
+  .sord-row { flex-wrap: wrap; }
+  .sord-row__label { flex: 1 1 7em; }
+  .sord-row__actions { margin-inline-start: auto; }
+}
+
 /* ---------- Review two-pane ---------- */
 .review-layout {
   display: grid;

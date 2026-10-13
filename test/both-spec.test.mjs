@@ -309,6 +309,46 @@ test('slide toggles: monthly / send-out / compliance switch off and the pages re
   assert.deepEqual(buildBothSpec(m).map((s) => s.id), ['cover', 'execFunnel', 'monthly', 'sendoutCountries', 'sendoutLabs', 'thanks']);
 });
 
+// SLIDE ORDER (model/slide-order.js): the main deck re-sequences its content units by the
+// same list as the single-hospital deck — the saved reportOptions.slideOrder, or the review's
+// one-report model.slideOrder over it. A unit moves as one block, the pages renumber 1..n in
+// the new order, exec stays always-on, and units this deck has no slide for are skipped.
+test('slide order: the send-out pair moves as one block and the pages renumber in the new order', () => {
+  const m = model();
+  m.reportOptions = { ...m.reportOptions, slideOrder: ['sendout', 'compliance', 'execFunnel', 'monthly', 'tracker'] };
+  const spec = buildBothSpec(m, { variant: 'internal' });
+  assert.deepEqual(spec.map((s) => s.id), ['cover', 'sendoutCountries', 'sendoutLabs', 'compliance', 'execFunnel', 'monthly', 'thanks']);
+  assert.deepEqual(spec.slice(1, -1).map((s) => s.elements.at(-1).text), ['1', '2', '3', '4', '5']);
+  assert.deepEqual(buildBothSpec(m, { variant: 'nupco' }), spec, 'the variant still changes nothing');
+  // Through the buildSpec dispatch too (the path every caller takes).
+  assert.deepEqual(buildSpec(m, { variant: 'internal' }), spec);
+  // Each slide is the default deck's slide but for its page number.
+  const plain = buildBothSpec(model());
+  for (const s of spec.slice(1, -1)) assert.deepEqual(s.elements.slice(0, -1), slide(plain, s.id).elements.slice(0, -1), s.id);
+  assertInsideFloor(spec);
+});
+
+test('slide order: the one-report order beats the saved one; shipments / challenges / definitions are skipped silently', () => {
+  const m = model();
+  m.reportOptions = { ...m.reportOptions, slideOrder: ['compliance', 'monthly', 'sendout', 'execFunnel', 'tracker'] };
+  m.slideOrder = ['challenges', 'definitions', 'shipments', 'monthly', 'execFunnel', 'sendout', 'compliance', 'tracker'];
+  assert.deepEqual(buildBothSpec(m).map((s) => s.id), ['cover', 'monthly', 'execFunnel', 'sendoutCountries', 'sendoutLabs', 'compliance', 'thanks']);
+  delete m.slideOrder;
+  assert.deepEqual(buildBothSpec(m).map((s) => s.id), ['cover', 'compliance', 'monthly', 'sendoutCountries', 'sendoutLabs', 'execFunnel', 'thanks']);
+});
+
+test('slide order + toggles: exec stays on when switched off and moved; an OFF unit leaves no gap', () => {
+  const m = model();
+  m.reportOptions = {
+    ...m.reportOptions,
+    slides: { execFunnel: false, monthly: false },
+    slideOrder: ['compliance', 'monthly', 'sendout', 'execFunnel', 'tracker'],
+  };
+  const spec = buildBothSpec(m);
+  assert.deepEqual(spec.map((s) => s.id), ['cover', 'compliance', 'sendoutCountries', 'sendoutLabs', 'execFunnel', 'thanks']);
+  assert.deepEqual(spec.slice(1, -1).map((s) => s.elements.at(-1).text), ['1', '2', '3', '4']);
+});
+
 test('turnaround block follows kpiCards.turnaround (explicit-true) and needs both averages', () => {
   const m = model();
   m.reportOptions = { ...m.reportOptions, kpiCards: { turnaround: false } };

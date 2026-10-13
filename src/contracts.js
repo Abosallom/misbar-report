@@ -219,6 +219,10 @@
  *   NOTE: 'funnel.resulted' is the (unrenamed) key of the funnel's COMPLETED final
  *   stage, so it and 'completed' address the same figure on two slides.
  * @property {Settings['reportOptions']} [reportOptions] - presentation options (see Settings)
+ * @property {string[]} [slideOrder] - the review screen's TEMPORARY slide order for THIS
+ *   report only (unit keys, model/slide-order.js). Wins over reportOptions.slideOrder (the
+ *   saved one) in every deck builder; memory only, never written to settings, never set on
+ *   the automation's model. Absent ⇒ the saved order (else the default).
  * @property {{start:string, end:string, mode:('daily'|'week'), approx?:Object<string,boolean>}} [deltaWindow]
  *   - the ACTIVITY WINDOW kpi.deltas were counted over, stamped by
  *     model/delta-window.js stampWindowDeltas (ui/screen-review.js on render/preview/
@@ -313,7 +317,7 @@
  *     'https://elab.seha.sa/hpapm'. Empty/disabled → CSV drop only. The access
  *     token is the public-dashboard token (view-only, server-side-masked data);
  *     it is NEVER seeded in the repo — the user enters it once in Settings.
- * @property {{excludeNoTat:boolean, slides:Object<string,boolean>, kpiCards:Object<string,boolean>, labels:Object<string,string>, deltaMode:('daily'|'week'), autoDownloadFiles:boolean, trackerLang:('ar'|'en'|'both')}} reportOptions
+ * @property {{excludeNoTat:boolean, slides:Object<string,boolean>, kpiCards:Object<string,boolean>, labels:Object<string,string>, deltaMode:('daily'|'week'), autoDownloadFiles:boolean, trackerLang:('ar'|'en'|'both'), slideOrder?:string[]}} reportOptions
  *   - presentation defaults: excludeNoTat drops rows with no TAT from ANY source
  *     (lookup + CSV fallback = null → 'No Match') before aggregation; slides keys
  *     'execFunnel'|'monthly'|'compliance'|'action'|'challenges'|'definitions'|'sendout'|'tracker' toggle the middle
@@ -349,6 +353,17 @@
  *     track / milestone cells: 'ar' = the Arabic translation (taskAr / trackAr /
  *     milestoneAr), the English per cell where it is ''; 'en' = English only (the
  *     pre-translation slides); 'both' = Arabic with the English original under it.
+ *     slideOrder (2026-10-13; model/slide-order.js owns the vocabulary) is the SAVED,
+ *     fixed order of the content-slide UNITS ('execFunnel'|'shipments'|'monthly'|
+ *     'sendout'|'compliance'|'tracker'|'challenges'|'definitions' — a unit moves with
+ *     all its pages; cover stays first, thanks last). OPTIONAL: ABSENT means the default
+ *     order (the historic deck, byte-identical), and it is never seeded or backfilled,
+ *     so a unit added later lands at its default place. A stored list is normalised to
+ *     a full permutation (unknown / duplicate / retired 'action' names dropped). Every
+ *     deck type reads the same list and skips the units it lacks. The automation uses
+ *     only this saved order (a one-report order is ReportModel.slideOrder). An import
+ *     REPLACES it, absence included: a backup whose reportOptions has no slideOrder is a
+ *     default-order backup and resets the device to the default.
  * @property {{enabled:boolean, autoPull:boolean, autoGenerate:boolean, autoDownload:boolean,
  *             autoLabFiles:boolean, autoEmailDrafts:boolean, autoAcceptTat:boolean,
  *             dailyTime:string, labRecipients:Object<string,string>}} automation

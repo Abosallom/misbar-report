@@ -41,11 +41,11 @@
 //   • GRAIN = per test LINE (order line): counts (late/dueSoon) and data rows are
 //     NEVER deduplicated by order — one order with 3 qualifying tests contributes
 //     3 rows and counts as 3, not 1.
-import { buildTatIndex, resolveTat } from '../engine/tat.js?v=v2026-10-13.4';
+import { buildTatIndex, resolveTat } from '../engine/tat.js?v=v2026-10-13.5';
 import {
   parseDateTime, toEpochDay, workday, dayDiff,
-} from '../engine/workday.js?v=v2026-10-13.4';
-import { writeStyledXlsx } from './xlsx-styled.js?v=v2026-10-13.4';
+} from '../engine/workday.js?v=v2026-10-13.5';
+import { writeStyledXlsx } from './xlsx-styled.js?v=v2026-10-13.5';
 
 /**
  * The 21 export columns, VERBATIM (keep the 'Lonic code' typo — established format).

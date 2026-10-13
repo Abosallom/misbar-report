@@ -54,7 +54,7 @@
 // Arabic TRANSLATIONS are measured with real Cairo metrics (contextual forms, lam-alef, the
 // font's one positive Arabic kern — shapedTextWidth below); every other cell keeps the
 // legacy estimate, so the English / fallback layout never moves.
-import { COLORS as C } from '../theme.js?v=v2026-10-13.4';
+import { COLORS as C } from '../theme.js?v=v2026-10-13.5';
 
 // ---- labels (registry keys; build-spec.js DEFAULT_LABELS spreads this object so the
 // labels editor reaches them and an override reaches all three decks) ------------------
