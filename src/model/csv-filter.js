@@ -66,9 +66,9 @@
 // not introduced: a DUPLICATED header name is renamed on parse ('X' → 'X_1'), so such
 // a column would come back renamed. The KAMC export has no duplicated headers.
 
-import { normFacility } from '../contracts.js?v=v2026-10-13.5';
-import { fillBlankFacilities } from '../engine/infer-facility.js?v=v2026-10-13.5';
-import { parseDateTime } from '../engine/workday.js?v=v2026-10-13.5';
+import { normFacility } from '../contracts.js?v=v2026-10-13.6';
+import { fillBlankFacilities } from '../engine/infer-facility.js?v=v2026-10-13.6';
+import { parseDateTime } from '../engine/workday.js?v=v2026-10-13.6';
 
 /** The sequential stages, in pipeline order. A selection must be one unbroken run. */
 export const LADDER = Object.freeze(['notCollected', 'notShipped', 'notReceived', 'notResulted', 'resulted']);

@@ -1,5 +1,5 @@
 // ui/components.js — shared DOM helpers used by Track E screens.
-import { STR, formatDateAr } from '../i18n/ar.js?v=v2026-10-13.5';
+import { STR, formatDateAr } from '../i18n/ar.js?v=v2026-10-13.6';
 // The project tracker document's OWNER (shape, tag, due-date rule, new-row factory). STATIC,
 // like scope.js / hospital.js elsewhere: the module is pure (SheetJS is injected, never
 // imported), and the editor below must apply the parser's own rules — a website-typed
@@ -9,11 +9,11 @@ import { STR, formatDateAr } from '../i18n/ar.js?v=v2026-10-13.5';
 import {
   isProjectTracker, newTask as blankTrackerTask, normalizeDueText, TRACKER_FORMAT,
   TRACKER_LANGS, DEFAULT_TRACKER_LANG, normalizeTrackerLang as parseTrackerLang,
-} from '../ingest/task-tracker.js?v=v2026-10-13.5';
+} from '../ingest/task-tracker.js?v=v2026-10-13.6';
 // ONE status rule for the editor pill, the upload card's counts and the slide (its pill and
 // its overdue test): the slide builder's statusKey owns the alias table (English as the
 // workbook writes it, 'Deleyed' included, plus the Arabic words). Pure; imports theme only.
-import { statusKey as slideStatusKey } from '../slidespec/build-tracker.js?v=v2026-10-13.5';
+import { statusKey as slideStatusKey } from '../slidespec/build-tracker.js?v=v2026-10-13.6';
 
 /** Tiny hyperscript helper. */
 export function el(tag, props = {}, children = []) {
@@ -538,6 +538,21 @@ export function trackerHasAnyArabic(tracker) {
   const tasks = (tracker && Array.isArray(tracker.tasks)) ? tracker.tasks : [];
   return tasks.some((t) => t && typeof t === 'object'
     && ['taskAr', 'trackAr', 'milestoneAr'].some((k) => String(t[k] || '').trim()));
+}
+
+/**
+ * The review card's warning when the slide language asks for Arabic but the loaded tracker
+ * has none to show (2026-10-13: a user picked «عربي», generated, and got English — the
+ * tracker in the browser was still the original, untranslated workbook; the language switch
+ * can only show Arabic that exists). Pure: null when there is nothing to say ('en', no tasks,
+ * or every task translated); { kind:'none' } when no task has an Arabic text;
+ * { kind:'partial', translated, total } when only some do.
+ */
+export function trackerArabicNotice(tracker, lang) {
+  if (normalizeTrackerLang(lang) === 'en') return null;
+  const { translated, total } = trackerTranslationCount(tracker);
+  if (!total || translated === total) return null;
+  return translated === 0 ? { kind: 'none', translated, total } : { kind: 'partial', translated, total };
 }
 
 /**

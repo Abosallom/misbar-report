@@ -8,17 +8,17 @@
 // mirror of the automation panel), live source (Grafana + cached-tracker), and
 // backup (export/import).
 
-import { SNAPSHOT_SEED, REPORT_OPTIONS_SEED, AUTOMATION_SEED } from '../seeds/defaults.js?v=v2026-10-13.5';
-import { normalizeDeltaMode } from '../model/delta-baseline.js?v=v2026-10-13.5';
+import { SNAPSHOT_SEED, REPORT_OPTIONS_SEED, AUTOMATION_SEED } from '../seeds/defaults.js?v=v2026-10-13.6';
+import { normalizeDeltaMode } from '../model/delta-baseline.js?v=v2026-10-13.6';
 // The connection test's per-hospital line (STR.settings) — ar.js is pure and DOM-free
 // (every other screen imports it), so module-smoke's bare-Node import still holds.
-import { STR } from '../i18n/ar.js?v=v2026-10-13.5';
+import { STR } from '../i18n/ar.js?v=v2026-10-13.6';
 // NAMESPACE import on purpose: the access tab reads lock.currentUser(), which is a
 // newer export. A named import would throw at link time on any build of lock.js that
 // predates it (and take the whole settings screen down); a namespace import lets the
 // tab degrade to 'unknown user' instead. lock.js is DOM-free at module scope, so this
 // stays importable in bare Node (test/module-smoke).
-import * as lock from './lock.js?v=v2026-10-13.5';
+import * as lock from './lock.js?v=v2026-10-13.6';
 // The project tracker document (tracker CONTRACT §1.3): the review editor's pending save
 // (flushed before this screen loads its working copy — its autosave would otherwise
 // write the stale cache back), and the one "is this a tagged tracker" rule.
@@ -27,11 +27,11 @@ import * as lock from './lock.js?v=v2026-10-13.5';
 import {
   trackerSaver, trackerMetaLine, TRACKER_LANG_OPTIONS, normalizeTrackerLang,
   slideOrderList, slideOrderLabel,
-} from './components.js?v=v2026-10-13.5';
+} from './components.js?v=v2026-10-13.6';
 // «ترتيب الشرائح» — the SAVED (fixed) slide order, reportOptions.slideOrder: the shared unit
 // vocabulary (model/slide-order.js, a pure leaf) and the review card's own list widget.
-import { SLIDE_ORDER_KEYS, normalizeSlideOrder } from '../model/slide-order.js?v=v2026-10-13.5';
-import { resolveProjectTracker } from '../model/report-model.js?v=v2026-10-13.5';
+import { SLIDE_ORDER_KEYS, normalizeSlideOrder } from '../model/slide-order.js?v=v2026-10-13.6';
+import { resolveProjectTracker } from '../model/report-model.js?v=v2026-10-13.6';
 
 const TABS = [
   { id: 'tat', label: 'مدة الفحوصات' },

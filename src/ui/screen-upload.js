@@ -1,22 +1,22 @@
 // ui/screen-upload.js — file upload + parse + engine kickoff (Track E).
-import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-10-13.5';
+import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-10-13.6';
 import {
   el, dropZone, fileSummaryCard, toast, trackerSaver, trackerStatusCounts, trackerStamp,
   trackerTranslationCount, trackerHasAnyArabic,
-} from './components.js?v=v2026-10-13.5';
+} from './components.js?v=v2026-10-13.6';
 // The project tracker («ملف متابعة المشروع», tracker CONTRACT §1.7). resolveProjectTracker
 // is the model layer's ONE rule for "which tracker does this run have" (tagged only —
 // an install's OLD-shape cache is no tracker); static, report-model.js is pure.
-import { resolveProjectTracker } from '../model/report-model.js?v=v2026-10-13.5';
-import { normTest } from '../contracts.js?v=v2026-10-13.5';
-import { getPapa, getXLSX } from '../vendor-loader.js?v=v2026-10-13.5';
-import { TAT_LOINC } from '../seeds/tat-lookup.js?v=v2026-10-13.5';
-import { buildLateLabsSection } from './late-labs-section.js?v=v2026-10-13.5';
-import { buildAutomationPanel } from './automation-panel.js?v=v2026-10-13.5';
+import { resolveProjectTracker } from '../model/report-model.js?v=v2026-10-13.6';
+import { normTest } from '../contracts.js?v=v2026-10-13.6';
+import { getPapa, getXLSX } from '../vendor-loader.js?v=v2026-10-13.6';
+import { TAT_LOINC } from '../seeds/tat-lookup.js?v=v2026-10-13.6';
+import { buildLateLabsSection } from './late-labs-section.js?v=v2026-10-13.6';
+import { buildAutomationPanel } from './automation-panel.js?v=v2026-10-13.6';
 // Optional filtered-CSV download (labs × order stages → the uploaded file's own rows).
 // It reads state.parsed.raw — PATIENT DATA, memory-only; see state.js for the pairing
 // rule this screen upholds at every site that writes state.parsed.orders.
-import { buildCsvExportSection } from './csv-export-section.js?v=v2026-10-13.5';
+import { buildCsvExportSection } from './csv-export-section.js?v=v2026-10-13.6';
 // THE HOSPITAL DOOR (2026-10-07; report types 2026-10-11): the feed carries KAMC's and
 // SGH's orders. Every site below that writes state.parsed.orders goes through
 // takeOrders(): parsed.orders = the KAMC rows — what EVERY surface of this screen reads
@@ -27,14 +27,14 @@ import { buildCsvExportSection } from './csv-export-section.js?v=v2026-10-13.5';
 // silently skipped the split would put another hospital's orders into every number (and
 // SGH test names into the global TAT table). hospital.js is pure (no DOM, no vendor
 // bundle), so this adds no failure mode.
-import { takeOrders } from '../model/hospital.js?v=v2026-10-13.5';
+import { takeOrders } from '../model/hospital.js?v=v2026-10-13.6';
 // «متابعة» assembles the report afresh, so a temporary slide order (the review's «ترتيب
 // الشرائح» card) goes with the old model — state.js owns that rule.
-import { clearTempSlideOrder } from '../state.js?v=v2026-10-13.5';
+import { clearTempSlideOrder } from '../state.js?v=v2026-10-13.6';
 
 /** The SAME specifier main.js and ui/automation-panel.js import — resolving to
  *  the identical URL means the probe below hits the already-cached module. */
-const AUTOMATION_PIPELINE_URL = '../automation/pipeline.js?v=v2026-10-13.5';
+const AUTOMATION_PIPELINE_URL = '../automation/pipeline.js?v=v2026-10-13.6';
 
 /** Format an ISO timestamp as local 'HH:MM' for snapshot-freshness labels. */
 function fmtHHMM(iso) {
@@ -249,7 +249,7 @@ function normalizeOrders(res) {
 
 async function ingestCsv(file) {
   const Papa = await getPapa();
-  const mod = await tryImport('../ingest/csv.js?v=v2026-10-13.5');
+  const mod = await tryImport('../ingest/csv.js?v=v2026-10-13.6');
   const fn = pickFn(mod, ['parseKamcCsv', 'parseCsv', 'ingestCsv', 'parseOrders', 'parse']);
   if (fn) {
     const text = await file.text();
@@ -269,7 +269,7 @@ async function ingestCsv(file) {
  * FAILS with a message (it used to fall back to mock tasks — never again). */
 async function ingestTracker(file) {
   const XLSX = await getXLSX();
-  const mod = await tryImport('../ingest/task-tracker.js?v=v2026-10-13.5');
+  const mod = await tryImport('../ingest/task-tracker.js?v=v2026-10-13.6');
   if (!mod || typeof mod.parseTaskTracker !== 'function') throw new Error(STR.upload.trackerModuleMissing);
   const buf = await file.arrayBuffer();
   let tracker = mod.parseTaskTracker(buf, XLSX, { fileName: file.name });
@@ -500,7 +500,7 @@ export async function render(container, ctx) {
     const gcfg = (store.settings && store.settings.grafana) || {};
     const dataKey = (gcfg.dataKey || '').trim();
     try {
-      const mod = await import('../ingest/grafana.js?v=v2026-10-13.5');
+      const mod = await import('../ingest/grafana.js?v=v2026-10-13.6');
       const asOf = state.reportDate || todayISO();
       const directConfigured = !!(gcfg.baseUrl && gcfg.accessToken);
       try {
@@ -953,7 +953,7 @@ export async function render(container, ctx) {
     const seq = ++unmatchedSeq;
     let mod;
     try {
-      mod = await import('../ingest/tat-suggest.js?v=v2026-10-13.5');
+      mod = await import('../ingest/tat-suggest.js?v=v2026-10-13.6');
     } catch { return; } // module not present yet — keep the plain panel behavior
     if (seq !== unmatchedSeq) return; // a newer paint superseded this run
     const fn = pickFn(mod, ['suggestTats']);
@@ -1101,7 +1101,7 @@ export async function render(container, ctx) {
     if (!orders || !orders.length) { heroHost.innerHTML = ''; return; }
     let out;
     try {
-      const mod = await import('../engine/engine.js?v=v2026-10-13.5');
+      const mod = await import('../engine/engine.js?v=v2026-10-13.6');
       if (seq !== heroSeq) return; // a newer run superseded this one
       const compute = pickFn(mod, ['compute', 'runEngine', 'run']);
       if (typeof compute !== 'function') { heroHost.innerHTML = ''; return; }
@@ -1126,7 +1126,7 @@ export async function render(container, ctx) {
       let out = (state.engineOutput && state.engineOutput.totals) ? state.engineOutput : null;
       if (!out) {
         try {
-          const mod = await tryImport('../engine/engine.js?v=v2026-10-13.5');
+          const mod = await tryImport('../engine/engine.js?v=v2026-10-13.6');
           const compute = pickFn(mod, ['compute', 'runEngine', 'run']);
           if (compute) {
             out = compute(state.parsed.orders, (store.settings || {}).tatLookup, engineOpts());

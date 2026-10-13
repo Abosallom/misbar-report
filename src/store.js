@@ -20,17 +20,17 @@
 // throws on write; on failure we fall back to an in-memory doc and expose
 // isEphemeral() so the UI can warn the user their edits will not persist.
 
-import { SETTINGS_KEY } from './contracts.js?v=v2026-10-13.5';
-import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-10-13.5';
-import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-10-13.5';
+import { SETTINGS_KEY } from './contracts.js?v=v2026-10-13.6';
+import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-10-13.6';
+import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-10-13.6';
 import {
   HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED, GRAFANA_SEED, REPORT_OPTIONS_SEED,
   SNAPSHOT_HISTORY_SEED, AUTOMATION_SEED, TASK_LOG_SEED,
-} from './seeds/defaults.js?v=v2026-10-13.5';
-import { DELTA_MODES, canonicalDeltaMode } from './model/delta-baseline.js?v=v2026-10-13.5';
+} from './seeds/defaults.js?v=v2026-10-13.6';
+import { DELTA_MODES, canonicalDeltaMode } from './model/delta-baseline.js?v=v2026-10-13.6';
 import {
   sanitizeTaskLog, recordShownTasks, TASK_LOG_LIMIT, TASK_KEY_MAX,
-} from './model/task-lifecycle.js?v=v2026-10-13.5';
+} from './model/task-lifecycle.js?v=v2026-10-13.6';
 // The ProjectTracker shape has ONE owner — the module that produces it. The store only
 // asks "is this the tagged document?" and "give me its clean copy", exactly as it
 // defers the taskLog entry shape to task-lifecycle.js above. The same module owns the
@@ -39,10 +39,10 @@ import {
 import {
   TRACKER_FORMAT, isProjectTracker, normalizeProjectTracker, normalizeTrackerLang, TRACKER_LANGS,
   backfillTaskFields,
-} from './ingest/task-tracker.js?v=v2026-10-13.5';
+} from './ingest/task-tracker.js?v=v2026-10-13.6';
 // The slide-order vocabulary (reportOptions.slideOrder) has one owner too: the leaf module
 // the deck builders sort by. The store only cleans, caps and normalises with it.
-import { normalizeSlideOrder, SLIDE_ORDER_MAX } from './model/slide-order.js?v=v2026-10-13.5';
+import { normalizeSlideOrder, SLIDE_ORDER_MAX } from './model/slide-order.js?v=v2026-10-13.6';
 
 export const SCHEMA_VERSION = 9;
 

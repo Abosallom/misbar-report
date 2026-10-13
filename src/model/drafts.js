@@ -9,7 +9,7 @@
 // closed-task log (model/task-lifecycle.js); do not wire new code to it.
 import {
   LIST_EXTERNAL, LIST_INTERNAL, isGraceRow, taskKey,
-} from './task-lifecycle.js?v=v2026-10-13.5';
+} from './task-lifecycle.js?v=v2026-10-13.6';
 
 const CLOSED = 'مغلق'; // closed/done
 const CAT_INTERNAL = 'لين'; // فئة التقرير value that routes a task to the internal slide (داخلي)

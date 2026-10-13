@@ -42,15 +42,15 @@
 // TAT table), the per-lab Late & Due workbooks and their drafts all read parsed.orders —
 // the KAMC rows only (model/hospital.js takeOrders). The operator's state.reportHospital
 // is never read.
-import { STR, todayISO, buildFileName } from '../i18n/ar.js?v=v2026-10-13.5';
-import { VARIANTS, normTest } from '../contracts.js?v=v2026-10-13.5';
-import { getGenLibs } from '../vendor-loader.js?v=v2026-10-13.5';
+import { STR, todayISO, buildFileName } from '../i18n/ar.js?v=v2026-10-13.6';
+import { VARIANTS, normTest } from '../contracts.js?v=v2026-10-13.6';
+import { getGenLibs } from '../vendor-loader.js?v=v2026-10-13.6';
 // STATIC on purpose, unlike the injected model modules below: isScoped gates the
 // published-history write, and neither guarded fallback is safe — "absent ⇒ unscoped"
 // would let a side report overwrite the history, "absent ⇒ scoped" would silently stop
 // recording full reports. scope.js is pure (no DOM, no vendor bundle), and ar.js above
 // already depends on it for the «(مخصص)» file-name suffix, so this adds no new failure mode.
-import { isScoped } from '../model/scope.js?v=v2026-10-13.5';
+import { isScoped } from '../model/scope.js?v=v2026-10-13.6';
 // THE HOSPITAL DOOR (2026-10-07, report types 2026-10-11): the feed carries KAMC's and
 // SGH's orders (and possibly a third hospital's). takeOrders puts the KAMC rows in
 // parsed.orders — they feed every KAMC-side step of this unattended run (TAT suggestions,
@@ -61,12 +61,12 @@ import { isScoped } from '../model/scope.js?v=v2026-10-13.5';
 // put another hospital's orders into an UNATTENDED morning report nobody reviews. A load failure abandons the run (main.js
 // catches the import) — no report, never a wrong one. hospital.js is pure (no DOM, no
 // vendor bundle).
-import { takeOrders } from '../model/hospital.js?v=v2026-10-13.5';
+import { takeOrders } from '../model/hospital.js?v=v2026-10-13.6';
 // THE TRACKER SHAPE CHECK (2026-10-13): resolveTracker below hands the unattended deck
 // only a TAGGED ProjectTracker. STATIC for isScoped's reason — "absent ⇒ accept anything"
 // would publish an old-format cache under the new slide design. task-tracker.js is a
 // leaf (no imports, no DOM; SheetJS is injected into its parser, never imported).
-import { isProjectTracker } from '../ingest/task-tracker.js?v=v2026-10-13.5';
+import { isProjectTracker } from '../ingest/task-tracker.js?v=v2026-10-13.6';
 
 /* ------------------------------------------------------------------ *
  * Shared micro-helpers (same idioms the screens use)
@@ -367,7 +367,7 @@ function installFastTimers() {
 // Build the SlideSpec per VARIANT — the variant changes slide-5 content
 // (task rows), so one shared spec would leak internal tasks into NUPCO files.
 async function buildVariantSpec(model, variant) {
-  const mod = await tryImport('../slidespec/build-spec.js?v=v2026-10-13.5');
+  const mod = await tryImport('../slidespec/build-spec.js?v=v2026-10-13.6');
   const fn = pickFn(mod, ['buildSpec', 'build', 'makeSpec', 'toSpec']);
   if (!fn) return null;
   let spec = fn(model, { variant });
@@ -393,7 +393,7 @@ async function toBlob(result, kind) {
 // renderPptx(spec, {variant, PptxGenJS}) -> Promise<Blob>
 async function makePptx(spec, variant, libs) {
   if (!spec) return null;
-  const mod = await tryImport('../render/pptx-renderer.js?v=v2026-10-13.5');
+  const mod = await tryImport('../render/pptx-renderer.js?v=v2026-10-13.6');
   const fn = pickFn(mod, ['renderPptx', 'buildPptx', 'toPptx', 'makePptx', 'render']);
   if (!fn) return null;
   const r = await fn(spec, { variant, PptxGenJS: libs.PptxGenJS });
@@ -405,9 +405,9 @@ async function makePptx(spec, variant, libs) {
 // the host and before capture starts — screen-generate clones them into live thumbnails.
 async function makePdf(spec, variant, libs, host, onProgress, onSlides) {
   if (!spec) return null;
-  const rMod = await tryImport('../render/html-renderer.js?v=v2026-10-13.5');
+  const rMod = await tryImport('../render/html-renderer.js?v=v2026-10-13.6');
   const renderSlides = pickFn(rMod, ['renderSlides', 'renderSpec', 'renderHtml', 'render']);
-  const pMod = await tryImport('../render/pdf-export.js?v=v2026-10-13.5');
+  const pMod = await tryImport('../render/pdf-export.js?v=v2026-10-13.6');
   const exportPdf = pickFn(pMod, ['exportPdf', 'renderPdf', 'toPdf', 'buildPdf', 'render']);
   if (!renderSlides || !exportPdf) return null;
   host.innerHTML = '';
@@ -605,29 +605,29 @@ const PULL_REUSE_MS = 15000;
 
 /** Default heavy dependencies — every one overridable through `deps` (tests inject fakes). */
 const DEFAULT_DEPS = Object.freeze({
-  loadGrafana: () => import('../ingest/grafana.js?v=v2026-10-13.5'),
-  loadEngine: () => tryImport('../engine/engine.js?v=v2026-10-13.5'),
-  loadReportModel: () => import('../model/report-model.js?v=v2026-10-13.5'),
+  loadGrafana: () => import('../ingest/grafana.js?v=v2026-10-13.6'),
+  loadEngine: () => tryImport('../engine/engine.js?v=v2026-10-13.6'),
+  loadReportModel: () => import('../model/report-model.js?v=v2026-10-13.6'),
   // The main report's builder (buildBothModel). NOT guarded, like the report model above:
   // without it there is no main report to publish, and the engine step fails loudly
   // (generate then skips) rather than publishing some other report as the weekly one.
-  loadHospitalReport: () => import('../model/hospital-report.js?v=v2026-10-13.5'),
-  loadDeltaBaseline: () => tryImport('../model/delta-baseline.js?v=v2026-10-13.5'),
+  loadHospitalReport: () => import('../model/hospital-report.js?v=v2026-10-13.6'),
+  loadDeltaBaseline: () => tryImport('../model/delta-baseline.js?v=v2026-10-13.6'),
   // The delta-chip stamper. Guarded like the rest: a build without it degrades to the
   // engine's own clamped deltas instead of failing this module at load time.
-  loadDeltaWindow: () => tryImport('../model/delta-window.js?v=v2026-10-13.5'),
-  loadLateLabs: () => import('../export/late-labs.js?v=v2026-10-13.5'),
-  loadTatSuggest: () => tryImport('../ingest/tat-suggest.js?v=v2026-10-13.5'),
-  loadTatLoinc: () => tryImport('../seeds/tat-lookup.js?v=v2026-10-13.5'),
+  loadDeltaWindow: () => tryImport('../model/delta-window.js?v=v2026-10-13.6'),
+  loadLateLabs: () => import('../export/late-labs.js?v=v2026-10-13.6'),
+  loadTatSuggest: () => tryImport('../ingest/tat-suggest.js?v=v2026-10-13.6'),
+  loadTatLoinc: () => tryImport('../seeds/tat-lookup.js?v=v2026-10-13.6'),
   // Track 5's module; absent until it ships → the emails step reports 'skip'.
-  loadEmlDraft: () => tryImport('../export/eml-draft.js?v=v2026-10-13.5'),
+  loadEmlDraft: () => tryImport('../export/eml-draft.js?v=v2026-10-13.6'),
   // The encrypted send-out catalogue. Guarded: absent module or a failed decrypt
   // means the deck simply omits the two send-out slides.
-  loadSendoutMaster: () => tryImport('../ingest/sendout-master.js?v=v2026-10-13.5'),
+  loadSendoutMaster: () => tryImport('../ingest/sendout-master.js?v=v2026-10-13.6'),
   // The vendor contact book (To: per lab + the standard CC block). Guarded: a
   // build without it just means drafts fall back to the Settings map alone.
-  loadLabContacts: () => tryImport('../seeds/lab-contacts.js?v=v2026-10-13.5'),
-  loadDownload: () => tryImport('../ui/late-labs-section.js?v=v2026-10-13.5'),
+  loadLabContacts: () => tryImport('../seeds/lab-contacts.js?v=v2026-10-13.6'),
+  loadDownload: () => tryImport('../ui/late-labs-section.js?v=v2026-10-13.6'),
   produceReportFiles,
   now: () => Date.now(),
 });
