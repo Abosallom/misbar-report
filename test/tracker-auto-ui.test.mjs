@@ -365,7 +365,8 @@ test('loadBuiltinTrackerTM: once per session, concurrent callers share one load,
   assert.equal(a, BUILTIN);
   assert.equal(b, BUILTIN);
   assert.equal(state.trackerBuiltinTM, BUILTIN);
-  assert.deepEqual(calls, ['../ingest/tracker-translations.js?v=v2026-10-13.6', `key:${'k'.repeat(64)}`]);
+  // The ?v= stamp changes on every release (scripts/stamp-version.mjs) — compare the path only.
+  assert.deepEqual(calls.map((c) => c.replace(/\?v=[^']*$/, '')), ['../ingest/tracker-translations.js', `key:${'k'.repeat(64)}`]);
   assert.equal(await loadBuiltinTrackerTM(state, st, importer), BUILTIN);
   assert.equal(calls.length, 2, 'not loaded again');
 });
