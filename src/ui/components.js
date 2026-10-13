@@ -1,17 +1,19 @@
 // ui/components.js — shared DOM helpers used by Track E screens.
-import { STR, formatDateAr } from '../i18n/ar.js?v=v2026-10-13.3';
+import { STR, formatDateAr } from '../i18n/ar.js?v=v2026-10-13.4';
 // The project tracker document's OWNER (shape, tag, due-date rule, new-row factory). STATIC,
 // like scope.js / hospital.js elsewhere: the module is pure (SheetJS is injected, never
 // imported), and the editor below must apply the parser's own rules — a website-typed
 // '17/9/2026' has to become the same ISO date a file cell does, or the slide's overdue
 // test would treat the two differently.
+// It also owns the slide-language enum (reportOptions.trackerLang) the store validates.
 import {
   isProjectTracker, newTask as blankTrackerTask, normalizeDueText, TRACKER_FORMAT,
-} from '../ingest/task-tracker.js?v=v2026-10-13.3';
+  TRACKER_LANGS, DEFAULT_TRACKER_LANG, normalizeTrackerLang as parseTrackerLang,
+} from '../ingest/task-tracker.js?v=v2026-10-13.4';
 // ONE status rule for the editor pill, the upload card's counts and the slide (its pill and
 // its overdue test): the slide builder's statusKey owns the alias table (English as the
 // workbook writes it, 'Deleyed' included, plus the Arabic words). Pure; imports theme only.
-import { statusKey as slideStatusKey } from '../slidespec/build-tracker.js?v=v2026-10-13.3';
+import { statusKey as slideStatusKey } from '../slidespec/build-tracker.js?v=v2026-10-13.4';
 
 /** Tiny hyperscript helper. */
 export function el(tag, props = {}, children = []) {
@@ -230,11 +232,19 @@ export function textareaField({ label, value, hint, onInput, rows = 4 }) {
  * The pure helpers below carry every rule (exported for node tests); trackerEditor is
  * only their DOM. Field VALUES are the workbook's own words, stored verbatim ('Deleyed'
  * stays 'Deleyed'); only the display labels are Arabic.
+ *
+ * ARABIC TRANSLATION (2026-10-13, Arabic CONTRACT §1/§4): each task also carries taskAr /
+ * trackAr / milestoneAr — SEPARATE fields beside the English originals, which are never
+ * overwritten, so a bad translation can always be checked against (and fall back to) the
+ * file's own words. Which text the slide shows is reportOptions.trackerLang.
  * ================================================================== */
 
-/** The 16 editable task fields, in editor order. `wide` = full-width multi-line field. */
+/** The 19 editable task fields, in editor order. `wide` = full-width multi-line field;
+ *  `pair` = the English task and its Arabic translation, side by side on one row (stacked
+ *  when the column is too narrow); `rtl` = an Arabic translation field (typed RTL). */
 export const TRACKER_EDIT_FIELDS = Object.freeze([
-  { key: 'task', wide: true },
+  { key: 'task', wide: true, pair: true },
+  { key: 'taskAr', wide: true, pair: true, rtl: true },
   { key: 'status', suggest: true },
   { key: 'due', due: true },
   { key: 'owner', suggest: true },
@@ -242,7 +252,9 @@ export const TRACKER_EDIT_FIELDS = Object.freeze([
   { key: 'organization', suggest: true },
   { key: 'wbs' },
   { key: 'track', suggest: true },
+  { key: 'trackAr', suggest: true, rtl: true },
   { key: 'milestone', suggest: true },
+  { key: 'milestoneAr', suggest: true, rtl: true },
   { key: 'workstream', suggest: true },
   { key: 'workPackage', suggest: true },
   { key: 'taskType', suggest: true },
@@ -411,7 +423,8 @@ export function setTrackerField(tracker, id, key, value, now) {
 
 /**
  * Add a blank task (unique id from the parser's own factory). With `afterId` it goes right
- * after that task and joins its group (track, milestone, workstream, work package);
+ * after that task and joins its group (track, milestone — and their Arabic names —
+ * workstream, work package);
  * otherwise it is appended. Status starts as 'Not Started'. Returns the new task.
  */
 export function addTrackerTask(tracker, { afterId = null, now } = {}) {
@@ -421,7 +434,7 @@ export function addTrackerTask(tracker, { afterId = null, now } = {}) {
   const i = afterId == null ? -1 : indexOfTask(tracker, afterId);
   if (i >= 0) {
     const ref = tracker.tasks[i];
-    for (const k of ['track', 'milestone', 'workstream', 'workPackage']) task[k] = ref[k] || '';
+    for (const k of ['track', 'trackAr', 'milestone', 'milestoneAr', 'workstream', 'workPackage']) task[k] = ref[k] || '';
     tracker.tasks.splice(i + 1, 0, task);
   } else {
     tracker.tasks.push(task);
@@ -451,10 +464,112 @@ export function moveTrackerTask(tracker, id, delta, now) {
   return true;
 }
 
-/** The «المسار › المرحلة» heading a task sits under in the editor (the slide's grouping). */
-export function trackerGroupLabel(task) {
+/** The «المسار › المرحلة» heading text a task sits under in the editor. Without `lang`
+ *  (or 'en') it is the English pair. With 'ar' / 'both' each part is its Arabic name,
+ *  falling back to the English one per part (the slide's per-cell rule). Display only —
+ *  where a heading starts is trackerGroupKey's job. */
+export function trackerGroupLabel(task, lang) {
   const t = task || {};
-  return `${String(t.track || '').trim() || STR.tracker.noTrack} › ${String(t.milestone || '').trim() || STR.tracker.noMilestone}`;
+  const ar = lang != null && normalizeTrackerLang(lang) !== 'en';
+  const part = (en, arKey, none) => (ar && String(t[arKey] || '').trim()) || String(t[en] || '').trim() || none;
+  return `${part('track', 'trackAr', STR.tracker.noTrack)} › ${part('milestone', 'milestoneAr', STR.tracker.noMilestone)}`;
+}
+
+/** The editor's GROUPING key: consecutive tasks with the same key share one heading. It is
+ *  the slide's merge rule (slidespec/build-tracker.js trackKey / msKey) — the English pair,
+ *  plus (outside 'en') the Arabic pair — so the list splits exactly where the deck does.
+ *  trackAr / milestoneAr are stored PER TASK: a group whose Arabic name differs on one task
+ *  prints as separate blocks on the slide, and the editor must show that same split rather
+ *  than one heading named from the group's first task. Whitespace runs collapse as on the
+ *  slide. Pure. */
+export function trackerGroupKey(task, lang) {
+  const t = task || {};
+  const c = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
+  const en = `${c(t.track)}\u0001${c(t.milestone)}`;
+  return normalizeTrackerLang(lang) === 'en' ? en : `${en}\u0001${c(t.trackAr)}\u0001${c(t.milestoneAr)}`;
+}
+
+/* ---------- The slide's task language (reportOptions.trackerLang) ---------- */
+
+/* 'ar' (Arabic, English fallback per cell) | 'en' (the file's English, unchanged) |
+ * 'both' (Arabic + the English original under it) — the enum and its default are the
+ * tracker module's (ingest/task-tracker.js), re-exported so the screens import one place.
+ * Order = the selector's order. */
+export { TRACKER_LANGS, DEFAULT_TRACKER_LANG };
+/** A stored / typed value → one of TRACKER_LANGS. Unlike the store's validator (null for
+ *  a bad value — it must REJECT an import), a screen always needs a choice: anything
+ *  invalid or absent reads as the default ('ar'). Pure. */
+export function normalizeTrackerLang(v) {
+  return parseTrackerLang(v) || DEFAULT_TRACKER_LANG;
+}
+/** The selector's options (review tracker card + Settings radio): ONE list, one wording. */
+export const TRACKER_LANG_OPTIONS = Object.freeze(TRACKER_LANGS.map((value) => Object.freeze({
+  value, label: STR.tracker.lang[value], hint: STR.tracker.langHint[value],
+})));
+
+const hasArabic = (task) => !!(task && String(task.taskAr || '').trim());
+
+/**
+ * The task text as the slide shows it in `lang`: { primary, secondary } — 'en' the English
+ * task; 'ar' the Arabic, else the English (per row); 'both' the Arabic with the English
+ * original as `secondary` (a row without Arabic shows the English once). Pure; the editor's
+ * row summary reads it so the list matches the deck.
+ */
+export function trackerTaskText(task, lang) {
+  const en = String((task && task.task) || '').trim();
+  const ar = String((task && task.taskAr) || '').trim();
+  const l = normalizeTrackerLang(lang);
+  if (l === 'en' || !ar) return { primary: en, secondary: '' };
+  return { primary: ar, secondary: l === 'both' && en && en !== ar ? en : '' };
+}
+
+/** How many tasks carry an Arabic text: { translated, total } (the upload card's
+ *  «N من M مهمة مترجمة» and the editor's meta). Pure. */
+export function trackerTranslationCount(tracker) {
+  const tasks = (tracker && Array.isArray(tracker.tasks)) ? tracker.tasks.filter((t) => t && typeof t === 'object') : [];
+  return { translated: tasks.filter(hasArabic).length, total: tasks.length };
+}
+
+/** True when ANY task carries ANY Arabic text — taskAr, trackAr or milestoneAr. The upload
+ *  card's «no Arabic columns» note keys on this, not on the task count: a workbook with only
+ *  the Arabic track / milestone columns (Portfolio, CONTRACT §2) still prints Arabic group
+ *  cells in 'ar' mode, so it does not read «in English». Pure. */
+export function trackerHasAnyArabic(tracker) {
+  const tasks = (tracker && Array.isArray(tracker.tasks)) ? tracker.tasks : [];
+  return tasks.some((t) => t && typeof t === 'object'
+    && ['taskAr', 'trackAr', 'milestoneAr'].some((k) => String(t[k] || '').trim()));
+}
+
+/**
+ * The «لغة نص المهام في الشريحة» selector (DOM): three pills (aria-pressed), the
+ * selected option's hint under them. `onChange(lang)` only on a real change.
+ * @returns {{el:HTMLElement, set:(lang:string)=>void}}
+ */
+let trackerLangSeq = 0;
+export function trackerLangControl({ value, onChange }) {
+  let cur = normalizeTrackerLang(value);
+  const hint = el('p', { class: 'trk-lang__hint small muted' });
+  const btns = TRACKER_LANG_OPTIONS.map((o) => el('button', {
+    type: 'button', class: 'trk-lang__btn', text: o.label, dataset: { lang: o.value },
+    onClick: () => {
+      if (o.value === cur) return;
+      cur = o.value;
+      paint();
+      if (typeof onChange === 'function') onChange(cur);
+    },
+  }));
+  const titleId = `trk-lang-${++trackerLangSeq}`;
+  const root = el('div', { class: 'trk-lang' }, [
+    el('span', { class: 'trk-lang__title', id: titleId, text: `${STR.tracker.langTitle}:` }),
+    el('div', { class: 'trk-lang__pills', role: 'group', 'aria-labelledby': titleId }, btns),
+    hint,
+  ]);
+  function paint() {
+    for (const b of btns) b.setAttribute('aria-pressed', b.dataset.lang === cur ? 'true' : 'false');
+    hint.textContent = STR.tracker.langHint[cur];
+  }
+  paint();
+  return { el: root, set(v) { cur = normalizeTrackerLang(v); paint(); } };
 }
 
 /**
@@ -528,9 +643,13 @@ export function trackerStamp(iso) {
 export function trackerMetaLine(tracker) {
   if (!isProjectTracker(tracker)) return '';
   const T = STR.tracker;
+  const { translated, total } = trackerTranslationCount(tracker);
   return [
     tracker.fileName || T.manualName,
     T.count(tracker.tasks.length),
+    // Arabic translation coverage — only once any task has one (a file without the Arabic
+    // columns keeps its line as before).
+    translated ? T.translated(translated, total) : null,
     tracker.loadedAt && trackerStamp(tracker.loadedAt) ? T.loaded(trackerStamp(tracker.loadedAt)) : null,
     tracker.editedAt && trackerStamp(tracker.editedAt) ? T.edited(trackerStamp(tracker.editedAt)) : T.notEdited,
   ].filter(Boolean).join(' · ');
@@ -547,26 +666,33 @@ export function trackerStatusPill(status) {
 }
 
 let trackerEditorSeq = 0;
+// Fields whose edit can move a group boundary or rename a heading (trackerGroupKey /
+// trackerGroupLabel) — the list re-renders on them.
+const GROUP_KEYS = new Set(['track', 'trackAr', 'milestone', 'milestoneAr']);
 
 /**
  * The tracker editor (DOM). Every task is a row: a one-line summary (WBS · task · status
- * pill · due) that opens a form with ALL 16 fields, plus move up / move down / delete.
+ * pill · due) that opens a form with ALL 19 fields, plus move up / move down / delete.
  * Rows sit under their «المسار › المرحلة» heading, in document (= slide) order. Narrow by
  * design: it lives in the review screen's ~400px controls column and on phones.
+ * The summaries and headings speak the slide's language (`lang` — reportOptions
+ * .trackerLang), so the list reads like the deck; an untranslated task is tagged.
  *
  * @param {{
  *   tracker: Object|null,
+ *   lang?: string,
  *   onChange: (tracker:Object, info:{structural:boolean}) => void,
  *   onCreate?: () => Object|null,
  * }} o  onChange after EVERY mutation (the caller previews + schedules the save);
  *        onCreate makes the document when there is none (returns the new tracker).
- * @returns {{el:HTMLElement, setTracker:(t:Object|null)=>void}}
+ * @returns {{el:HTMLElement, setTracker:(t:Object|null)=>void, setLang:(lang:string)=>void}}
  */
-export function trackerEditor({ tracker: initial, onChange, onCreate }) {
+export function trackerEditor({ tracker: initial, lang: initialLang, onChange, onCreate }) {
   const T = STR.tracker;
   const F = T.fields;
   const uid = `trk${++trackerEditorSeq}`;
   let tracker = isProjectTracker(initial) ? initial : null;
+  let lang = normalizeTrackerLang(initialLang);
   const expanded = new Set();
 
   const meta = el('p', { class: 'trk-meta small muted' });
@@ -625,10 +751,19 @@ export function trackerEditor({ tracker: initial, onChange, onCreate }) {
     }
     let group = null;
     tracker.tasks.forEach((task, i) => {
-      const g = trackerGroupLabel(task);
-      if (g !== group) {
-        group = g;
-        listEl.appendChild(el('div', { class: 'trk-group', dir: 'auto', text: g }));
+      // Grouped by the slide's own merge key (trackerGroupKey: the English pair, plus the
+      // Arabic pair outside 'en'), so a task whose Arabic group name differs from its
+      // neighbours' gets its own heading here exactly as it gets its own block in the deck.
+      // Shown in the slide's language; 'both' adds the English original under it.
+      const k = trackerGroupKey(task, lang);
+      if (k !== group) {
+        group = k;
+        const g = trackerGroupLabel(task);
+        const shown = trackerGroupLabel(task, lang);
+        listEl.appendChild(el('div', { class: 'trk-group' }, [
+          el('div', { dir: 'auto', text: shown }),
+          lang === 'both' && shown !== g ? el('div', { class: 'trk-group__en', dir: 'ltr', text: g }) : null,
+        ]));
       }
       listEl.appendChild(taskRow(task, i));
     });
@@ -655,11 +790,14 @@ export function trackerEditor({ tracker: initial, onChange, onCreate }) {
     const isOpen = expanded.has(task.id);
     const wbsEl = el('span', { class: 'trk-row__wbs', dir: 'ltr' });
     const taskEl = el('span', { class: 'trk-row__task', dir: 'auto' });
+    const untrEl = el('span', { class: 'trk-row__untr', text: T.untranslated });
     const pillHost = el('span', { class: 'trk-row__pill' });
     const dueEl = el('span', { class: 'trk-row__due', dir: 'auto' });
     const paintHead = () => {
       wbsEl.textContent = task.wbs || '—';
-      taskEl.textContent = String(task.task || '').trim() || T.untitled;
+      taskEl.textContent = trackerTaskText(task, lang).primary || T.untitled;
+      // «بلا ترجمة»: the slide will show this row's English text although Arabic is chosen.
+      untrEl.hidden = lang === 'en' || !String(task.task || '').trim() || !!String(task.taskAr || '').trim();
       pillHost.innerHTML = '';
       pillHost.appendChild(trackerStatusPill(task.status));
       dueEl.textContent = dueDisplay(task.due);
@@ -668,7 +806,7 @@ export function trackerEditor({ tracker: initial, onChange, onCreate }) {
     const toggle = el('button', {
       type: 'button', class: 'trk-row__toggle', 'aria-expanded': isOpen ? 'true' : 'false', 'aria-controls': bodyId,
       dataset: { trkId: task.id, trkField: '_toggle' },
-    }, [wbsEl, taskEl, pillHost, dueEl]);
+    }, [wbsEl, taskEl, untrEl, pillHost, dueEl]);
     const iconBtn = (text, label, field, disabled, onClick) => el('button', {
       type: 'button', class: 'trk-iconbtn', text, title: label, 'aria-label': label, disabled,
       dataset: { trkId: task.id, trkField: field }, onClick,
@@ -693,7 +831,16 @@ export function trackerEditor({ tracker: initial, onChange, onCreate }) {
     ]);
     const fillBody = () => {
       if (body.firstChild) return;
-      body.appendChild(el('div', { class: 'trk-grid' }, TRACKER_EDIT_FIELDS.map((f) => fieldControl(task, f, paintHead))));
+      // The English task and its Arabic translation share one row (.trk-pair).
+      const grid = el('div', { class: 'trk-grid' });
+      let pair = null;
+      for (const f of TRACKER_EDIT_FIELDS) {
+        const ctl = fieldControl(task, f, paintHead);
+        if (!f.pair) { pair = null; grid.appendChild(ctl); continue; }
+        if (!pair) { pair = el('div', { class: 'trk-pair' }); grid.appendChild(pair); }
+        pair.appendChild(ctl);
+      }
+      body.appendChild(grid);
       body.appendChild(el('div', { class: 'table-actions' }, [el('button', {
         type: 'button', class: 'btn btn--ghost btn--sm', text: `＋ ${T.addAfter}`,
         onClick: () => {
@@ -729,13 +876,20 @@ export function trackerEditor({ tracker: initial, onChange, onCreate }) {
       return true;
     };
     let ctrl;
+    // An Arabic translation field is typed right-to-left whatever it starts with (a
+    // leading 'NUPCO' must not flip it LTR); every other field follows its own text.
+    const dir = f.rtl ? 'rtl' : 'auto';
+    const lng = f.rtl ? 'ar' : null;
     if (f.wide) {
-      ctrl = el('textarea', { id, rows: f.key === 'task' ? 3 : 2, value: task[f.key] || '', dir: 'auto' });
+      ctrl = el('textarea', {
+        id, rows: f.pair ? 3 : 2, value: task[f.key] || '', dir, lang: lng,
+        placeholder: f.rtl ? T.arHint : null,
+      });
     } else {
       ctrl = el('input', {
-        id, type: 'text', value: task[f.key] || '', dir: 'auto', autocomplete: 'off',
+        id, type: 'text', value: task[f.key] || '', dir, lang: lng, autocomplete: 'off',
         list: f.suggest ? `${uid}-dl-${f.key}` : null,
-        placeholder: f.due ? T.dueHint : (f.suggest ? T.suggestHint : null),
+        placeholder: f.due ? T.dueHint : f.rtl ? T.arHint : (f.suggest ? T.suggestHint : null),
       });
     }
     ctrl.dataset.trkId = task.id;
@@ -753,7 +907,7 @@ export function trackerEditor({ tracker: initial, onChange, onCreate }) {
       // A new value joins the suggestions; a new track / milestone moves the row under
       // another heading (the list re-renders, keeping focus).
       paintDatalists();
-      if (f.key === 'track' || f.key === 'milestone') renderList();
+      if (GROUP_KEYS.has(f.key)) renderList();
     });
     let picker = null;
     let control = ctrl;
@@ -816,6 +970,13 @@ export function trackerEditor({ tracker: initial, onChange, onCreate }) {
       tracker = isProjectTracker(next) ? next : null;
       expanded.clear();
       paintDatalists();
+      renderList();
+    },
+    /** The slide language changed (the card's selector): repaint summaries + headings. */
+    setLang(next) {
+      const l = normalizeTrackerLang(next);
+      if (l === lang) return;
+      lang = l;
       renderList();
     },
   };

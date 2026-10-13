@@ -16,6 +16,17 @@
 // Portfolio rows with no track / milestone) and every disagreement becomes a warning,
 // shown on the upload card — the operator can correct any value on the website.
 //
+// Arabic translations (2026-10-13): OPTIONAL columns carrying the Arabic of the three
+// texts the slide shows — the task, its Portfolio Track and its Milestone — land in
+// taskAr / trackAr / milestoneAr beside the English, which is NEVER overwritten (it is
+// the user's reference «original» when a translation reads wrong). Found by tolerant
+// header match in EITHER sheet ('Task / Deliverable (Arabic)', '… (AR)', 'المهمة / المخرج',
+// 'Portfolio Track (Arabic)', 'المسار', 'Milestone (Arabic)', 'المرحلة', …). taskAr
+// follows the task rule (Hierarchical wins); trackAr / milestoneAr follow the grouping
+// rule (Portfolio, filled down within the group). A workbook without them parses
+// exactly as before, every *Ar field ''. The translations live in the user's own
+// workbook / browser cache only — never in this repo.
+//
 // Rows hidden in Excel are INCLUDED: the hiding comes from an Organization filter on the
 // sheet's table, a view setting at save time, not data (the Portfolio sheet shows them).
 //
@@ -34,11 +45,35 @@
 export const TRACKER_FORMAT = 'misbar-task-tracker-v1';
 
 /** Every task field, in editor / documentation order. All are strings ('' when empty). */
+// Each *Ar field directly follows the English field it translates.
 export const TASK_FIELDS = Object.freeze([
-  'id', 'wbs', 'track', 'milestone', 'workstream', 'workPackage', 'task', 'taskType',
-  'organization', 'owner', 'priority', 'status', 'due', 'predecessor', 'nextAction',
-  'definitionOfDone', 'notes',
+  'id', 'wbs', 'track', 'trackAr', 'milestone', 'milestoneAr', 'workstream', 'workPackage',
+  'task', 'taskAr', 'taskType', 'organization', 'owner', 'priority', 'status', 'due',
+  'predecessor', 'nextAction', 'definitionOfDone', 'notes',
 ]);
+
+/**
+ * The tracker slides' text language (settings.reportOptions.trackerLang): 'ar' = the
+ * Arabic translation, falling back to the English per cell where a row has none;
+ * 'en' = the English exactly as before translations existed; 'both' = Arabic with the
+ * English original under it. Owned here, beside the fields it selects between, so the
+ * store (seed / validation / import) and the slide builder share ONE list.
+ */
+export const TRACKER_LANGS = Object.freeze(['ar', 'en', 'both']);
+/** MUST equal REPORT_OPTIONS_SEED.trackerLang (seeds/defaults.js keeps a first-run copy). */
+export const DEFAULT_TRACKER_LANG = 'ar';
+
+/**
+ * A stored / imported trackerLang → one of TRACKER_LANGS, or null when it is not one
+ * (case and surrounding spaces forgiven — a hand-edited backup's ' Both ' is still 'both').
+ * @param {*} v
+ * @returns {'ar'|'en'|'both'|null}
+ */
+export function normalizeTrackerLang(v) {
+  if (typeof v !== 'string') return null;
+  const s = v.trim().toLowerCase();
+  return TRACKER_LANGS.includes(s) ? s : null;
+}
 
 // The OLD tracker's sheet names (src/ingest/xlsx.js parseTracker, retired 2026-10-13).
 const OLD_SHEETS = ['سجل المهام', 'سجل التحديات', 'سجل المخاطر'];
@@ -71,14 +106,82 @@ const HEADER_ALIASES = {
   notes: 'notes', note: 'notes',
 };
 
+// ---- Arabic translation columns --------------------------------------------------------
+// The English field each translation belongs to. Only these three are ever shown in
+// Arabic; an 'Owner (Arabic)' column is not a translation slot and stays unmapped.
+const AR_FIELD_OF = { task: 'taskAr', track: 'trackAr', milestone: 'milestoneAr' };
+
+// A LATIN header marked as the Arabic copy: the English alias with an 'Arabic' / 'AR'
+// suffix ('Task / Deliverable (Arabic)' → 'taskdeliverablearabic', 'Track AR' →
+// 'trackar') or an 'Arabic' prefix ('Arabic Task'). Longest suffix first. Only a base
+// that IS a task / track / milestone alias counts, so an unrelated header ending in
+// 'ar' ('Calendar') can never be taken for one.
+const LATIN_AR_SUFFIXES = ['arabictranslation', 'arabic', 'ar'];
+const LATIN_AR_PREFIX = 'arabic';
+
+// Arabic-script headers, compared as their letters only (see arWords). Words that only
+// SAY "Arabic" / "translation" are markers: dropped before the lookup, and they turn an
+// otherwise-English header ('Task (عربي)') into the Arabic column.
+const AR_MARKERS = new Set(['عربي', 'العربي', 'بالعربي', 'عربيه', 'العربيه', 'بالعربيه', 'ترجمه', 'الترجمه']);
+const AR_HEADER_ALIASES = {
+  المهمه: 'taskAr', مهمه: 'taskAr', المهام: 'taskAr', مهام: 'taskAr', المخرج: 'taskAr',
+  المهمهالمخرج: 'taskAr', المهمهوالمخرج: 'taskAr', المهمهاوالمخرج: 'taskAr',
+  المهمهالمخرجات: 'taskAr', المهمهوالمخرجات: 'taskAr', وصفالمهمه: 'taskAr',
+  المسار: 'trackAr', مسار: 'trackAr', مسارالمحفظه: 'trackAr',
+  المرحله: 'milestoneAr', مرحله: 'milestoneAr', المرحلهالرئيسيه: 'milestoneAr',
+  المعلمالرئيسي: 'milestoneAr',
+};
+
+// Harakat / Quranic marks / tatweel carry no identity for a header match.
+const AR_NOISE = /[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED\u0640]/g;
+
+/**
+ * A header's Arabic words, normalized for matching: marks and tatweel removed, the
+ * hamza / madda alef forms → ا, ى → ي, ة → ه (spelling variants of one word), split on
+ * anything that is not an Arabic letter (spaces, '/', brackets, latin text).
+ */
+function arWords(v) {
+  return oneLine(v).replace(AR_NOISE, '')
+    .replace(/[أإآٱ]/g, 'ا').replace(/ى/g, 'ي').replace(/ة/g, 'ه')
+    .split(/[^\u0621-\u064A]+/).filter(Boolean);
+}
+
+/**
+ * Header cell → task field (English or *Ar), or undefined. Order matters:
+ *   1. a latin header with an Arabic suffix / prefix → the translation of its base;
+ *   2. an English header carrying an Arabic marker word ('Task (عربي)') → the translation;
+ *   3. any header the English aliases know → that field — so every header that mapped
+ *      before translations existed maps the same way ('المهمة / Task' stays English);
+ *   4. a purely Arabic header ('المهمة / المخرج', 'المسار', 'المرحلة') → the translation.
+ */
+function headerField(v) {
+  const n = norm(v);
+  for (const s of LATIN_AR_SUFFIXES) {
+    if (n.length > s.length && n.endsWith(s)) {
+      const f = AR_FIELD_OF[HEADER_ALIASES[n.slice(0, -s.length)]];
+      if (f) return f;
+    }
+  }
+  if (n.length > LATIN_AR_PREFIX.length && n.startsWith(LATIN_AR_PREFIX)) {
+    const f = AR_FIELD_OF[HEADER_ALIASES[n.slice(LATIN_AR_PREFIX.length)]];
+    if (f) return f;
+  }
+  const words = arWords(v);
+  if (n && words.some((w) => AR_MARKERS.has(w)) && AR_FIELD_OF[HEADER_ALIASES[n]]) {
+    return AR_FIELD_OF[HEADER_ALIASES[n]];
+  }
+  if (HEADER_ALIASES[n]) return HEADER_ALIASES[n];
+  return AR_HEADER_ALIASES[words.filter((w) => !AR_MARKERS.has(w)).join('')];
+}
+
 // Free-text fields keep their line breaks (a multi-line note is the author's layout);
 // every other field is a one-line value and has all whitespace collapsed.
-const MULTILINE_FIELDS = new Set(['task', 'nextAction', 'definitionOfDone', 'notes']);
+const MULTILINE_FIELDS = new Set(['task', 'taskAr', 'nextAction', 'definitionOfDone', 'notes']);
 
 // Fields where the two sheets overlap: Hierarchical wins, Portfolio fills a blank, and a
 // real difference is reported. Arabic names for the warning text.
 const SHARED_FIELDS = [
-  ['workPackage', 'Work Package'], ['task', 'المهمة'], ['taskType', 'Task Type'],
+  ['workPackage', 'Work Package'], ['task', 'المهمة'], ['taskAr', 'المهمة (عربي)'], ['taskType', 'Task Type'],
   ['organization', 'الجهة'], ['owner', 'المسؤول'], ['priority', 'الأولوية'],
   ['status', 'الحالة'], ['due', 'تاريخ الاستحقاق'],
 ];
@@ -201,7 +304,7 @@ function findHeader(ws, XLSX, mustAll, mustOne = []) {
     const map = {};
     for (let C = range.s.c; C <= range.e.c; C++) {
       const c = ws[XLSX.utils.encode_cell({ r: R, c: C })];
-      const f = c && HEADER_ALIASES[norm(c.v)];
+      const f = c && headerField(c.v);
       if (f && !(f in map)) map[f] = C;
     }
     if (mustAll.every((k) => k in map) && (!mustOne.length || mustOne.some((k) => k in map))) {
@@ -249,17 +352,23 @@ function locateSheets(wb, XLSX) {
 
 // ---- row reading ----------------------------------------------------------------------
 
+// Group labels — a row holding only these is a group header, not a task.
+const GROUP_FIELDS = new Set(['track', 'milestone', 'trackAr', 'milestoneAr']);
+
 /**
  * Read one sheet's data rows below its header. Portfolio group columns (track /
- * milestone) are filled DOWN here: they are written only on each group's first row. A
- * row that carries nothing but a group label still moves the fill-down (a group-header
- * row layout) and is then skipped, as is any row with no value at all.
+ * milestone, and their Arabic trackAr / milestoneAr) are filled DOWN here: they are
+ * written only on each group's first row. A row that carries nothing but a group label
+ * still moves the fill-down (a group-header row layout) and is then skipped, as is any
+ * row with no value at all.
  */
 function readRows(ws, XLSX, hdr, date1904 = false) {
   const out = [];
   const fields = Object.keys(hdr.map);
   let track = '';
   let milestone = '';
+  let trackAr = '';
+  let milestoneAr = '';
   for (let R = hdr.row + 1; R <= hdr.range.e.r; R++) {
     const cellOf = (f) => ws[XLSX.utils.encode_cell({ r: R, c: hdr.map[f] })];
     const row = { _row: R + 1 };
@@ -269,15 +378,28 @@ function readRows(ws, XLSX, hdr, date1904 = false) {
     if ('track' in hdr.map) {
       // A NEW track value starts a new group: its milestone does not inherit the previous
       // group's (fill-down never crosses a track boundary).
-      if (row.track && row.track !== track) { track = row.track; milestone = ''; }
-      if (row.milestone) milestone = row.milestone;
+      // The Arabic labels belong to the ENGLISH group they sit in: a new track clears
+      // both, a new milestone clears milestoneAr — so a group whose translation is
+      // missing reads '' (the slide then falls back to its English label) instead of
+      // inheriting the previous group's Arabic.
+      if (row.track && row.track !== track) {
+        track = row.track; milestone = ''; trackAr = ''; milestoneAr = '';
+      }
+      if (row.milestone) {
+        if (row.milestone !== milestone) milestoneAr = '';
+        milestone = row.milestone;
+      }
+      if (row.trackAr) trackAr = row.trackAr;
+      if (row.milestoneAr) milestoneAr = row.milestoneAr;
       row.track = track;
       row.milestone = milestone;
+      if ('trackAr' in hdr.map) row.trackAr = trackAr;
+      if ('milestoneAr' in hdr.map) row.milestoneAr = milestoneAr;
     }
     // The Portfolio Status formula is routinely copied BELOW the last task: with a blank
     // WBS its MATCH fails and the row caches 'Not Found'. That sentinel is not data, so a
     // row holding nothing else is skipped, never turned into a phantom empty task.
-    const hasData = fields.some((f) => f !== 'track' && f !== 'milestone' && row[f] !== ''
+    const hasData = fields.some((f) => !GROUP_FIELDS.has(f) && row[f] !== ''
       && !(f === 'status' && isNotFound(row[f])));
     if (hasData) out.push(row);
   }
@@ -298,6 +420,11 @@ function joinRow(p, h, warnings) {
   t.wbs = (h && h.wbs) || (p && p.wbs) || '';
   t.track = p ? p.track || '' : '';
   t.milestone = p ? p.milestone || '' : '';
+  // The group translations follow the grouping: Portfolio's (filled down) first; a
+  // Hierarchical column only fills a blank (that sheet has no groups, so its value is
+  // per row). taskAr is a SHARED_FIELD below — Hierarchical wins, like the task itself.
+  t.trackAr = (p && p.trackAr) || (h && h.trackAr) || '';
+  t.milestoneAr = (p && p.milestoneAr) || (h && h.milestoneAr) || '';
   for (const f of ['workstream', 'predecessor', 'nextAction', 'definitionOfDone', 'notes']) {
     t[f] = h ? h[f] || '' : '';
   }
@@ -459,6 +586,28 @@ export function normalizeProjectTracker(v) {
     warnings: Array.isArray(v.warnings) ? v.warnings.filter((w) => typeof w === 'string') : [],
     tasks,
   };
+}
+
+/**
+ * In place: give every task of a tagged ProjectTracker each TASK_FIELDS key it LACKS,
+ * as ''. A cache written before a field existed (taskAr / trackAr / milestoneAr arrived
+ * 2026-10-13, after trackers were already cached) stays the same document and every
+ * reader sees a string. Deliberately narrower than normalizeProjectTracker: nothing is
+ * dropped, no id repaired, no present value touched — this runs on the plain load path,
+ * where the cache must come back as it was stored plus the missing keys.
+ * @param {*} tracker
+ * @returns {number} how many tasks gained a key (0 = nothing to do / not a tracker)
+ */
+export function backfillTaskFields(tracker) {
+  if (!isProjectTracker(tracker)) return 0;
+  let changed = 0;
+  for (const t of tracker.tasks) {
+    if (t === null || typeof t !== 'object' || Array.isArray(t)) continue;
+    let hit = false;
+    for (const f of TASK_FIELDS) if (t[f] === undefined) { t[f] = ''; hit = true; }
+    if (hit) changed++;
+  }
+  return changed;
 }
 
 /**

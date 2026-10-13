@@ -8,22 +8,26 @@
 // mirror of the automation panel), live source (Grafana + cached-tracker), and
 // backup (export/import).
 
-import { SNAPSHOT_SEED, REPORT_OPTIONS_SEED, AUTOMATION_SEED } from '../seeds/defaults.js?v=v2026-10-13.3';
-import { normalizeDeltaMode } from '../model/delta-baseline.js?v=v2026-10-13.3';
+import { SNAPSHOT_SEED, REPORT_OPTIONS_SEED, AUTOMATION_SEED } from '../seeds/defaults.js?v=v2026-10-13.4';
+import { normalizeDeltaMode } from '../model/delta-baseline.js?v=v2026-10-13.4';
 // The connection test's per-hospital line (STR.settings) — ar.js is pure and DOM-free
 // (every other screen imports it), so module-smoke's bare-Node import still holds.
-import { STR } from '../i18n/ar.js?v=v2026-10-13.3';
+import { STR } from '../i18n/ar.js?v=v2026-10-13.4';
 // NAMESPACE import on purpose: the access tab reads lock.currentUser(), which is a
 // newer export. A named import would throw at link time on any build of lock.js that
 // predates it (and take the whole settings screen down); a namespace import lets the
 // tab degrade to 'unknown user' instead. lock.js is DOM-free at module scope, so this
 // stays importable in bare Node (test/module-smoke).
-import * as lock from './lock.js?v=v2026-10-13.3';
+import * as lock from './lock.js?v=v2026-10-13.4';
 // The project tracker document (tracker CONTRACT §1.3): the review editor's pending save
 // (flushed before this screen loads its working copy — its autosave would otherwise
 // write the stale cache back), and the one "is this a tagged tracker" rule.
-import { trackerSaver, trackerMetaLine } from './components.js?v=v2026-10-13.3';
-import { resolveProjectTracker } from '../model/report-model.js?v=v2026-10-13.3';
+// Also the tracker slide's task language (Arabic CONTRACT §3–4): the review card's pills
+// and this tab's radio share ONE option list and ONE normaliser (default = the seed's 'ar').
+import {
+  trackerSaver, trackerMetaLine, TRACKER_LANG_OPTIONS, normalizeTrackerLang,
+} from './components.js?v=v2026-10-13.4';
+import { resolveProjectTracker } from '../model/report-model.js?v=v2026-10-13.4';
 
 const TABS = [
   { id: 'tat', label: 'مدة الفحوصات' },
@@ -905,6 +909,7 @@ export function render(container, ctx) {
           labels: {},
           deltaMode: REPORT_OPTIONS_SEED.deltaMode,
           autoDownloadFiles: REPORT_OPTIONS_SEED.autoDownloadFiles,
+          trackerLang: normalizeTrackerLang(REPORT_OPTIONS_SEED.trackerLang),
         };
       }
       const r = S.doc.reportOptions;
@@ -922,6 +927,9 @@ export function render(container, ctx) {
       if (typeof r.autoDownloadFiles !== 'boolean') {
         r.autoDownloadFiles = REPORT_OPTIONS_SEED.autoDownloadFiles !== false;
       }
+      // trackerLang post-dates every stored doc too: absent / unknown → the default ('ar'),
+      // so the radio always has exactly one option checked.
+      r.trackerLang = normalizeTrackerLang(r.trackerLang);
       return r;
     }
 
@@ -1003,6 +1011,20 @@ export function render(container, ctx) {
         h('p', {
           class: 'st-help',
           text: 'الحساب من البيانات نفسها ولا يعتمد على وجود تقرير سابق، لذا تكرار التوليد في اليوم نفسه يعطي النتيجة ذاتها.',
+        }),
+        // (d2) «متابعة المشروع» — the tracker slides' task language. Mirror of the pills in
+        // the review screen's tracker card; both write reportOptions.trackerLang.
+        groupHead(STR.tracker.title),
+        radioField(
+          STR.tracker.langTitle,
+          'st-trackerLang',
+          TRACKER_LANG_OPTIONS,
+          () => ro().trackerLang,
+          (v) => { ro().trackerLang = v; },
+        ),
+        h('p', {
+          class: 'st-help',
+          text: `${TRACKER_LANG_OPTIONS.map((o) => `${o.label}: ${o.hint}`).join(' ')} النص الإنجليزي الأصلي يبقى محفوظًا دائمًا، والترجمة تُحرَّر من بطاقة «متابعة المشروع» في شاشة مراجعة التقرير.`,
         }),
         // (e) R2 — auto-download of the 4 files after a MANUAL generation. Mirror of the
         // checkbox next to «توليد التقارير» on the review screen; both write this one key.

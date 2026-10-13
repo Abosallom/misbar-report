@@ -1,21 +1,22 @@
 // ui/screen-upload.js — file upload + parse + engine kickoff (Track E).
-import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-10-13.3';
+import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-10-13.4';
 import {
   el, dropZone, fileSummaryCard, toast, trackerSaver, trackerStatusCounts, trackerStamp,
-} from './components.js?v=v2026-10-13.3';
+  trackerTranslationCount, trackerHasAnyArabic,
+} from './components.js?v=v2026-10-13.4';
 // The project tracker («ملف متابعة المشروع», tracker CONTRACT §1.7). resolveProjectTracker
 // is the model layer's ONE rule for "which tracker does this run have" (tagged only —
 // an install's OLD-shape cache is no tracker); static, report-model.js is pure.
-import { resolveProjectTracker } from '../model/report-model.js?v=v2026-10-13.3';
-import { normTest } from '../contracts.js?v=v2026-10-13.3';
-import { getPapa, getXLSX } from '../vendor-loader.js?v=v2026-10-13.3';
-import { TAT_LOINC } from '../seeds/tat-lookup.js?v=v2026-10-13.3';
-import { buildLateLabsSection } from './late-labs-section.js?v=v2026-10-13.3';
-import { buildAutomationPanel } from './automation-panel.js?v=v2026-10-13.3';
+import { resolveProjectTracker } from '../model/report-model.js?v=v2026-10-13.4';
+import { normTest } from '../contracts.js?v=v2026-10-13.4';
+import { getPapa, getXLSX } from '../vendor-loader.js?v=v2026-10-13.4';
+import { TAT_LOINC } from '../seeds/tat-lookup.js?v=v2026-10-13.4';
+import { buildLateLabsSection } from './late-labs-section.js?v=v2026-10-13.4';
+import { buildAutomationPanel } from './automation-panel.js?v=v2026-10-13.4';
 // Optional filtered-CSV download (labs × order stages → the uploaded file's own rows).
 // It reads state.parsed.raw — PATIENT DATA, memory-only; see state.js for the pairing
 // rule this screen upholds at every site that writes state.parsed.orders.
-import { buildCsvExportSection } from './csv-export-section.js?v=v2026-10-13.3';
+import { buildCsvExportSection } from './csv-export-section.js?v=v2026-10-13.4';
 // THE HOSPITAL DOOR (2026-10-07; report types 2026-10-11): the feed carries KAMC's and
 // SGH's orders. Every site below that writes state.parsed.orders goes through
 // takeOrders(): parsed.orders = the KAMC rows — what EVERY surface of this screen reads
@@ -26,11 +27,11 @@ import { buildCsvExportSection } from './csv-export-section.js?v=v2026-10-13.3';
 // silently skipped the split would put another hospital's orders into every number (and
 // SGH test names into the global TAT table). hospital.js is pure (no DOM, no vendor
 // bundle), so this adds no failure mode.
-import { takeOrders } from '../model/hospital.js?v=v2026-10-13.3';
+import { takeOrders } from '../model/hospital.js?v=v2026-10-13.4';
 
 /** The SAME specifier main.js and ui/automation-panel.js import — resolving to
  *  the identical URL means the probe below hits the already-cached module. */
-const AUTOMATION_PIPELINE_URL = '../automation/pipeline.js?v=v2026-10-13.3';
+const AUTOMATION_PIPELINE_URL = '../automation/pipeline.js?v=v2026-10-13.4';
 
 /** Format an ISO timestamp as local 'HH:MM' for snapshot-freshness labels. */
 function fmtHHMM(iso) {
@@ -69,7 +70,10 @@ export function buildMockOrders() {
  *  for the explicit dev mock mode (?mock=1) and the harnesses ONLY — never a fallback in a
  *  real flow (a mock once printed fake tasks into a real deck). Made-up tasks and owners;
  *  the field values use the workbook's own vocabulary (statuses incl. its 'Deleyed'
- *  spelling, a 'daily' due, a blank status) so every display branch is exercised. */
+ *  spelling, a 'daily' due, a blank status) so every display branch is exercised — and
+ *  made-up Arabic translations (every group named, every task but the last translated —
+ *  the parser fills trackAr / milestoneAr down a group too), so the slide's Arabic,
+ *  English and «both» modes and the per-row English fallback all show in ?mock=1. */
 // Identity set of the mock documents handed out, so the review editor can tell one apart
 // WITHOUT a marker key on the document (its shape is the parser's, nothing extra rides
 // into storage): edits to a mock are previewed but never saved to settings.cachedTracker,
@@ -82,10 +86,13 @@ export function isMockTracker(t) {
 
 export function buildMockTracker() {
   const at = '2026-10-01T08:00:00.000Z';
-  const task = (wbs, track, milestone, workstream, workPackage, text, taskType, organization, owner, priority, status, due, predecessor = '') => ({
+  const task = (wbs, track, milestone, workstream, workPackage, text, taskType, organization, owner, priority, status, due, predecessor = '', ar = {}) => ({
     id: wbs, wbs, track, milestone, workstream, workPackage, task: text, taskType, organization,
     owner, priority, status, due, predecessor, nextAction: '', definitionOfDone: '', notes: '',
+    taskAr: ar.task || '', trackAr: ar.track || '', milestoneAr: ar.milestone || '',
   });
+  // Made-up Arabic names for the mock's made-up groups.
+  const AR = (taskText, track, milestone) => ({ task: taskText, track, milestone });
   const doc = {
     format: 'misbar-task-tracker-v1',
     fileName: 'mock-task-tracker.xlsx',
@@ -93,13 +100,13 @@ export function buildMockTracker() {
     editedAt: null,
     warnings: [],
     tasks: [
-      task('1.1.1', 'Integration', 'Partner A', 'Product & Integration', 'Partner A Integration', 'Confirm Partner A integration scope (mock)', 'Integration', 'NUPCO / LEAN', 'Owner A', 'High', 'Completed', '2026-09-06'),
-      task('1.1.2', 'Integration', 'Partner A', 'Product & Integration', 'Partner A Integration', 'Complete Partner A integration testing (mock)', 'Integration', 'LEAN', 'Owner B', 'Critical', 'In Progress', '2026-09-14', '1.1.1'),
-      task('1.2.1', 'Integration', 'Labs', 'Operations', 'Laboratory Operations', 'Monitor overdue tests daily (mock)', 'Recurring Activity', 'LEAN', 'Owner B', 'High', 'In Progress', 'daily'),
-      task('2.1.1', 'Rollout', 'Site X', 'Onboarding', 'Site X Onboarding', 'Close Site X readiness gaps (mock)', 'Onboarding', 'NUPCO / LEAN', 'Owner C', 'Critical', 'Deleyed', '2026-09-13'),
-      task('2.1.2', 'Rollout', 'Site X', 'Onboarding', 'Site X Onboarding', 'Site X go-live (mock)', 'Milestone', 'NUPCO / LEAN', 'Owner C', 'Critical', 'Blocked', '2026-08-13', '2.1.1'),
-      task('3.1.1', 'Governance', 'Governance', 'Governance', 'Governance Framework', 'Finalize the governance framework (mock)', 'Deliverable', 'NUPCO', 'Owner D', 'Medium', 'In Progress', ''),
-      task('3.1.2', 'Governance', 'Governance', 'Governance', 'Product Roadmap', 'Draft the product roadmap (mock)', 'Deliverable', 'LEAN', 'Owner D', 'High', '', '2026-10-30'),
+      task('1.1.1', 'Integration', 'Partner A', 'Product & Integration', 'Partner A Integration', 'Confirm Partner A integration scope (mock)', 'Integration', 'NUPCO / LEAN', 'Owner A', 'High', 'Completed', '2026-09-06', '', AR('تأكيد نطاق التكامل مع الشريك أ (تجريبي)', 'التكامل', 'الشريك أ')),
+      task('1.1.2', 'Integration', 'Partner A', 'Product & Integration', 'Partner A Integration', 'Complete Partner A integration testing (mock)', 'Integration', 'LEAN', 'Owner B', 'Critical', 'In Progress', '2026-09-14', '1.1.1', AR('إكمال اختبارات التكامل مع الشريك أ (تجريبي)', 'التكامل', 'الشريك أ')),
+      task('1.2.1', 'Integration', 'Labs', 'Operations', 'Laboratory Operations', 'Monitor overdue tests daily (mock)', 'Recurring Activity', 'LEAN', 'Owner B', 'High', 'In Progress', 'daily', '', AR('متابعة الفحوصات المتأخرة يوميًا (تجريبي)', 'التكامل', 'المختبرات')),
+      task('2.1.1', 'Rollout', 'Site X', 'Onboarding', 'Site X Onboarding', 'Close Site X readiness gaps (mock)', 'Onboarding', 'NUPCO / LEAN', 'Owner C', 'Critical', 'Deleyed', '2026-09-13', '', AR('سد فجوات جاهزية الموقع س (تجريبي)', 'الإطلاق', 'الموقع س')),
+      task('2.1.2', 'Rollout', 'Site X', 'Onboarding', 'Site X Onboarding', 'Site X go-live (mock)', 'Milestone', 'NUPCO / LEAN', 'Owner C', 'Critical', 'Blocked', '2026-08-13', '2.1.1', AR('إطلاق الموقع س (تجريبي)', 'الإطلاق', 'الموقع س')),
+      task('3.1.1', 'Governance', 'Governance', 'Governance', 'Governance Framework', 'Finalize the governance framework (mock)', 'Deliverable', 'NUPCO', 'Owner D', 'Medium', 'In Progress', '', '', AR('اعتماد إطار الحوكمة (تجريبي)', 'الحوكمة', 'الحوكمة')),
+      task('3.1.2', 'Governance', 'Governance', 'Governance', 'Product Roadmap', 'Draft the product roadmap (mock)', 'Deliverable', 'LEAN', 'Owner D', 'High', '', '2026-10-30', '', AR('', 'الحوكمة', 'الحوكمة')),
     ],
   };
   MOCK_TRACKERS.add(doc);
@@ -239,7 +246,7 @@ function normalizeOrders(res) {
 
 async function ingestCsv(file) {
   const Papa = await getPapa();
-  const mod = await tryImport('../ingest/csv.js?v=v2026-10-13.3');
+  const mod = await tryImport('../ingest/csv.js?v=v2026-10-13.4');
   const fn = pickFn(mod, ['parseKamcCsv', 'parseCsv', 'ingestCsv', 'parseOrders', 'parse']);
   if (fn) {
     const text = await file.text();
@@ -259,7 +266,7 @@ async function ingestCsv(file) {
  * FAILS with a message (it used to fall back to mock tasks — never again). */
 async function ingestTracker(file) {
   const XLSX = await getXLSX();
-  const mod = await tryImport('../ingest/task-tracker.js?v=v2026-10-13.3');
+  const mod = await tryImport('../ingest/task-tracker.js?v=v2026-10-13.4');
   if (!mod || typeof mod.parseTaskTracker !== 'function') throw new Error(STR.upload.trackerModuleMissing);
   const buf = await file.arrayBuffer();
   let tracker = mod.parseTaskTracker(buf, XLSX, { fileName: file.name });
@@ -490,7 +497,7 @@ export async function render(container, ctx) {
     const gcfg = (store.settings && store.settings.grafana) || {};
     const dataKey = (gcfg.dataKey || '').trim();
     try {
-      const mod = await import('../ingest/grafana.js?v=v2026-10-13.3');
+      const mod = await import('../ingest/grafana.js?v=v2026-10-13.4');
       const asOf = state.reportDate || todayISO();
       const directConfigured = !!(gcfg.baseUrl && gcfg.accessToken);
       try {
@@ -726,6 +733,16 @@ export async function render(container, ctx) {
           ...trackerStatusCounts(tracker).map((c) => ({ label: c.label, value: c.count })),
         ],
       });
+      // «N من M مهمة مترجمة» — the Arabic translation coverage (Arabic CONTRACT §4); with no
+      // Arabic at all (no task, track or milestone translation — trackerHasAnyArabic), one
+      // line saying the slide will read in English (not an error). A file with only the
+      // Arabic track / milestone columns shows «0 من M» without that note: its group cells
+      // DO print in Arabic.
+      const tc = trackerTranslationCount(tracker);
+      if (tc.total) {
+        card.appendChild(el('p', { class: 'small', style: 'font-weight:700;margin:10px 0 0', text: STR.tracker.translated(tc.translated, tc.total) }));
+        if (!trackerHasAnyArabic(tracker)) card.appendChild(el('p', { class: 'small muted', style: 'margin:2px 0 0', text: STR.upload.trackerNoArabic }));
+      }
       const notes = [];
       if (trackerEditsReplacedAt) {
         notes.push(STR.upload.trackerEditsReplaced(trackerStamp(trackerEditsReplacedAt)));
@@ -933,7 +950,7 @@ export async function render(container, ctx) {
     const seq = ++unmatchedSeq;
     let mod;
     try {
-      mod = await import('../ingest/tat-suggest.js?v=v2026-10-13.3');
+      mod = await import('../ingest/tat-suggest.js?v=v2026-10-13.4');
     } catch { return; } // module not present yet — keep the plain panel behavior
     if (seq !== unmatchedSeq) return; // a newer paint superseded this run
     const fn = pickFn(mod, ['suggestTats']);
@@ -1081,7 +1098,7 @@ export async function render(container, ctx) {
     if (!orders || !orders.length) { heroHost.innerHTML = ''; return; }
     let out;
     try {
-      const mod = await import('../engine/engine.js?v=v2026-10-13.3');
+      const mod = await import('../engine/engine.js?v=v2026-10-13.4');
       if (seq !== heroSeq) return; // a newer run superseded this one
       const compute = pickFn(mod, ['compute', 'runEngine', 'run']);
       if (typeof compute !== 'function') { heroHost.innerHTML = ''; return; }
@@ -1106,7 +1123,7 @@ export async function render(container, ctx) {
       let out = (state.engineOutput && state.engineOutput.totals) ? state.engineOutput : null;
       if (!out) {
         try {
-          const mod = await tryImport('../engine/engine.js?v=v2026-10-13.3');
+          const mod = await tryImport('../engine/engine.js?v=v2026-10-13.4');
           const compute = pickFn(mod, ['compute', 'runEngine', 'run']);
           if (compute) {
             out = compute(state.parsed.orders, (store.settings || {}).tatLookup, engineOpts());

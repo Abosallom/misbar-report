@@ -34,7 +34,27 @@
 //   · a cell longer than MAX_BODY_LINES (a group label longer than MAX_LABEL_LINES) is cut
 //     at a word and ends in «…». That bound is what keeps ANY row inside a page, however
 //     long the text typed on the website; the full text stays in the tracker.
-import { COLORS as C } from '../theme.js?v=v2026-10-13.3';
+//
+// LANGUAGE (reportOptions.trackerLang, 2026-10-13 user request: the tasks in Arabic with the
+// English original kept). The task, track and milestone cells print, per `lang`:
+//   · 'ar' (the default; anything unknown reads as 'ar') — the row's Arabic translation
+//     (taskAr / trackAr / milestoneAr), falling back to the English PER CELL where it is '';
+//   · 'en' — the English only: today's slides, byte for byte (nothing below reads an *Ar
+//     field or the Arabic metrics in this mode);
+//   · 'both' — the Arabic, and under it the English original smaller, grey and LTR. Table
+//     cells take ONE style each in both renderers (a cell has no styled runs), so the two
+//     lines are two cells: a translated task is TWO table rows — the Arabic task cell on the
+//     first, the English one on the second, joined by suppressing the border between them —
+//     with every other cell of the task spanning both; a translated group label is split the
+//     same way inside its merged block (Arabic part bottom-aligned above the boundary nearest
+//     the block's middle, English part top-aligned below it). A cell without a translation
+//     (or whose translation equals the English) prints its text once, as in 'en'.
+// Owner, organization, priority, status and dates never change with the language.
+// An untranslated tracker therefore renders identically in all three modes.
+// Arabic TRANSLATIONS are measured with real Cairo metrics (contextual forms, lam-alef, the
+// font's one positive Arabic kern — shapedTextWidth below); every other cell keeps the
+// legacy estimate, so the English / fallback layout never moves.
+import { COLORS as C } from '../theme.js?v=v2026-10-13.4';
 
 // ---- labels (registry keys; build-spec.js DEFAULT_LABELS spreads this object so the
 // labels editor reaches them and an override reaches all three decks) ------------------
@@ -71,6 +91,13 @@ export const TR = Object.freeze({
   groupSep: Object.freeze({ color: '#94A3B8', pt: 1.25 }),   // = build-spec-both GROUP_SEP
   trackFill: '#4472C4', trackInk: '#FFFFFF',                 // workbook Portfolio A cells
   msFill: '#D9E1F2', msInk: '#1F4E78',                       // workbook Portfolio B cells
+  // 'both': the English original under the Arabic — 8pt, grey (a light tint on the blue
+  // track fill, where slate grey would not read), LTR. A table row holding only 8pt text
+  // draws ≈0.316in in QuickLook (measured 2026-10-13: a 9pt + 8pt row pair drew 0.683, the
+  // 9pt row alone 0.367) and 0.308 in PowerPoint (1.874em × 8pt + 0.1 insets); each extra
+  // line is 1.874em = 0.208in → authored 0.33 + 0.215/line, never below what is drawn.
+  enSize: 8, enRowH: 0.33, enLineH: 0.215,
+  enInk: C.slate500, enTrackInk: '#DCE6F5', enMsInk: C.slate500,
 });
 const COL = { track: 0, milestone: 1, task: 2, org: 3, owner: 4, priority: 5, status: 6, due: 7 };
 // pptxgenjs' default cell insets are 0.1in left + right, and QuickLook always insets ≈0.1in
@@ -86,6 +113,12 @@ const text = (x, y, w, h, t, size, o = {}) => ({ t: 'text', x: r5(x), y: r5(y), 
 const rev = (a) => a.slice().reverse();
 const sum = (a) => a.reduce((s, v) => s + v, 0);
 const rowHFor = (lines) => r5(TR.rowH + (lines - 1) * TR.lineH);   // 1 → 0.37, 2 → 0.61 …
+const enRowHFor = (lines) => r5(TR.enRowH + (lines - 1) * TR.enLineH);   // 1 → 0.33, 2 → 0.545 …
+
+// ---- language ---------------------------------------------------------------------------
+export const TRACKER_SLIDE_LANGS = Object.freeze(['ar', 'en', 'both']);
+/** reportOptions.trackerLang → 'ar' | 'en' | 'both'; absent / unknown → 'ar' (the default). */
+export const trackerSlideLang = (v) => (v === 'en' || v === 'both' ? v : 'ar');
 
 /** build-spec.js chrome(), verbatim: top bar, title, corner tags, footer rule. */
 function chrome(title) {
@@ -197,23 +230,142 @@ export function textWidth(t, pt = TR.body, bold = false) {
   for (const ch of String(t)) { const c = ch.codePointAt(0); u += (c >= 32 && c <= 126) ? a[c - 32] : 600; }
   return (u / 1000) * (pt / 72) * SAFETY;
 }
+// SHAPED ARABIC WIDTHS for the Arabic translations (taskAr / trackAr / milestoneAr). The
+// legacy 600-per-letter rule above is far off for Arabic either way — connected letters
+// run 267..945 (medial ب 294, medial س 860), isolated س is 1211 — so a translation is
+// measured the way a shaper sets it: each letter in its contextual form (isolated /
+// initial / medial / final, from the letter's joining behaviour), lam + alef as the
+// ligature, marks zero-width. Advances (1/1000 em) were read with fontTools from the Cairo
+// variable font the decks use (~/Library/Fonts/Cairo-VariableFont_slnt,wght.ttf, instanced
+// at wght 400 / 700, slnt 0 — like ADV400 / ADV700), from its init / medi / fina GSUB
+// lookups and the rlig lam-alef ligatures. Rows: codepoint, isolated, initial, medial,
+// final (0 = the letter has no such form). Checked against CoreText shaping the same font
+// (2026-10-13; 1,390 phrases / words / random letter strings, both weights): estimate /
+// real ≥ 0.9993 everywhere, median 1.000 — then ×1.03 like every estimate here.
+const AR400 = [
+  0x60C, 223, 0, 0, 0, 0x60D, 225, 0, 0, 0, 0x615, 0, 0, 0, 0, 0x61B, 250, 0, 0, 0, 0x61F, 446, 0, 0, 0, 0x621, 544, 0, 0, 0,
+  0x622, 269, 0, 0, 295, 0x623, 269, 0, 0, 295, 0x624, 545, 0, 0, 578, 0x625, 269, 0, 0, 295, 0x626, 896, 267, 294, 884, 0x627, 269, 0, 0, 295,
+  0x628, 790, 267, 294, 817, 0x629, 584, 0, 0, 578, 0x62A, 790, 267, 294, 817, 0x62B, 790, 267, 294, 817, 0x62C, 580, 555, 603, 628, 0x62D, 580, 555, 603, 628,
+  0x62E, 580, 555, 603, 628, 0x62F, 483, 0, 0, 535, 0x630, 483, 0, 0, 535, 0x631, 263, 0, 0, 300, 0x632, 263, 0, 0, 300, 0x633, 1211, 827, 860, 1247,
+  0x634, 1211, 827, 860, 1247, 0x635, 1191, 820, 853, 1224, 0x636, 1191, 820, 853, 1224, 0x637, 764, 743, 749, 797, 0x638, 764, 743, 749, 797, 0x639, 552, 592, 636, 631,
+  0x63A, 552, 592, 636, 631, 0x640, 250, 0, 0, 0, 0x641, 1033, 607, 639, 1055, 0x642, 863, 607, 639, 895, 0x643, 784, 625, 658, 817, 0x644, 666, 275, 307, 699,
+  0x645, 626, 642, 675, 659, 0x646, 666, 267, 294, 699, 0x647, 584, 796, 660, 578, 0x648, 545, 0, 0, 578, 0x649, 896, 267, 294, 884, 0x64A, 896, 267, 294, 884,
+  0x64B, 0, 0, 0, 0, 0x64C, 0, 0, 0, 0, 0x64D, 0, 0, 0, 0, 0x64E, 0, 0, 0, 0, 0x64F, 0, 0, 0, 0, 0x650, 0, 0, 0, 0,
+  0x651, 0, 0, 0, 0, 0x652, 0, 0, 0, 0, 0x653, 0, 0, 0, 0, 0x654, 0, 0, 0, 0, 0x655, 0, 0, 0, 0, 0x656, 0, 0, 0, 0,
+  0x658, 0, 0, 0, 0, 0x660, 250, 0, 0, 0, 0x661, 309, 0, 0, 0, 0x662, 527, 0, 0, 0, 0x663, 676, 0, 0, 0, 0x664, 468, 0, 0, 0,
+  0x665, 678, 0, 0, 0, 0x666, 482, 0, 0, 0, 0x667, 624, 0, 0, 0, 0x668, 624, 0, 0, 0, 0x669, 519, 0, 0, 0, 0x66A, 560, 0, 0, 0,
+  0x66B, 225, 0, 0, 0, 0x66C, 193, 0, 0, 0, 0x66D, 420, 0, 0, 0, 0x66E, 790, 267, 294, 817, 0x66F, 863, 0, 0, 895, 0x670, 0, 0, 0, 0,
+  0x671, 269, 0, 0, 295, 0x679, 790, 267, 294, 817, 0x67E, 790, 267, 294, 817, 0x686, 580, 555, 603, 628, 0x688, 483, 0, 0, 535, 0x691, 263, 0, 0, 300,
+  0x698, 263, 0, 0, 300, 0x6A1, 1033, 607, 639, 1055, 0x6A4, 1033, 607, 639, 1055, 0x6A9, 784, 625, 658, 817, 0x6AF, 784, 675, 708, 817, 0x6BA, 666, 267, 294, 699,
+  0x6BE, 787, 796, 819, 819, 0x6C1, 584, 267, 578, 578, 0x6C2, 584, 267, 578, 578, 0x6C3, 584, 0, 0, 578, 0x6CC, 896, 267, 294, 884, 0x6D2, 727, 0, 0, 706,
+  0x6D3, 727, 0, 0, 706, 0x6D4, 369, 0, 0, 0, 0x6F0, 250, 0, 0, 0, 0x6F1, 309, 0, 0, 0, 0x6F2, 527, 0, 0, 0, 0x6F3, 676, 0, 0, 0,
+  0x6F4, 664, 0, 0, 0, 0x6F5, 546, 0, 0, 0, 0x6F6, 478, 0, 0, 0, 0x6F7, 624, 0, 0, 0, 0x6F8, 624, 0, 0, 0, 0x6F9, 519, 0, 0, 0,
+];
+const AR700 = [
+  0x60C, 248, 0, 0, 0, 0x60D, 249, 0, 0, 0, 0x615, 0, 0, 0, 0, 0x61B, 267, 0, 0, 0, 0x61F, 456, 0, 0, 0, 0x621, 578, 0, 0, 0,
+  0x622, 313, 0, 0, 337, 0x623, 313, 0, 0, 337, 0x624, 583, 0, 0, 619, 0x625, 313, 0, 0, 337, 0x626, 950, 312, 344, 934, 0x627, 313, 0, 0, 337,
+  0x628, 838, 312, 344, 882, 0x629, 627, 0, 0, 619, 0x62A, 838, 365, 417, 882, 0x62B, 838, 369, 417, 882, 0x62C, 611, 578, 624, 656, 0x62D, 611, 578, 624, 656,
+  0x62E, 611, 578, 624, 656, 0x62F, 496, 0, 0, 551, 0x630, 496, 0, 0, 551, 0x631, 323, 0, 0, 361, 0x632, 323, 0, 0, 361, 0x633, 1283, 909, 945, 1324,
+  0x634, 1283, 909, 945, 1324, 0x635, 1216, 846, 882, 1252, 0x636, 1216, 846, 882, 1252, 0x637, 808, 788, 802, 844, 0x638, 808, 788, 802, 844, 0x639, 571, 578, 668, 662,
+  0x63A, 571, 578, 668, 662, 0x640, 250, 0, 0, 0, 0x641, 1051, 630, 665, 1076, 0x642, 912, 630, 665, 948, 0x643, 846, 661, 697, 882, 0x644, 699, 317, 352, 735,
+  0x645, 665, 661, 697, 701, 0x646, 699, 312, 344, 735, 0x647, 627, 804, 686, 619, 0x648, 583, 0, 0, 619, 0x649, 950, 312, 344, 934, 0x64A, 950, 365, 417, 934,
+  0x64B, 0, 0, 0, 0, 0x64C, 0, 0, 0, 0, 0x64D, 0, 0, 0, 0, 0x64E, 0, 0, 0, 0, 0x64F, 0, 0, 0, 0, 0x650, 0, 0, 0, 0,
+  0x651, 0, 0, 0, 0, 0x652, 0, 0, 0, 0, 0x653, 0, 0, 0, 0, 0x654, 0, 0, 0, 0, 0x655, 0, 0, 0, 0, 0x656, 0, 0, 0, 0,
+  0x658, 0, 0, 0, 0, 0x660, 301, 0, 0, 0, 0x661, 353, 0, 0, 0, 0x662, 548, 0, 0, 0, 0x663, 750, 0, 0, 0, 0x664, 460, 0, 0, 0,
+  0x665, 705, 0, 0, 0, 0x666, 524, 0, 0, 0, 0x667, 653, 0, 0, 0, 0x668, 653, 0, 0, 0, 0x669, 561, 0, 0, 0, 0x66A, 600, 0, 0, 0,
+  0x66B, 249, 0, 0, 0, 0x66C, 204, 0, 0, 0, 0x66D, 418, 0, 0, 0, 0x66E, 838, 312, 344, 882, 0x66F, 912, 0, 0, 948, 0x670, 0, 0, 0, 0,
+  0x671, 313, 0, 0, 337, 0x679, 838, 362, 344, 882, 0x67E, 838, 365, 383, 882, 0x686, 611, 578, 624, 656, 0x688, 496, 0, 0, 551, 0x691, 323, 0, 0, 369,
+  0x698, 323, 0, 0, 361, 0x6A1, 1051, 630, 665, 1076, 0x6A4, 1051, 630, 665, 1076, 0x6A9, 866, 661, 697, 902, 0x6AF, 866, 727, 762, 902, 0x6BA, 699, 312, 417, 735,
+  0x6BE, 810, 804, 842, 845, 0x6C1, 627, 350, 665, 612, 0x6C2, 627, 350, 665, 612, 0x6C3, 627, 0, 0, 612, 0x6CC, 950, 365, 417, 934, 0x6D2, 758, 0, 0, 735,
+  0x6D3, 758, 0, 0, 735, 0x6D4, 412, 0, 0, 0, 0x6F0, 301, 0, 0, 0, 0x6F1, 353, 0, 0, 0, 0x6F2, 548, 0, 0, 0, 0x6F3, 750, 0, 0, 0,
+  0x6F4, 733, 0, 0, 0, 0x6F5, 624, 0, 0, 0, 0x6F6, 489, 0, 0, 0, 0x6F7, 653, 0, 0, 0, 0x6F8, 653, 0, 0, 0, 0x6F9, 561, 0, 0, 0,
+];
+const formTable = (flat) => {
+  const m = new Map();
+  for (let i = 0; i < flat.length; i += 5) m.set(flat[i], flat.slice(i + 1, i + 5));
+  return m;
+};
+const AR_FORMS = { 400: formTable(AR400), 700: formTable(AR700) };
+// lam + alef (آ أ إ ا ٱ) is one ligature glyph, wider than its two letters: [isolated, final].
+const LAM_ALEF = { 400: [644, 671], 700: [691, 723] };
+const ALEFS = new Set([0x622, 0x623, 0x625, 0x627, 0x671]);
+// Cairo's only positive Arabic kern: reh / zain (ر ز ڑ ژ) before an INITIAL yeh / beh-like
+// letter (ي ى ئ ی پ) — +80 at 400, +65 at 700 (ﺮﻴ in «فريق», «جاهزية»).
+const REHS = new Set([0x631, 0x632, 0x691, 0x698]);
+const YEHS = new Set([0x64A, 0x649, 0x626, 0x6CC, 0x67E]);
+const REH_YEH_KERN = { 400: 80, 700: 65 };
+// Punctuation an Arabic cell carries (– — … « » nbsp), measured in the same font.
+const AR_MISC = { 400: { 0x2013: 630, 0x2014: 1130, 0x2026: 727, 0xAB: 542, 0xBB: 543, 0xA0: 220 },
+  700: { 0x2013: 603, 0x2014: 1103, 0x2026: 784, 0xAB: 573, 0xBB: 574, 0xA0: 218 } };
+// Joining: T (marks: transparent, zero-width), D (joins both sides), R (joins the letter
+// before it only), C (tatweel / ZWJ: join-causing), U (none). Read off the form table: a
+// letter with initial + medial forms is D, with a final form only R.
+function joining(cp, f) {
+  if (cp === 0x640 || cp === 0x200D) return 'C';
+  if (!f) return 'U';
+  if (!f[0] && !f[1] && !f[2] && !f[3]) return 'T';
+  if (f[1] && f[2]) return 'D';
+  return f[3] ? 'R' : 'U';
+}
+const BIDI_CONTROLS = /[\u200E\u200F\u202A-\u202E\u2066-\u2069]/g;
+/** Shaped Cairo advance of a string, in 1/1000 em (no safety factor). */
+function shapedUnits(t, bold) {
+  const w = bold ? 700 : 400;
+  const ascii = bold ? ADV700 : ADV400;
+  const forms = AR_FORMS[w];
+  // Presentation forms (ﻻ, ﺑ …) are typed rarely; NFKC folds them back to their letters.
+  // Bidi controls (the embedding embedRtl() adds, or typed ones) have no width.
+  const cps = Array.from(String(t).replace(BIDI_CONTROLS, '').replace(/[\uFB50-\uFDFF\uFE70-\uFEFF]/g, (ch) => ch.normalize('NFKC')), (ch) => ch.codePointAt(0));
+  const jt = cps.map((c) => joining(c, forms.get(c)));
+  const prev = (i) => { for (let k = i - 1; k >= 0; k--) if (jt[k] !== 'T') return k; return -1; };
+  const next = (i) => { for (let k = i + 1; k < cps.length; k++) if (jt[k] !== 'T') return k; return -1; };
+  let u = 0;
+  for (let i = 0; i < cps.length; i++) {
+    const c = cps[i];
+    if (c >= 32 && c <= 126) { u += ascii[c - 32]; continue; }
+    const t0 = jt[i];
+    if (t0 === 'T') continue;
+    if (c === 0x640) { u += 250; continue; }
+    const f = forms.get(c);
+    if (!f) { u += AR_MISC[w][c] ?? 600; continue; }
+    const p = prev(i);
+    const n = next(i);
+    const pj = p < 0 ? 'U' : jt[p];
+    const nj = n < 0 ? 'U' : jt[n];
+    const joinsPrev = (t0 === 'D' || t0 === 'R' || t0 === 'C') && (pj === 'D' || pj === 'C');
+    const joinsNext = (t0 === 'D' || t0 === 'C') && (nj === 'D' || nj === 'R' || nj === 'C');
+    if (c === 0x644 && n >= 0 && ALEFS.has(cps[n])) {      // lam-alef: one glyph for both
+      u += LAM_ALEF[w][joinsPrev ? 1 : 0];
+      i = n;
+      continue;
+    }
+    const form = joinsPrev && joinsNext ? 2 : joinsPrev ? 3 : joinsNext ? 1 : 0;
+    u += f[form] || f[0];
+    if (form === 1 && YEHS.has(c) && p >= 0 && REHS.has(cps[p])) u += REH_YEH_KERN[w];
+  }
+  return u;
+}
+/** Estimated ink width (inches) of an Arabic translation at `pt` — shaped, ×1.03. */
+export function shapedTextWidth(t, pt = TR.body, bold = false) {
+  return (shapedUnits(t, bold) / 1000) * (pt / 72) * SAFETY;
+}
 /** Trim + collapse every whitespace run (incl. newlines) to one space. */
 const clean = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
 /**
  * Greedy word wrap against `usable` inches. Returns the line strings; a word wider than a
  * whole line is broken by characters (a renderer breaks it too). Never empty: '' → [''].
  */
-function wrapLines(s, usable, pt, bold) {
+function wrapLines(s, usable, width) {
   if (!s) return [''];
   const lines = [];
   let cur = '';
   for (const word of s.split(' ')) {
-    if (cur && textWidth(`${cur} ${word}`, pt, bold) <= usable) { cur += ` ${word}`; continue; }
+    if (cur && width(`${cur} ${word}`) <= usable) { cur += ` ${word}`; continue; }
     if (cur) lines.push(cur);
     let chars = Array.from(word);
-    while (chars.length > 1 && textWidth(chars.join(''), pt, bold) > usable) {
+    while (chars.length > 1 && width(chars.join('')) > usable) {
       let k = 1;
-      while (k < chars.length - 1 && textWidth(chars.slice(0, k + 1).join(''), pt, bold) <= usable) k++;
+      while (k < chars.length - 1 && width(chars.slice(0, k + 1).join('')) <= usable) k++;
       lines.push(chars.slice(0, k).join(''));
       chars = chars.slice(k);
     }
@@ -228,10 +380,12 @@ function wrapLines(s, usable, pt, bold) {
  * word, none where it broke inside one), so a renderer re-wrapping it — and fitting at least
  * as much per line as the conservative estimate — never needs more than `maxLines` lines.
  */
-export function fitCell(value, colW, { bold = false, pt = TR.body, maxLines = MAX_BODY_LINES } = {}) {
+export function fitCell(value, colW, { bold = false, pt = TR.body, maxLines = MAX_BODY_LINES, shaped = false } = {}) {
   const s = clean(value);
   const usable = colW - CELL_PAD;
-  const lines = wrapLines(s, usable, pt, bold);
+  // `shaped` (an Arabic translation): the Cairo shaping estimate; else the legacy one.
+  const width = shaped ? (x) => shapedTextWidth(x, pt, bold) : (x) => textWidth(x, pt, bold);
+  const lines = wrapLines(s, usable, width);
   if (lines.length <= maxLines) return { text: s, lines: lines.length };
   let pos = 0;
   for (let i = 0; i < maxLines - 1; i++) {
@@ -239,27 +393,62 @@ export function fitCell(value, colW, { bold = false, pt = TR.body, maxLines = MA
     if (s[pos] === ' ') pos += 1;
   }
   let last = Array.from(lines[maxLines - 1]);
-  while (last.length && textWidth(`${last.join('').trimEnd()}…`, pt, bold) > usable) last.pop();
+  while (last.length && width(`${last.join('').trimEnd()}…`) > usable) last.pop();
   const cut = (s.slice(0, pos) + last.join('')).trimEnd();
   return { text: `${cut}…`, lines: maxLines };
 }
 // Arabic text sets right-aligned RTL; Latin prose reads better left-aligned ragged-right.
 const ARABIC = /[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿]/;
 const dirOf = (s) => (ARABIC.test(s) ? { align: 'right', rtl: true } : { align: 'left', rtl: false });
+// RTL EMBEDDING for a printed TRANSLATION. Both renderers get the cell's base direction
+// (<a:pPr rtl="1">, CSS direction), but macOS QuickLook ignores rtl="1" on table-cell
+// paragraphs and lays them out LTR — so a translation with Latin words, digits, brackets
+// or a cut «…» comes out in scrambled order there («… NUPCO وLEAN» drawn with «NUPCO»
+// first; checked 2026-10-13). Wrapping the text in U+202B RLE … U+202C PDF makes it RTL
+// whatever the paragraph says (QuickLook then matches Chrome; RLM does not help), and is a
+// no-op where rtl is honoured. Applied AFTER fitCell (line counts are measured on the bare
+// text; shapedUnits ignores the controls anyway) and only to text with Arabic in it that
+// holds something besides Arabic letters and spaces: pure Arabic reads the same in either
+// direction, and the English / fallback cells — and so all of 'en' — never get it.
+const NEEDS_EMBED = /[^\s\p{Script=Arabic}]/u;
+const embedRtl = (s) => (ARABIC.test(s) && NEEDS_EMBED.test(s) ? `\u202B${s}\u202C` : s);
 
 // ---- rows ---------------------------------------------------------------------------------
 // The eight on-slide fields. A row whose on-slide fields are ALL empty (a row just added on
 // the website and not filled in yet) prints nothing and is skipped; every other row prints,
-// in the tracker's order.
+// in the tracker's order. Outside 'en' a translation alone is something to print too.
 const SLIDE_FIELDS = ['track', 'milestone', 'task', 'organization', 'owner', 'priority', 'status', 'due'];
-const isBlankRow = (t) => SLIDE_FIELDS.every((k) => !clean(t?.[k]));
+const SLIDE_FIELDS_AR = [...SLIDE_FIELDS, 'trackAr', 'milestoneAr', 'taskAr'];
+const isBlankRow = (t, lang) => (lang === 'en' ? SLIDE_FIELDS : SLIDE_FIELDS_AR).every((k) => !clean(t?.[k]));
+
+/**
+ * A group (track / milestone) label in `lang`: `main` is the line printed (bold), `sub` the
+ * English original under it in 'both' (null when there is no translation, or it says the
+ * same). Without a translation — or in 'en' — exactly the English label of before.
+ */
+function groupLabel(en, ar, colW, lang) {
+  const a = lang === 'en' ? '' : clean(ar);
+  if (!a) return { main: fitCell(en || DASH, colW, { bold: true, maxLines: MAX_LABEL_LINES }), sub: null, ar: false };
+  const e = clean(en);
+  const main = fitCell(a, colW, { bold: true, maxLines: MAX_LABEL_LINES, shaped: true });
+  return {
+    ar: true,
+    main: { ...main, text: embedRtl(main.text) },
+    sub: lang === 'both' && e && e !== a ? fitCell(e, colW, { pt: TR.enSize, maxLines: MAX_LABEL_LINES }) : null,
+  };
+}
 
 /** Per-row layout facts that do not depend on the page: texts, styles, line counts. */
-function prepareRow(t, reportDate) {
+function prepareRow(t, reportDate, lang) {
   const W = TR.colW;
-  const track = fitCell(t.track || DASH, W[COL.track], { bold: true, maxLines: MAX_LABEL_LINES });
-  const milestone = fitCell(t.milestone || DASH, W[COL.milestone], { bold: true, maxLines: MAX_LABEL_LINES });
-  const task = fitCell(t.task || DASH, W[COL.task]);
+  const track = groupLabel(t.track, t.trackAr, W[COL.track], lang);
+  const milestone = groupLabel(t.milestone, t.milestoneAr, W[COL.milestone], lang);
+  const taskAr = lang === 'en' ? '' : clean(t.taskAr);
+  const taskEn = clean(t.task);
+  const task = taskAr ? fitCell(taskAr, W[COL.task], { shaped: true }) : fitCell(t.task || DASH, W[COL.task]);
+  // 'both': the English original on a second table row under the Arabic (see the header).
+  const taskSub = lang === 'both' && taskAr && taskEn && taskEn !== taskAr
+    ? fitCell(taskEn, W[COL.task], { pt: TR.enSize }) : null;
   const org = fitCell(t.organization || DASH, W[COL.org]);
   const owner = fitCell(t.owner || DASH, W[COL.owner]);
 
@@ -274,7 +463,8 @@ function prepareRow(t, reportDate) {
   const dueCell = fitCell(due.text, W[COL.due], { bold: overdue });
 
   const cells = {
-    task: { text: task.text, ...(clean(t.task) ? dirOf(task.text) : { color: NA }) },
+    task: { text: taskAr ? embedRtl(task.text) : task.text, ...(taskAr || taskEn ? dirOf(task.text) : { color: NA }) },
+    taskSub: taskSub ? { text: taskSub.text, size: TR.enSize, color: TR.enInk, ...dirOf(taskSub.text) } : null,
     org: { text: org.text, color: clean(t.organization) ? C.slate600 : NA },
     owner: { text: owner.text, ...(clean(t.owner) ? dirOf(owner.text) : { color: NA }) },
     priority: pr ? { text: priority.text, color: pr.color, bold: pr.bold }
@@ -287,15 +477,25 @@ function prepareRow(t, reportDate) {
         : due.kind === 'free' ? { text: dueCell.text, color: C.slate500, italic: true }
           : { text: dueCell.text },
   };
+  const spanLines = Math.max(org.lines, owner.lines, status.lines, priority.lines, dueCell.lines);
   return {
-    trackKey: clean(t.track),
-    msKey: clean(t.milestone),
-    trackLabel: track,
-    msLabel: milestone,
-    lines: Math.max(task.lines, org.lines, owner.lines, status.lines, priority.lines, dueCell.lines),
+    // Merge keys: the English identity, plus (outside 'en') the translation — a block merges
+    // only rows that print the same label, so each row's label is exactly its own data.
+    trackKey: lang === 'en' ? clean(t.track) : `${clean(t.track)}\u0001${clean(t.trackAr)}`,
+    msKey: lang === 'en' ? clean(t.milestone) : `${clean(t.milestone)}\u0001${clean(t.milestoneAr)}`,
+    trackLabel: track.main,
+    trackSub: track.sub,
+    msLabel: milestone.main,
+    msSub: milestone.sub,
+    lines: Math.max(task.lines, spanLines),
+    taskLines: task.lines,
+    taskSub,
+    spanLines,
     cells,
     statusKey: sk,
     overdue,
+    // Prints at least one translation (never in 'en') — turns on paginate()'s polish.
+    translated: !!(taskAr || track.ar || milestone.ar),
   };
 }
 
@@ -308,44 +508,113 @@ function runFrom(rows, i, sameMs) {
 }
 
 /**
- * Body row heights for ONE page: each row's own line count, then — milestone blocks first,
- * track blocks second — the shortfall of a merged block too short for its own (bold,
- * wrapped) label is added to the block's LAST row, so the label never overflows its cell.
+ * The table layout of ONE page: the body rows' heights and which cell starts where.
+ *  · A task is one table row — or two in 'both' when its task cell is bilingual (Arabic row,
+ *    English row; every other cell of the task spans both), or when a bilingual group label
+ *    needs a boundary inside a block that is this one task alone (then all of the task's
+ *    cells span both rows).
+ *  · Heights: each row its own line count (0.37 + 0.24/line at 9pt; an English row 0.33 +
+ *    0.215/line at 8pt); a cell spanning a task's two rows that needs more gets the
+ *    shortfall split over both (the Arabic sits bottom-aligned, the English top-aligned, so
+ *    the pair stays together and centred).
+ *  · Then — milestone blocks first, track blocks second — a merged block too short for its
+ *    own (bold, wrapped) label gets the shortfall on its LAST row, so the label never
+ *    overflows its cell. A bilingual label is split at the row boundary nearest the point
+ *    that centres the pair in the block: Arabic part above (bottom-aligned), English part
+ *    below (top-aligned), each grown the same way when short.
+ * With no bilingual cell on the page this is exactly the one-row-per-task layout of 'en'.
  */
-function pageHeights(pr) {
-  const h = pr.map((r) => rowHFor(r.lines));
-  const grow = (sameMs, labelOf) => {
+function layoutPage(pr) {
+  const nSub = pr.map((r) => (r.taskSub ? 2 : 1));
+  const forced = pr.map(() => false);
+  for (const sameMs of [true, false]) {
     for (let i = 0; i < pr.length;) {
       const n = runFrom(pr, i, sameMs);
-      const need = rowHFor(labelOf(pr[i]).lines);
-      const have = sum(h.slice(i, i + n));
-      if (have < need) h[i + n - 1] = r5(h[i + n - 1] + (need - have));
+      if ((sameMs ? pr[i].msSub : pr[i].trackSub) && n === 1 && nSub[i] === 1) { nSub[i] = 2; forced[i] = true; }
+      i += n;
+    }
+  }
+  const start = [];
+  let q = 0;
+  for (const n of nSub) { start.push(q); q += n; }
+  const h = [];
+  pr.forEach((r, i) => {
+    if (nSub[i] === 1) { h.push(rowHFor(r.lines)); return; }
+    let a = forced[i] ? TR.rowH : rowHFor(r.taskLines);
+    let b = forced[i] ? TR.enRowH : enRowHFor(r.taskSub.lines);
+    const short = rowHFor(forced[i] ? r.lines : r.spanLines) - (a + b);
+    if (short > 1e-9) { a = r5(a + short / 2); b = r5(b + short / 2); }
+    h.push(a, b);
+  });
+  const groups = { track: new Map(), ms: new Map() };
+  const grow = (sameMs) => {
+    const at = sameMs ? groups.ms : groups.track;
+    for (let i = 0; i < pr.length;) {
+      const n = runFrom(pr, i, sameMs);
+      const s = start[i];
+      const e = start[i + n - 1] + nSub[i + n - 1];
+      const label = sameMs ? pr[i].msLabel : pr[i].trackLabel;
+      const sub = sameMs ? pr[i].msSub : pr[i].trackSub;
+      if (!sub) {
+        const need = rowHFor(label.lines);
+        const have = sum(h.slice(s, e));
+        if (have < need) h[e - 1] = r5(h[e - 1] + (need - have));
+        at.set(s, { part: 'one', span: e - s });
+      } else {
+        const arNeed = rowHFor(label.lines);
+        const enNeed = enRowHFor(sub.lines);
+        // Boundary B centring the pair: Arabic ink ends at B, English starts there, so the
+        // pair's middle is B + (en − ar)/2 → B = (total + ar − en)/2.
+        const target = (sum(h.slice(s, e)) + arNeed - enNeed) / 2;
+        let j = 1;
+        let best = Infinity;
+        for (let k = 1, acc = 0; k < e - s; k++) {
+          acc += h[s + k - 1];
+          if (Math.abs(acc - target) < best - 1e-9) { best = Math.abs(acc - target); j = k; }
+        }
+        const top = sum(h.slice(s, s + j));
+        if (top < arNeed) h[s + j - 1] = r5(h[s + j - 1] + (arNeed - top));
+        const bottom = sum(h.slice(s + j, e));
+        if (bottom < enNeed) h[e - 1] = r5(h[e - 1] + (enNeed - bottom));
+        at.set(s, { part: 'ar', span: j });
+        at.set(s + j, { part: 'en', span: e - s - j });
+      }
       i += n;
     }
   };
-  grow(true, (r) => r.msLabel);
-  grow(false, (r) => r.trackLabel);
-  return h;
+  grow(true);
+  grow(false);
+  return { h, nSub, start, forced, groups };
 }
 
 /**
  * PAGINATION — the fewest slides first; among equal slide counts, every track kept whole.
  * A page's band is floor − table top − header − (the «يتبع…» marker when a page follows).
- * Real file (34 rows): 3 slides 12 / 7 / 15, no track split.
+ * Real file (34 rows): 3 slides 12 / 7 / 15, no track split. A task's two 'both' rows
+ * always stay on one page (the unit paginated is the task).
+ * TRANSLATED decks (a translation prints; never 'en', never an untranslated tracker, which
+ * keep exactly the greedy pages above) are paginated by balancePages() instead: bilingual
+ * rows are tall, and the greedy fill left e.g. a 'both' deck of 34 tasks with ONE task on
+ * its last slide, and a block's first task alone at a page bottom in a row stretched to
+ * its two-language label.
  */
 function paginate(rows, headH) {
   const together = paginateGroups(rows, headH, true);
   const filled = paginateGroups(rows, headH, false);
-  return filled.length < together.length ? filled : together;
+  const plain = filled.length < together.length ? filled : together;
+  if (!rows.some((r) => r.translated)) return plain;
+  const even = balancePages(rows, headH);
+  return even && even.length <= plain.length ? even : plain;
 }
+const pageCap = (headH, first, last) => r5(TR.floor - (first ? TR.firstY : TR.contY) - headH - (last ? 0 : TR.markerH));
+const pageHeight = (pageRows) => sum(layoutPage(pageRows).h);
 function paginateGroups(rows, headH, keepTogether) {
   const groups = [];
   for (const r of rows) {
     const g = groups[groups.length - 1];
     if (g && g.key === r.trackKey) g.rows.push(r); else groups.push({ key: r.trackKey, rows: [r] });
   }
-  const cap = (first, last) => r5(TR.floor - (first ? TR.firstY : TR.contY) - headH - (last ? 0 : TR.markerH));
-  const fits = (pageRows, first, last) => sum(pageHeights(pageRows)) <= cap(first, last) + 1e-9;
+  const fits = (pageRows, first, last) => pageHeight(pageRows) <= pageCap(headH, first, last) + 1e-9;
   const pages = [[]];
   groups.forEach((g, gi) => {
     const lastGroup = gi === groups.length - 1;
@@ -355,8 +624,9 @@ function paginateGroups(rows, headH, keepTogether) {
     if (fits([...cur, ...g.rows], first, lastGroup)) { cur.push(...g.rows); return; }
     // 2. the whole group fits on a fresh continuation page → start one
     if (keepTogether && cur.length && fits(g.rows, false, lastGroup)) { pages.push([...g.rows]); return; }
-    // 3. split row by row: a row that does not fit opens a new page. Any single row fits an
-    //    empty page (cells are cut at MAX_BODY_LINES / MAX_LABEL_LINES).
+    // 3. split row by row: a row that does not fit opens a new page. Any single task fits an
+    //    empty page (cells are cut at MAX_BODY_LINES / MAX_LABEL_LINES: even a 'both' task
+    //    with 4 + 4 lines and 4 + 4-line labels is ≈2.1in of a ≥4.9in band).
     g.rows.forEach((r, k) => {
       const p = pages[pages.length - 1];
       const isLast = lastGroup && k === g.rows.length - 1;
@@ -366,27 +636,130 @@ function paginateGroups(rows, headH, keepTogether) {
   });
   return pages.filter((p) => p.length);
 }
+const sameBlock = (a, b) => a.trackKey === b.trackKey && a.msKey === b.msKey;
+const sameTrack = (a, b) => a.trackKey === b.trackKey;
+// Lone rows (see balancePages 3.) of the page rows[i..k), at both block levels.
+function loneRows(rows, i, k) {
+  const n = rows.length;
+  let c = 0;
+  for (const same of [sameBlock, sameTrack]) {
+    if (k < n && same(rows[k - 1], rows[k]) && (k - 1 === i || !same(rows[k - 2], rows[k - 1]))) c += 1;   // orphan
+    if (i > 0 && same(rows[i - 1], rows[i]) && (k === i + 1 || !same(rows[i], rows[i + 1]))) c += 1;       // widow
+  }
+  return c;
+}
+/**
+ * The page breaks of a translated deck, chosen EXACTLY (dynamic programming over the break
+ * positions; every page is checked with the real layout, so nothing can overflow) by, in
+ * order:
+ *   1. the fewest slides (never more than the greedy fill — paginate() checks);
+ *   2. the fewest breaks inside a track (the greedy rule: keep tracks whole);
+ *   3. the fewest LONE ROWS at a break, per block level (track, milestone): a block opened
+ *      by its only row at the bottom of a page while it goes on on the next one (orphan),
+ *      or ended by its only row at the top of a page (widow) — such a row also carries the
+ *      block's whole (bilingual) label, so it is drawn stretched;
+ *   4. the most even pages: least Σ (free height)² — no near-empty last slide.
+ * null when some single task does not fit a page (cannot happen; the greedy then decides).
+ */
+function balancePages(rows, headH) {
+  const n = rows.length;
+  // best[i]: the cheapest pagination of rows[i..]; cost [slides, track breaks, lone rows, Σslack²].
+  const best = Array(n + 1).fill(null);
+  best[n] = { cost: [0, 0, 0, 0], next: n };
+  const better = (x, y) => {
+    for (let k = 0; k < 3; k++) if (x[k] !== y[k]) return x[k] < y[k];
+    return x[3] < y[3] - 1e-9;
+  };
+  for (let i = n - 1; i >= 0; i--) {
+    const first = i === 0;
+    for (let k = i + 1; k <= n; k++) {
+      const page = rows.slice(i, k);
+      const h = pageHeight(page);
+      const last = k === n;
+      const cap = pageCap(headH, first, last);
+      if (h > cap + 1e-9) {
+        // Longer pages from i do not fit either (more rows never make a table shorter; were
+        // that ever not so, a break would only be missed, nothing could overflow) — except
+        // the rest of the deck as the LAST page, which has no marker: try it on its own.
+        if (k < n) {
+          const tail = rows.slice(i);
+          const capLast = pageCap(headH, first, true);
+          const ht = pageHeight(tail);
+          if (ht <= capLast + 1e-9) {
+            const c = [1, 0, loneRows(rows, i, n), (capLast - ht) ** 2];
+            if (!best[i] || better(c, best[i].cost)) best[i] = { cost: c, next: n };
+          }
+        }
+        break;
+      }
+      if (!best[k]) continue;
+      const brk = k < n;
+      const trackBreak = brk && rows[k - 1].trackKey === rows[k].trackKey ? 1 : 0;
+      const b = best[k].cost;
+      const c = [1 + b[0], trackBreak + b[1], loneRows(rows, i, k) + b[2], (cap - h) ** 2 + b[3]];
+      if (!best[i] || better(c, best[i].cost)) best[i] = { cost: c, next: k };
+    }
+  }
+  if (!best[0]) return null;
+  const pages = [];
+  for (let i = 0; i < n; i = best[i].next) pages.push(rows.slice(i, best[i].next));
+  return pages;
+}
 
 function trackerTable(pr, y, header, headH) {
   const out = [rev(header.map((h) => h.text))];
-  const rowH = [headH, ...pageHeights(pr)];
+  const lay = layoutPage(pr);
+  const rowH = [headH, ...lay.h];
+  // A merged group cell (or one part of a bilingual one) starting on table row q.
+  const groupCell = (g, label, sub, fill, ink, subInk, top) => {
+    // `color` twice ON PURPOSE: the first only fixes the key order HEAD's cell() produced
+    // (color, border, text, …) — JSON key order is what keeps 'en' byte-identical; the
+    // second is the value. Do not "clean up" the first.
+    if (g.part === 'one') return { color: C.slate900, ...top, text: label.text, rowSpan: g.span, fill, color: ink, bold: true };
+    if (g.part === 'ar') {
+      return { color: ink, text: label.text, rowSpan: g.span, fill, bold: true, valign: 'bottom',
+        border: { ...(top.border || {}), bottom: null } };
+    }
+    return { color: subInk, text: sub.text, rowSpan: g.span, fill, size: TR.enSize, bold: false,
+      valign: 'top', rtl: false, border: { top: null } };
+  };
   pr.forEach((r, i) => {
     const newTrack = i === 0 || pr[i - 1].trackKey !== r.trackKey;
-    const newMs = newTrack || pr[i - 1].msKey !== r.msKey;
     // A 1.25pt line above each new track (not above the page's first row: the header is there).
     const top = newTrack && i > 0 ? { border: { top: { ...TR.groupSep } } } : {};
     const cell = (o) => ({ color: C.slate900, ...top, ...o });
-    const logical = [];
-    // Merged group cells: only on the group's first row ON THIS PAGE, rowSpan = its rows on
-    // this page; the covered cells are omitted (schema). A group continuing from the previous
-    // slide repeats its label here — the title already says تتمة.
-    if (newTrack) logical.push(cell({ text: r.trackLabel.text, rowSpan: runFrom(pr, i, false), fill: TR.trackFill, color: TR.trackInk, bold: true }));
-    if (newMs) logical.push(cell({ text: r.msLabel.text, rowSpan: runFrom(pr, i, true), fill: TR.msFill, color: TR.msInk, bold: true }));
     const c = r.cells;
-    logical.push(cell(c.task), cell(c.org), cell(c.owner), cell(c.priority), cell(c.status), cell(c.due));
-    // Group cells are the two LAST cells in visual (L→R) order, so omitting a covered one
-    // never shifts another cell of the row.
-    out.push(rev(logical));
+    const n = lay.nSub[i];
+    for (let k = 0; k < n; k++) {
+      const q = lay.start[i] + k;
+      const rowTop = k === 0 ? top : {};
+      const logical = [];
+      // Merged group cells: only on the group's first row ON THIS PAGE, rowSpan = its table
+      // rows on this page; the covered cells are omitted (schema). A group continuing from
+      // the previous slide repeats its label here — the title already says تتمة.
+      const tg = lay.groups.track.get(q);
+      if (tg) logical.push(groupCell(tg, r.trackLabel, r.trackSub, TR.trackFill, TR.trackInk, TR.enTrackInk, rowTop));
+      const mg = lay.groups.ms.get(q);
+      if (mg) logical.push(groupCell(mg, r.msLabel, r.msSub, TR.msFill, TR.msInk, TR.enMsInk, rowTop));
+      if (n === 1) {
+        logical.push(cell(c.task), cell(c.org), cell(c.owner), cell(c.priority), cell(c.status), cell(c.due));
+      } else if (k === 0) {
+        const span = { rowSpan: n };
+        // Bilingual task: the Arabic on this row, its bottom border dropped so it reads as
+        // one cell with the English row below; a forced two-row task spans both.
+        const taskCell = c.taskSub
+          ? cell({ ...c.task, valign: 'bottom', border: { ...(top.border || {}), bottom: null } })
+          : cell({ ...c.task, ...span });
+        logical.push(taskCell, cell({ ...c.org, ...span }), cell({ ...c.owner, ...span }),
+          cell({ ...c.priority, ...span }), cell({ ...c.status, ...span }), cell({ ...c.due, ...span }));
+      } else if (c.taskSub) {
+        logical.push({ color: C.slate900, ...c.taskSub, valign: 'top', border: { top: null } });
+      }
+      // Group cells are the LAST cells in visual (L→R) order and a task's spanning cells
+      // the FIRST, so omitting covered ones never shifts another cell of the row (HTML
+      // table semantics, which pptxgenjs follows).
+      out.push(rev(logical));
+    }
   });
   return {
     t: 'table', x: TR.x, y, w: TR.w, rtl: true, rowH, headerSize: TR.head, bodySize: TR.body,
@@ -503,18 +876,20 @@ function labelLookup(labels) {
 /**
  * @param {Object|null} tracker   ProjectTracker ({ format, tasks:[{track, milestone, task,
  *                                organization, owner, priority, status, due, …}] }) or null
- * @param {{reportDate?:string, variant?:string, labels?:Function|Object}} [opts]
+ * @param {{reportDate?:string, variant?:string, labels?:Function|Object, lang?:string}} [opts]
  *        reportDate 'YYYY-MM-DD' — the overdue reference; labels — labelOf(m) or an
- *        overrides map; variant — ignored (the tracker is the same in both decks)
+ *        overrides map; variant — ignored (the tracker is the same in both decks);
+ *        lang — reportOptions.trackerLang: 'ar' (default) | 'en' | 'both' (see the header)
  * @returns {Array} slides ('tracker', 'tracker-cont-1', …) without page numbers; [] when
  *          there is nothing to show
  */
 // eslint-disable-next-line no-unused-vars
-export function buildTrackerSlides(tracker, { reportDate, variant, labels } = {}) {
-  const tasks = Array.isArray(tracker?.tasks) ? tracker.tasks.filter((t) => t && typeof t === 'object' && !isBlankRow(t)) : [];
+export function buildTrackerSlides(tracker, { reportDate, variant, labels, lang } = {}) {
+  const lg = trackerSlideLang(lang);
+  const tasks = Array.isArray(tracker?.tasks) ? tracker.tasks.filter((t) => t && typeof t === 'object' && !isBlankRow(t, lg)) : [];
   if (!tasks.length) return [];
   const L = labelLookup(labels);
-  const rows = tasks.map((t) => prepareRow(t, reportDate));
+  const rows = tasks.map((t) => prepareRow(t, reportDate, lg));
   const headKeys = ['trkTrack', 'trkMilestone', 'trkTask', 'trkOrg', 'trkOwner', 'trkPriority', 'trkStatus', 'trkDue'];
   const header = headKeys.map((k, i) => fitCell(L(k), TR.colW[i], { bold: true, pt: TR.head, maxLines: MAX_HEAD_LINES }));
   const headH = rowHFor(Math.max(...header.map((h) => h.lines)));

@@ -96,6 +96,13 @@ export const REPORT_OPTIONS_SEED = {
   // A presentation checkbox on the review screen must never arm a background download,
   // and turning this off must never disable a pipeline the user deliberately armed.
   autoDownloadFiles: true,
+  // The «متابعة المشروع» slides' text language (2026-10-13 user request: the tasks in
+  // Arabic, the English original kept): 'ar' | 'en' | 'both'. 'ar' shows each task /
+  // track / milestone's Arabic translation and falls back to the English per cell where
+  // a row has none, so a tracker without translations renders exactly as before. MUST
+  // stay equal to DEFAULT_TRACKER_LANG (ingest/task-tracker.js owns the enum; this is
+  // the first-run copy, like deltaMode above).
+  trackerLang: 'ar',
 };
 
 // Automation pipeline options (Settings.automation, v4): the unattended daily run.

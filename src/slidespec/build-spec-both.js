@@ -47,12 +47,12 @@
 //
 // HOSPITAL NAMES. The old "no hospital name on any slide" rule applies to the KAMC report
 // only (CONTRACT §1.13): this deck prints the names the reference prints.
-import { COLORS as C } from '../theme.js?v=v2026-10-13.3';
-import { AR_COUNTRY } from '../model/sendout.js?v=v2026-10-13.3';
-import { HOSPITALS } from '../model/hospital.js?v=v2026-10-13.3';
+import { COLORS as C } from '../theme.js?v=v2026-10-13.4';
+import { AR_COUNTRY } from '../model/sendout.js?v=v2026-10-13.4';
+import { HOSPITALS } from '../model/hospital.js?v=v2026-10-13.4';
 // The project-tracker slides — a leaf module (imports nothing from either spec file), so it
 // is safe to import at top level despite the cycle described below.
-import { buildTrackerSlides } from './build-tracker.js?v=v2026-10-13.3';
+import { buildTrackerSlides } from './build-tracker.js?v=v2026-10-13.4';
 // DEFAULT_LABELS (the registry) and SGH_TEXT (the reference's SGH sentences, shared with the
 // single-SGH deck so both print one source) come from build-spec.js.
 // CIRCULAR IMPORT, SAFE ONLY AT CALL TIME: build-spec.js imports this file to dispatch
@@ -61,7 +61,7 @@ import { buildTrackerSlides } from './build-tracker.js?v=v2026-10-13.3';
 // inside a function, never at this module's top level (that would be a TDZ ReferenceError)
 // — which is also why the palette below keeps its own literal hexes (the same values as
 // build-spec.js SGH_COLORS) instead of reading them at load time.
-import { DEFAULT_LABELS, SGH_TEXT } from './build-spec.js?v=v2026-10-13.3';
+import { DEFAULT_LABELS, SGH_TEXT } from './build-spec.js?v=v2026-10-13.4';
 
 // ---- palette added by the BOTH reference (not in theme.js) ---------------------------
 const KAMC_C = '#00897B';      // KAMC teal — slices, segments, dots, counts, tags
@@ -937,8 +937,9 @@ export function buildBothSpec(model, { variant = 'internal' } = {}) {
   if (on('monthly')) middle.push(buildMonthly(m));
   if (on('sendout') && sendoutData) middle.push(buildCountries(m), buildLabs(m));
   if (on('compliance')) middle.push(buildCompliance(m));
-  // Project tracker: after compliance, before thanks; [] without a tracker.
-  if (on('tracker')) middle.push(...buildTrackerSlides(m.projectTracker, { reportDate: m.reportDate, variant, labels: labelOf(m) }));
+  // Project tracker: after compliance, before thanks; [] without a tracker. Text language
+  // = reportOptions.trackerLang, as in build-spec.js.
+  if (on('tracker')) middle.push(...buildTrackerSlides(m.projectTracker, { reportDate: m.reportDate, variant, labels: labelOf(m), lang: m.reportOptions?.trackerLang }));
   middle.forEach((s, i) => s.elements.push(pageFooter(i + 1)));
   return [buildCover(m), ...middle, buildThanks(m)];
 }

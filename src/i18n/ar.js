@@ -5,11 +5,11 @@
 // build-spec reads from the very same predicate. A local re-derivation here is exactly
 // how a filename would one day say «مخصص» while the cover says nothing (or the reverse).
 // scope.js is pure (no DOM, no vendor, no ar.js back-edge), so this adds no cycle.
-import { isScoped, normalizeScope } from '../model/scope.js?v=v2026-10-13.3';
+import { isScoped, normalizeScope } from '../model/scope.js?v=v2026-10-13.4';
 // The hospital registry's short codes (KAMC / SGH) are what the file-name tag, the report
 // type pills and the share text print — read from the ONE registry, never re-typed here.
 // hospital.js is pure (no imports at all), so this adds no cycle either.
-import { HOSPITALS } from '../model/hospital.js?v=v2026-10-13.3';
+import { HOSPITALS } from '../model/hospital.js?v=v2026-10-13.4';
 
 /** Join ids for a sentence: Arabic comma, tolerant of a bare string or a missing list. */
 const joinIds = (ids) => [].concat(ids == null ? [] : ids).map(String).join('، ');
@@ -87,6 +87,11 @@ export const STR = {
     trackerModuleMissing: 'وحدة قراءة ملف متابعة المشروع غير متوفرة — لم يُحمَّل الملف.',
     // No tracker loaded: the report goes ahead without the tracker slides.
     trackerOptional: 'ملف متابعة المشروع اختياري: بدونه لا تظهر شرائح «متابعة المشروع» في التقرير.',
+    // The Arabic translation of the tasks (2026-10-13, Arabic CONTRACT §4): the card's
+    // «N من M مهمة مترجمة» line is STR.tracker.translated. An untranslated task falls back
+    // to its English text on the slide, so a file with no Arabic columns is not an error,
+    // only this note that the slide will read in English.
+    trackerNoArabic: 'لا توجد أعمدة ترجمة عربية في هذا الملف — تظهر المهام في الشريحة بنصها الإنجليزي.',
     errorsTitle: 'أخطاء أثناء التحليل',
     unmatchedTitle: 'فحوصات بدون مدة معيارية (TAT)',
     unmatchedHint: 'هذه الفحوصات غير موجودة في جدول المدد المعيارية. أضف المدة (بالأيام) لكل منها:',
@@ -395,21 +400,40 @@ export const STR = {
     noTrack: 'بدون مسار',
     noMilestone: 'بدون مرحلة',
     pickDate: 'اختيار تاريخ من التقويم',
+    // Arabic translation (2026-10-13, Arabic CONTRACT §3–4): the slide's task language —
+    // reportOptions.trackerLang. The English original is always kept (never overwritten):
+    // an empty Arabic field shows the English text on the slide.
+    langTitle: 'لغة نص المهام في الشريحة',
+    lang: { ar: 'عربي', en: 'إنجليزي', both: 'عربي + إنجليزي' },
+    langHint: {
+      ar: 'تظهر الترجمة العربية؛ والمهمة غير المترجمة تظهر بنصها الإنجليزي.',
+      en: 'يظهر النص الإنجليزي الأصلي كما في الملف.',
+      both: 'تظهر الترجمة العربية وتحتها النص الإنجليزي الأصلي بخط أصغر.',
+    },
+    translated: (n, m) => `${n} من ${m} مهمة مترجمة`,
+    untranslated: 'بلا ترجمة',
+    arHint: 'اتركه فارغًا لعرض النص الإنجليزي في الشريحة',
     dueHint: 'تاريخ (يوم/شهر/سنة أو YYYY-MM-DD)، أو نص مثل daily',
     suggestHint: 'اختر من القائمة أو اكتب قيمة جديدة',
     saveFailed: 'تعذّر حفظ تعديلات متابعة المشروع في هذا المتصفح',
-    // The 16 editable task fields (every column of the workbook + Portfolio's Track /
-    // Milestone). Order = the editor's field order.
+    // The 19 editable task fields (every column of the workbook + Portfolio's Track /
+    // Milestone + the three Arabic translations). Order = the editor's field order.
+    // The three Arabic fields (taskAr / trackAr / milestoneAr) sit beside their English
+    // originals; the original keeps its own field, labelled «(الأصل)», and all three
+    // translations carry the SAME suffix «(عربي)» so the pairs read alike.
     fields: {
-      task: 'المهمة / المخرج',
+      task: 'المهمة / المخرج (الأصل)',
+      taskAr: 'المهمة / المخرج (عربي)',
       status: 'الحالة',
       due: 'الاستحقاق',
       owner: 'المسؤول',
       priority: 'الأولوية',
       organization: 'الجهة',
       wbs: 'رقم WBS',
-      track: 'المسار',
-      milestone: 'المرحلة',
+      track: 'المسار (الأصل)',
+      trackAr: 'المسار (عربي)',
+      milestone: 'المرحلة (الأصل)',
+      milestoneAr: 'المرحلة (عربي)',
       workstream: 'مسار العمل (Workstream)',
       workPackage: 'حزمة العمل (Work Package)',
       taskType: 'نوع المهمة',

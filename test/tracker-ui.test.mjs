@@ -1,6 +1,6 @@
 // test/tracker-ui.test.mjs — run with:  node --test
 // The «متابعة المشروع» UI layer (tracker CONTRACT §1.3, §1.6, §1.7):
-//   • the editor's pure model functions (ui/components.js): every one of the 16 task fields
+//   • the editor's pure model functions (ui/components.js): every one of the 19 task fields
 //     editable, add / delete / move, suggestion lists (known vocabulary + the data's own
 //     values, free text allowed), the due field's text + date rule ('daily' kept);
 //   • persistence: the debounced saver (latest wins, flush, cancel) and the round trip
@@ -65,14 +65,14 @@ function tracker(over = {}) {
  * Fields + labels
  * ------------------------------------------------------------------ */
 
-test('editor fields: exactly the 16 task fields (every column; never the id), each with an Arabic label', () => {
+test('editor fields: exactly the 19 task fields (every column + the 3 Arabic translations; never the id), each with an Arabic label', () => {
   const keys = TRACKER_EDIT_FIELDS.map((f) => f.key);
-  assert.equal(keys.length, 16);
+  assert.equal(keys.length, 19);
   assert.deepEqual([...keys].sort(), TASK_FIELDS.filter((f) => f !== 'id').sort());
   for (const k of keys) assert.ok(STR.tracker.fields[k], `label for ${k}`);
   // The controlled fields are text inputs WITH suggestion lists (free text allowed).
   const suggest = TRACKER_EDIT_FIELDS.filter((f) => f.suggest).map((f) => f.key).sort();
-  assert.deepEqual(suggest, ['milestone', 'organization', 'owner', 'predecessor', 'priority', 'status', 'taskType', 'track', 'workPackage', 'workstream']);
+  assert.deepEqual(suggest, ['milestone', 'milestoneAr', 'organization', 'owner', 'predecessor', 'priority', 'status', 'taskType', 'track', 'trackAr', 'workPackage', 'workstream']);
   assert.equal(TRACKER_EDIT_FIELDS.filter((f) => f.due).map((f) => f.key).join(), 'due');
 });
 
@@ -158,7 +158,7 @@ test('suggestions: the known vocabulary first, then every value in the data; fre
  * Mutations — every column, add / delete / move
  * ------------------------------------------------------------------ */
 
-test('setTrackerField: every one of the 16 fields is editable, verbatim, and stamps editedAt', () => {
+test('setTrackerField: every one of the 19 fields is editable, verbatim, and stamps editedAt', () => {
   const t = tracker();
   for (const f of TRACKER_EDIT_FIELDS) {
     const v = `edited ${f.key}`;

@@ -26,11 +26,15 @@
                   so it is not the demo document the screen refuses to persist: editor edits
                   are saved to the in-memory store's cachedTracker exactly as in the app
                   (the live line shows the saved task count + last edit). ?tracker=0 starts
-                  with NO tracker (the «add task» path creates one).
+                  with NO tracker (the «add task» path creates one). The mock carries
+                  made-up Arabic translations (all but its last task) — the card's
+                  «لغة نص المهام في الشريحة» pills switch the preview between Arabic /
+                  English / both; the live line shows the model's and the SAVED trackerLang.
   Query: ?date=YYYY-MM-DD (report date, default the golden asOf 2026-07-09), ?master=0|1,
          ?ambiguous=1 (adds two SYNTHETIC lines — see withAmbiguousBlank below),
          ?sgh=1 (adds 30 SYNTHETIC second-hospital lines — see withSgh below),
-         ?tracker=0 (no project tracker), ?hospital=both|kamc|sgh (report type; default kamc).
+         ?tracker=0 (no project tracker), ?hospital=both|kamc|sgh (report type; default kamc),
+         ?lang=ar|en|both (the stored reportOptions.trackerLang; absent = none stored → 'ar').
 
   THE ENGINE is the real one, handed to the screen through ctx.compute (the screen's
   dev-harness seam; main.js never sets it) wrapped so the live line can COUNT the runs and
@@ -114,6 +118,7 @@
   const WITH_SGH = params.get('sgh') === '1';
   const WITH_TRACKER = params.get('tracker') !== '0';
   const HOSPITAL = ['both', 'kamc', 'sgh'].includes(params.get('hospital')) ? params.get('hospital') : 'kamc';
+  const TRACKER_LANG = ['ar', 'en', 'both'].includes(params.get('lang')) ? params.get('lang') : null;
   const UNATTRIBUTED = 'غير محدد'; // engine.js byLab caption for a blank facility
   const app = document.getElementById('app');
   const statusEl = document.getElementById('harness-status');
@@ -207,6 +212,9 @@
       snapshotHistory: {},
       taskLog: {},
       cachedTracker: null,
+      // ?lang= seeds a stored trackerLang; without it no reportOptions is stored at all
+      // (an install from before the option — the screens must read 'ar').
+      ...(TRACKER_LANG ? { reportOptions: { trackerLang: TRACKER_LANG } } : {}),
     };
   }
 
@@ -321,6 +329,8 @@
     const ct = s.cachedTracker && s.cachedTracker.model;
     const live = state.parsed && state.parsed.tracker;
     bits.push(`متابعة: ${live ? `${live.tasks.length} مهمة` : 'لا يوجد'} · المحفوظ: ${ct ? `${ct.tasks.length} مهمة، آخر تعديل ${ct.editedAt || '—'}` : 'لا يوجد'} · في النموذج ${m && m.projectTracker === live ? 'الوثيقة نفسها' : 'نسخة أخرى!'}`);
+    const translated = live ? live.tasks.filter((x) => String(x.taskAr || '').trim()).length : 0;
+    bits.push(`لغة الشريحة: النموذج ${(m && m.reportOptions && m.reportOptions.trackerLang) || '—'} · المحفوظ ${(s.reportOptions && s.reportOptions.trackerLang) || '—'} · مترجمة ${translated} من ${live ? live.tasks.length : 0}`);
     if (ambiguous) bits.push(`صف غامض: الشحنة ${ambiguous.shipment} · ${ambiguous.lab} = ${labTotal(k, ambiguous.lab)}`);
     liveEl.textContent = bits.join(' • ');
   }
@@ -336,7 +346,8 @@
     const t = m.projectTracker;
     const tracker = t ? `${t.tasks.length} مهمة (الأولى: ${(t.tasks[0] && t.tasks[0].task) || '—'})` : 'لا يوجد';
     return `→ generate: التاريخ ${m.reportDate} • ${scoped ? 'مخصص' : 'كامل'} • الإجمالي ${m.kpi && m.kpi.totals ? m.kpi.totals.total : '?'}`
-      + ` • شحنات ${(m.shipmentDetails || []).length} • الدعم المطلوب: ${support} • متابعة المشروع: ${tracker} • ${names}`;
+      + ` • شحنات ${(m.shipmentDetails || []).length} • الدعم المطلوب: ${support} • متابعة المشروع: ${tracker}`
+      + ` (لغة ${(m.reportOptions && m.reportOptions.trackerLang) || '—'}) • ${names}`;
   }
 
   /* Router stand-in: 'generate' only reports what the screen handed over (the model the

@@ -20,23 +20,26 @@
 // throws on write; on failure we fall back to an in-memory doc and expose
 // isEphemeral() so the UI can warn the user their edits will not persist.
 
-import { SETTINGS_KEY } from './contracts.js?v=v2026-10-13.3';
-import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-10-13.3';
-import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-10-13.3';
+import { SETTINGS_KEY } from './contracts.js?v=v2026-10-13.4';
+import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-10-13.4';
+import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-10-13.4';
 import {
   HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED, GRAFANA_SEED, REPORT_OPTIONS_SEED,
   SNAPSHOT_HISTORY_SEED, AUTOMATION_SEED, TASK_LOG_SEED,
-} from './seeds/defaults.js?v=v2026-10-13.3';
-import { DELTA_MODES, canonicalDeltaMode } from './model/delta-baseline.js?v=v2026-10-13.3';
+} from './seeds/defaults.js?v=v2026-10-13.4';
+import { DELTA_MODES, canonicalDeltaMode } from './model/delta-baseline.js?v=v2026-10-13.4';
 import {
   sanitizeTaskLog, recordShownTasks, TASK_LOG_LIMIT, TASK_KEY_MAX,
-} from './model/task-lifecycle.js?v=v2026-10-13.3';
+} from './model/task-lifecycle.js?v=v2026-10-13.4';
 // The ProjectTracker shape has ONE owner — the module that produces it. The store only
 // asks "is this the tagged document?" and "give me its clean copy", exactly as it
-// defers the taskLog entry shape to task-lifecycle.js above.
+// defers the taskLog entry shape to task-lifecycle.js above. The same module owns the
+// tracker slides' language enum (reportOptions.trackerLang), like delta-baseline.js
+// owns deltaMode's.
 import {
-  TRACKER_FORMAT, isProjectTracker, normalizeProjectTracker,
-} from './ingest/task-tracker.js?v=v2026-10-13.3';
+  TRACKER_FORMAT, isProjectTracker, normalizeProjectTracker, normalizeTrackerLang, TRACKER_LANGS,
+  backfillTaskFields,
+} from './ingest/task-tracker.js?v=v2026-10-13.4';
 
 export const SCHEMA_VERSION = 9;
 
@@ -133,6 +136,12 @@ function backfillReportOptions(doc) {
   // unrecognized resets to the seed. NOTE this backfill cannot change the DEFAULT for
   // an install that already stored 'daily' — that is migrateV6toV7's job.
   ro.deltaMode = canonicalDeltaMode(ro.deltaMode) || seed.deltaMode;
+  // trackerLang (2026-10-13, the Arabic task translations): the tracker slides' text
+  // language. A missing or unrecognized value takes the seed ('ar'). That changes
+  // nothing for an existing install until translations are uploaded: 'ar' falls back to
+  // the English per cell, so a tracker without Arabic columns renders as it did. No
+  // schema bump — like every key above, only a MISSING / invalid value is filled.
+  ro.trackerLang = normalizeTrackerLang(ro.trackerLang) || seed.trackerLang;
 }
 
 /**
@@ -269,6 +278,11 @@ function migrateSnapshotShape(doc) {
   // unlike the default-reset migrations there is no user choice to protect here, the
   // old shape simply cannot be read by anything any more.
   if (trackerCacheIsStale(doc)) doc.cachedTracker = null;
+  // A tracker cached before the Arabic translation fields existed (taskAr / trackAr /
+  // milestoneAr) is still the current document: its tasks just gain the missing keys as
+  // '' (in memory; the next save writes them), so the editor and the slides read a
+  // string, never undefined. Nothing else in the cache changes.
+  else if (doc.cachedTracker) backfillTaskFields(doc.cachedTracker.model);
   backfillReportOptions(doc); // add reportOptions + any new slide/card subkeys + deltaMode
   if (!isPlainObject(doc.snapshotHistory)) doc.snapshotHistory = {}; // v3 rolling history
   backfillAutomation(doc); // v4 automation block (all switches default false)
@@ -976,6 +990,13 @@ function validateImport(doc) {
         `حقل reportOptions.deltaMode غير صالح: يجب أن يكون ${DELTA_MODES.map((m) => `'${m}'`).join(' أو ')}.`,
       );
     }
+    // trackerLang is an enum like deltaMode and is enforced the same way (list built
+    // from the enum, never re-typed).
+    if ('trackerLang' in ro && normalizeTrackerLang(ro.trackerLang) == null) {
+      throw new Error(
+        `حقل reportOptions.trackerLang غير صالح: يجب أن يكون ${TRACKER_LANGS.map((m) => `'${m}'`).join(' أو ')}.`,
+      );
+    }
     if ('slides' in ro && !isPlainObject(ro.slides)) {
       throw new Error('حقل reportOptions.slides غير صالح: يجب أن يكون كائناً.');
     }
@@ -1155,8 +1176,8 @@ function pickImportKeys(doc) {
     out.grafana = picked;
   }
   if (isPlainObject(out.reportOptions)) {
-    // Whitelist exactly {excludeNoTat, autoDownloadFiles, deltaMode, slides(7 keys),
-    // kpiCards(8 keys), labels}. Flags coerce to booleans; only string label values
+    // Whitelist exactly {excludeNoTat, autoDownloadFiles, deltaMode, trackerLang,
+    // slides(REPORT_OPTION_SLIDE_KEYS), kpiCards(REPORT_OPTION_CARD_KEYS), labels}. Flags coerce to booleans; only string label values
     // survive; unknown slide/card subkeys are discarded.
     const ro = out.reportOptions;
     const picked = {};
@@ -1170,6 +1191,9 @@ function pickImportKeys(doc) {
     // the stored default survives the merge (validateImport already rejected it).
     const dm = canonicalDeltaMode(ro.deltaMode);
     if (dm != null) picked.deltaMode = dm;
+    // Same for the tracker slides' language: canonical value or dropped.
+    const tl = normalizeTrackerLang(ro.trackerLang);
+    if (tl != null) picked.trackerLang = tl;
     if (isPlainObject(ro.slides)) {
       const s = {};
       for (const k of REPORT_OPTION_SLIDE_KEYS) if (k in ro.slides) s[k] = !!ro.slides[k];

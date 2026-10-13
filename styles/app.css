@@ -438,7 +438,7 @@ input, select, textarea { font-family: inherit; font-size: 1rem; }
 
 /* ---------- «متابعة المشروع» tracker editor (ui/components.js trackerEditor) ----------
    Row = one-line summary button (WBS · task · status pill · due) + move/delete icons;
-   opening it shows a form with all 16 fields. Built for the ~400px review controls
+   opening it shows a form with all 19 fields. Built for the ~400px review controls
    column and phone width: no horizontal scroll, the form grid collapses to one column. */
 .trk-meta { margin: 0 0 8px; overflow-wrap: anywhere; }
 .trk-toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
@@ -494,6 +494,31 @@ input, select, textarea { font-family: inherit; font-size: 1rem; }
   position: static; width: auto; height: auto; opacity: 1; pointer-events: auto;
   border: 1px solid var(--border-dark); border-radius: 6px; padding: 4px; min-height: 38px; background: var(--white); color: var(--text);
 }
+/* Arabic translation (2026-10-13). The English task and its Arabic translation share a
+   row (.trk-pair: side by side when two 150px columns fit, stacked otherwise), so a
+   translation is always read against its original. «بلا ترجمة» tags a row the slide
+   will show in English although Arabic is chosen. */
+.trk-pair { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px 10px; min-width: 0; }
+.trk-pair > .trk-field--wide { grid-column: auto; } /* wide in the form, half inside the pair */
+.trk-field textarea[dir="rtl"], .trk-field input[dir="rtl"] { text-align: right; }
+.trk-row__untr {
+  flex: 0 0 auto; font-size: .68rem; font-weight: 700; color: var(--slate-500);
+  border: 1px dashed var(--border-dark); border-radius: 999px; padding: 0 6px; white-space: nowrap;
+}
+.trk-row__untr[hidden] { display: none; }
+.trk-group__en { font-weight: 600; font-size: .72rem; color: var(--slate-500); text-align: left; unicode-bidi: isolate; }
+/* «لغة نص المهام في الشريحة» — three pills (aria-pressed), wrapping as a whole at phone width. */
+.trk-lang { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 0 0 10px; }
+.trk-lang__title { font-size: .8rem; font-weight: 700; color: var(--slate-600); }
+.trk-lang__pills { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.trk-lang__btn {
+  border-radius: 999px; padding: 6px 12px; min-height: 32px; line-height: 1; white-space: nowrap;
+  font: inherit; font-weight: 700; font-size: .78rem; cursor: pointer;
+  background: var(--white); color: var(--slate-600); border: 1px solid var(--border-dark);
+}
+.trk-lang__btn[aria-pressed="true"] { background: var(--navy); color: #fff; border-color: var(--navy); }
+.trk-lang__btn:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.trk-lang__hint { flex: 1 1 100%; margin: 0; }
 
 /* ---------- Live preview ---------- */
 .preview-frame {

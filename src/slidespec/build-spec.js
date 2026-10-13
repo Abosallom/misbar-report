@@ -63,16 +63,16 @@
 // standing rule, unchanged for it). The SGH and BOTH decks print exactly the names the
 // reference deck prints («SGH», «مستشفى الألماني السعودي») — the reference supersedes the
 // old rule for those two report types only.
-import { COLORS as C, GEOM } from '../theme.js?v=v2026-10-13.3';
-import { AR_COUNTRY, AR_COUNTRY_SHORT, reflabShort } from '../model/sendout.js?v=v2026-10-13.3';
-import { isScoped, hasRange } from '../model/scope.js?v=v2026-10-13.3';
+import { COLORS as C, GEOM } from '../theme.js?v=v2026-10-13.4';
+import { AR_COUNTRY, AR_COUNTRY_SHORT, reflabShort } from '../model/sendout.js?v=v2026-10-13.4';
+import { isScoped, hasRange } from '../model/scope.js?v=v2026-10-13.4';
 // The project-tracker slides (shared with build-spec-both.js; a leaf module, no cycle).
-import { buildTrackerSlides, TRACKER_LABELS } from './build-tracker.js?v=v2026-10-13.3';
+import { buildTrackerSlides, TRACKER_LABELS } from './build-tracker.js?v=v2026-10-13.4';
 // NAMESPACE import on purpose: build-spec-both.js may import helpers back from this file
 // (an ESM cycle). A namespace binding is only read inside buildSpec, at CALL time, when
 // both modules have finished evaluating — and it tolerates either a named
 // `buildBothSpec` export (the contract's name) or a default export.
-import * as bothSpecModule from './build-spec-both.js?v=v2026-10-13.3';
+import * as bothSpecModule from './build-spec-both.js?v=v2026-10-13.4';
 
 // EXPLICIT-TRUE kpiCards KEYS. reportOptions.kpiCards normally reads "on unless === false"
 // (see buildExec's cardDefs filter). The keys in this set INVERT that: they render only
@@ -2623,8 +2623,9 @@ export function buildSpec(reportModel, { variant = 'internal' } = {}) {
     { key: 'compliance', build: () => [buildCompliance(m)] },
     // Project tracker ('متابعة المشروع', build-tracker.js) — in the slot the retired 'action'
     // (المهام) slide held, default ON ('tracker' is not in OPT_IN_SLIDES). The same slides
-    // for both variants; no tracker / no task → [] (no slide, no page number used).
-    { key: 'tracker', build: () => buildTrackerSlides(m.projectTracker, { reportDate: m.reportDate, variant, labels: labelOf(m) }) },
+    // for both variants; no tracker / no task → [] (no slide, no page number used). The text
+    // language is reportOptions.trackerLang ('ar' default | 'en' | 'both'; build-tracker.js).
+    { key: 'tracker', build: () => buildTrackerSlides(m.projectTracker, { reportDate: m.reportDate, variant, labels: labelOf(m), lang: m.reportOptions?.trackerLang }) },
     // Challenges & risks — SPLIT OFF the action slide 2026-08-04. It is a NORMAL (default
     // ON) middle slide: 'challenges' is not in OPT_IN_SLIDES, so on() reads an absent
     // reportOptions.slides.challenges as ON. That matters for saved report options written

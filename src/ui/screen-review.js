@@ -1,17 +1,18 @@
 // ui/screen-review.js — review/edit report content with a live slide preview (Track E).
-import { STR, todayISO, formatDateAr, formatRangeAr } from '../i18n/ar.js?v=v2026-10-13.3';
+import { STR, todayISO, formatDateAr, formatRangeAr } from '../i18n/ar.js?v=v2026-10-13.4';
 import {
   el, editableTable, toast, trackerEditor, trackerSaver, saveTrackerToStore, createProjectTracker,
-} from './components.js?v=v2026-10-13.3';
-import { buildMockEngineOutput, isMockTracker } from './screen-upload.js?v=v2026-10-13.3';
+  trackerLangControl, normalizeTrackerLang, DEFAULT_TRACKER_LANG,
+} from './components.js?v=v2026-10-13.4';
+import { buildMockEngineOutput, isMockTracker } from './screen-upload.js?v=v2026-10-13.4';
 // THE PROJECT TRACKER (2026-10-13, tracker CONTRACT §1.3/§1.6): the report carries the
 // «ملف متابعة المشروع» document as model.projectTracker, resolved by the model layer's
 // ONE rule (the run's tagged tracker, else the tagged cache, else null — never the old
 // untagged shape, never a mock). Static: report-model.js is pure, and sendout.js — its
 // only import — is already imported below.
-import { resolveProjectTracker } from '../model/report-model.js?v=v2026-10-13.3';
-import { analyseSendout, hasMaster, AR_COUNTRY } from '../model/sendout.js?v=v2026-10-13.3';
-import { buildHistoryPanel } from './history-table.js?v=v2026-10-13.3';
+import { resolveProjectTracker } from '../model/report-model.js?v=v2026-10-13.4';
+import { analyseSendout, hasMaster, AR_COUNTRY } from '../model/sendout.js?v=v2026-10-13.4';
+import { buildHistoryPanel } from './history-table.js?v=v2026-10-13.4';
 // REPORT SCOPE (2026-09-29). STATIC, not guarded like delta-window below: scope decides
 // WHICH ROWS every number is computed from, and there is no safe degraded answer — a
 // build that silently ignored a chosen scope would publish the full programme's numbers
@@ -20,16 +21,16 @@ import { buildHistoryPanel } from './history-table.js?v=v2026-10-13.3';
 import {
   EMPTY_SCOPE, normalizeScope, isScoped, hasRange, parseShipmentIds, labOptions,
   findShipments, applyScope, shipmentDetails,
-} from '../model/scope.js?v=v2026-10-13.3';
+} from '../model/scope.js?v=v2026-10-13.4';
 import {
   normalizeDeltaMode, isWeekDeltaMode, DEFAULT_DELTA_MODE,
-} from '../model/delta-baseline.js?v=v2026-10-13.3';
+} from '../model/delta-baseline.js?v=v2026-10-13.4';
 // REPORT TYPES (2026-10-11): KAMC + SGH (the main weekly report, default) / KAMC / SGH.
 // STATIC for scope.js's reason: WHICH hospital's rows a report reads has no safe degraded
 // answer, and hospital.js is pure (no imports at all). The per-hospital MODEL builders
 // (model/hospital-report.js) are a guarded import inside render(), like the engine they
 // depend on — absent, an SGH / KAMC + SGH build throws and modelFor says so.
-import { HOSPITALS, HOSPITAL_MODES, rowsForMode } from '../model/hospital.js?v=v2026-10-13.3';
+import { HOSPITALS, HOSPITAL_MODES, rowsForMode } from '../model/hospital.js?v=v2026-10-13.4';
 
 /* small local module helpers (kept local to avoid cross-screen coupling) */
 async function tryImport(path) { try { return await import(path); } catch { return null; } }
@@ -96,11 +97,15 @@ function defaultReportOptions() {
     // behaviour, which is also what an ABSENT key must mean for every doc written
     // before this option existed (see reportOptionsFromSettings below).
     autoDownloadFiles: true,
+    // The tracker slide's task language (Arabic CONTRACT §3): 'ar' | 'en' | 'both'. The
+    // seed owns the default ('ar'); an absent / unknown stored value reads as it.
+    trackerLang: DEFAULT_TRACKER_LANG,
   };
 }
 
-/* Deep-copy settings.reportOptions over the all-on defaults so every key exists. */
-function reportOptionsFromSettings(settings) {
+/* Deep-copy settings.reportOptions over the all-on defaults so every key exists.
+ * Pure; exported for node tests. */
+export function reportOptionsFromSettings(settings) {
   const base = defaultReportOptions();
   const ro = settings && settings.reportOptions;
   if (!ro || typeof ro !== 'object') return base;
@@ -113,6 +118,7 @@ function reportOptionsFromSettings(settings) {
     // Absent/non-boolean → the default (ON). Only an explicit false turns it off, so a
     // doc written before R2 keeps auto-downloading exactly as it always did.
     autoDownloadFiles: ro.autoDownloadFiles != null ? !!ro.autoDownloadFiles : base.autoDownloadFiles,
+    trackerLang: normalizeTrackerLang(ro.trackerLang),
   };
 }
 
@@ -1017,7 +1023,7 @@ export async function render(container, ctx) {
   // any failure, which simply omits the two slides.
   if (state.sendoutMaster === undefined) {
     const dataKey = ((store.settings || {}).grafana || {}).dataKey || '';
-    const mod = await tryImport('../ingest/sendout-master.js?v=v2026-10-13.3');
+    const mod = await tryImport('../ingest/sendout-master.js?v=v2026-10-13.4');
     state.sendoutMaster = (mod && mod.loadSendoutMaster)
       ? await mod.loadSendoutMaster(dataKey)
       : null;
@@ -1033,11 +1039,11 @@ export async function render(container, ctx) {
   // so the app always takes the guarded import.
   const compute = typeof ctx.compute === 'function'
     ? ctx.compute
-    : pickFn(await tryImport('../engine/engine.js?v=v2026-10-13.3'), ['compute', 'runEngine', 'run']);
+    : pickFn(await tryImport('../engine/engine.js?v=v2026-10-13.4'), ['compute', 'runEngine', 'run']);
   // The SGH / KAMC + SGH model builders — guarded like the engine they depend on. Loaded
   // even in KAMC mode: the generate click and a report-type switch go through modelFor
   // with it, and a missing module must surface as modelFor's loud fallback, not a crash.
-  const hrMod = await tryImport('../model/hospital-report.js?v=v2026-10-13.3');
+  const hrMod = await tryImport('../model/hospital-report.js?v=v2026-10-13.4');
   const model = modelFor(state, store, compute, { hospitalReport: hrMod });
   // The report type ON SCREEN — the model's, which is the state's choice unless that
   // build failed and modelFor fell back to KAMC (it said so).
@@ -1075,7 +1081,7 @@ export async function render(container, ctx) {
   // Guarded import, exactly as the retired picker was: a build without the module
   // degrades to the engine's own deltas instead of throwing. Re-run below on a
   // report-date change and on a mode switch; being PURE, every re-run agrees.
-  const dwMod = await tryImport('../model/delta-window.js?v=v2026-10-13.3');
+  const dwMod = await tryImport('../model/delta-window.js?v=v2026-10-13.4');
   const stampWindow = dwMod && dwMod.stampWindowDeltas;
   // The chips need the parsed CSV rows: with no upload in this session (mock preview)
   // stampWindowDeltas leaves the engine's deltas alone and stamps no window, and the
@@ -1138,6 +1144,8 @@ export async function render(container, ctx) {
         // R2 — written as a real boolean so the settings mirror, the store validator and
         // pipeline.js shouldAutoDownloadFiles all read one shape.
         autoDownloadFiles: ro.autoDownloadFiles !== false,
+        // The tracker card's language pills — the same key Settings' radio writes.
+        trackerLang: normalizeTrackerLang(ro.trackerLang),
       };
       store.saveSettings(doc);
     } catch (e) { console.warn('[review] persist reportOptions failed', e); }
@@ -1186,9 +1194,9 @@ export async function render(container, ctx) {
     // A range's END when one is active (the deck is dated 'to'), else the chosen date.
     model.reportDate = effectiveReportDate(state, model.scope);
     stampDeltas(); // re-window the chips for the current report date (pure → idempotent)
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-10-13.3');
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-10-13.4');
     const buildSpec = pickFn(specMod, ['buildSpec', 'build', 'makeSpec', 'toSpec']);
-    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-10-13.3');
+    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-10-13.4');
     const renderFn = pickFn(rendMod, ['renderSpec', 'renderSlides', 'renderHtml', 'render']);
 
     if (!buildSpec || !renderFn) {
@@ -1418,24 +1426,41 @@ export async function render(container, ctx) {
       toast(STR.tracker.saveFailed, 'err');
     });
   };
+  const trackerEd = trackerEditor({
+    tracker: model.projectTracker,
+    lang: model.reportOptions.trackerLang,
+    onChange: (t) => {
+      // The same object everywhere (see sessionProjectTracker) — re-pinned in case the
+      // editor just CREATED the document (no file loaded).
+      model.projectTracker = t;
+      if (state.parsed) state.parsed.tracker = t;
+      persistTracker(t);
+      schedulePreview();
+    },
+    onCreate: () => {
+      const t = createProjectTracker();
+      if (state.files && !state.files.tracker) state.files.tracker = { name: STR.tracker.manualName };
+      return t;
+    },
+  });
+  // «لغة نص المهام في الشريحة» (Arabic CONTRACT §4): which text the tracker slides show —
+  // the Arabic translation (English per row when a task has none), the English original,
+  // or both. A REPORT OPTION, not tracker data: persisted with the slide chips through
+  // persistReportOptions (Settings mirrors it), the preview re-renders, and the editor's
+  // summaries switch language so the list reads like the deck.
+  const trackerLang = trackerLangControl({
+    value: model.reportOptions.trackerLang,
+    onChange: (lang) => {
+      model.reportOptions.trackerLang = normalizeTrackerLang(lang);
+      persistReportOptions();
+      trackerEd.setLang(model.reportOptions.trackerLang);
+      schedulePreview();
+    },
+  });
   const trackerCard = el('div', { class: 'card' }, [
     el('div', { class: 'card__title', text: STR.tracker.title }),
-    trackerEditor({
-      tracker: model.projectTracker,
-      onChange: (t) => {
-        // The same object everywhere (see sessionProjectTracker) — re-pinned in case the
-        // editor just CREATED the document (no file loaded).
-        model.projectTracker = t;
-        if (state.parsed) state.parsed.tracker = t;
-        persistTracker(t);
-        schedulePreview();
-      },
-      onCreate: () => {
-        const t = createProjectTracker();
-        if (state.files && !state.files.tracker) state.files.tracker = { name: STR.tracker.manualName };
-        return t;
-      },
-    }).el,
+    trackerLang.el,
+    trackerEd.el,
   ]);
 
   // Challenges
@@ -1578,7 +1603,7 @@ export async function render(container, ctx) {
     el('summary', { class: 'card__title', style: 'cursor:pointer', text: STR.review.labelsCardTitle }),
   ]);
   (async () => {
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-10-13.3');
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-10-13.4');
     const LABEL_NAMES = specMod && specMod.LABEL_NAMES;
     const DEFAULT_LABELS = (specMod && specMod.DEFAULT_LABELS) || {};
     if (!LABEL_NAMES || typeof LABEL_NAMES !== 'object') {

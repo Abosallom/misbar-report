@@ -66,10 +66,21 @@
  *                                   on the website
  * @property {string} wbs          - WBS ID ('2.1.1')
  * @property {string} track        - Portfolio Track (Portfolio sheet; filled down)
+ * @property {string} trackAr      - the track's Arabic translation ('' = none; optional
+ *                                   'Portfolio Track (Arabic)' / 'المسار' column, filled down
+ *                                   within its English group like track)
  * @property {string} milestone    - Milestone (Portfolio sheet; filled down within its track)
+ * @property {string} milestoneAr  - the milestone's Arabic translation ('' = none; optional
+ *                                   'Milestone (Arabic)' / 'المرحلة' column, filled down)
  * @property {string} workstream
  * @property {string} workPackage
- * @property {string} task         - Task / Deliverable
+ * @property {string} task         - Task / Deliverable (the English original, never
+ *                                   overwritten by a translation)
+ * @property {string} taskAr       - the task's Arabic translation ('' = none; optional
+ *                                   'Task / Deliverable (Arabic)' / 'المهمة / المخرج' column
+ *                                   in either sheet, Hierarchical winning like task). A cache
+ *                                   from before translations lacks the three *Ar keys and
+ *                                   normalizes to ''
  * @property {string} taskType
  * @property {string} organization - 'NUPCO' | 'LEAN' | 'NUPCO / LEAN' | free text
  * @property {string} owner
@@ -302,7 +313,7 @@
  *     'https://elab.seha.sa/hpapm'. Empty/disabled → CSV drop only. The access
  *     token is the public-dashboard token (view-only, server-side-masked data);
  *     it is NEVER seeded in the repo — the user enters it once in Settings.
- * @property {{excludeNoTat:boolean, slides:Object<string,boolean>, kpiCards:Object<string,boolean>, labels:Object<string,string>, deltaMode:('daily'|'week'), autoDownloadFiles:boolean}} reportOptions
+ * @property {{excludeNoTat:boolean, slides:Object<string,boolean>, kpiCards:Object<string,boolean>, labels:Object<string,string>, deltaMode:('daily'|'week'), autoDownloadFiles:boolean, trackerLang:('ar'|'en'|'both')}} reportOptions
  *   - presentation defaults: excludeNoTat drops rows with no TAT from ANY source
  *     (lookup + CSV fallback = null → 'No Match') before aggregation; slides keys
  *     'execFunnel'|'monthly'|'compliance'|'action'|'challenges'|'definitions'|'sendout'|'tracker' toggle the middle
@@ -333,6 +344,11 @@
  *     strictly INDEPENDENT of automation.autoDownload below, which arms the
  *     UNATTENDED run's downloads — the single predicate is
  *     automation/pipeline.js shouldAutoDownloadFiles.
+ *     trackerLang (2026-10-13; default 'ar'; enum owned by ingest/task-tracker.js
+ *     TRACKER_LANGS) is the «متابعة المشروع» slides' text language for the task /
+ *     track / milestone cells: 'ar' = the Arabic translation (taskAr / trackAr /
+ *     milestoneAr), the English per cell where it is ''; 'en' = English only (the
+ *     pre-translation slides); 'both' = Arabic with the English original under it.
  * @property {{enabled:boolean, autoPull:boolean, autoGenerate:boolean, autoDownload:boolean,
  *             autoLabFiles:boolean, autoEmailDrafts:boolean, autoAcceptTat:boolean,
  *             dailyTime:string, labRecipients:Object<string,string>}} automation
