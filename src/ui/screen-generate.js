@@ -2,17 +2,17 @@
 // The file-producing core now lives in automation/pipeline.js (produceReportFiles) so
 // an unattended run makes byte-identical files; this screen drives it and paints the
 // very same progress bar, file rows and live slide thumbnails it always has.
-import { STR, todayISO, formatDateAr, formatRangeAr } from '../i18n/ar.js?v=v2026-10-11.2';
-import { el, progressBar, toast } from './components.js?v=v2026-10-11.2';
-import { resetRunData } from '../state.js?v=v2026-10-11.2';
-import { buildMockEngineOutput, buildMockTracker } from './screen-upload.js?v=v2026-10-11.2';
-import { autoDraft, splitTaskLists } from '../model/drafts.js?v=v2026-10-11.2';
-import { buildLateLabsSection, triggerDownload } from './late-labs-section.js?v=v2026-10-11.2';
+import { STR, todayISO, formatDateAr, formatRangeAr } from '../i18n/ar.js?v=v2026-10-13.1';
+import { el, progressBar, toast } from './components.js?v=v2026-10-13.1';
+import { resetRunData } from '../state.js?v=v2026-10-13.1';
+import { buildMockEngineOutput } from './screen-upload.js?v=v2026-10-13.1';
+import { resolveProjectTracker } from '../model/report-model.js?v=v2026-10-13.1';
+import { buildLateLabsSection, triggerDownload } from './late-labs-section.js?v=v2026-10-13.1';
 import {
   applyWindowDeltas, buildFileDefs, produceReportFiles, recordRunSnapshot,
   shouldAutoDownloadFiles,
-} from '../automation/pipeline.js?v=v2026-10-11.2';
-import { isScoped, hasRange, normalizeScope } from '../model/scope.js?v=v2026-10-11.2';
+} from '../automation/pipeline.js?v=v2026-10-13.1';
+import { isScoped, hasRange, normalizeScope } from '../model/scope.js?v=v2026-10-13.1';
 
 /** The report type a model is (model.hospital; absent ⇒ 'kamc': a legacy KAMC-only model —
  *  every model that predates the report types, and the fallback below, whose numbers are
@@ -26,33 +26,22 @@ const hospitalLabel = (h) => (STR.review.hospital.modes[h] || String(h));
 async function tryImport(path) { try { return await import(path); } catch { return null; } }
 const isMobile = () => /iP(hone|ad|od)|Android/i.test(navigator.userAgent);
 
-function fallbackModel(state, store) {
+// Only reached when there is no review model (a direct jump to this screen). The project
+// tracker is the REAL one or nothing: this run's parsed tracker, else the cached document
+// (resolveProjectTracker — tagged ProjectTrackers only), else null ⇒ no tracker slides.
+// Never buildMockTracker: a mock here once printed fake tasks into a real deck.
+// Challenges / risks / support lines are manual review content — none without a review.
+// Exported for test/tracker-model.test.mjs (pure: reads state + store.settings only).
+export function fallbackModel(state, store) {
   const kpi = state.engineOutput || buildMockEngineOutput(store.settings);
-  const tracker = state.parsed.tracker || buildMockTracker();
   const reportDate = state.reportDate || todayISO();
-  // CANONICAL task split via model/drafts.js (internal = فئة التقرير 'لين', plus the
-  // one-report grace for مغلق rows) — a local regex here once diverged and emptied
-  // the internal task table, so nothing is re-derived on this screen any more.
-  let d;
-  try {
-    d = autoDraft(tracker, reportDate, { taskLog: store.settings && store.settings.taskLog });
-  } catch { d = null; }
-  // If autoDraft itself threw, splitTaskLists with an empty bag is the degradation:
-  // non-closed rows only (a subset of the real answer), never every closed task.
-  let split = { tasksCurrent: [], tasksInternal: [] };
-  try { split = splitTaskLists(tracker.tasks || [], {}); } catch { /* keep the empties */ }
   return {
     reportDate,
     kpi,
-    panels: {
-      supportRequired: (d && d.supportRequired) || [],
-      completedTasks: (d && d.completedTasks) || [],
-      plannedTasks: (d && d.plannedTasks) || [],
-    },
-    tasksCurrent: (d && d.tasksCurrent) || split.tasksCurrent,
-    tasksInternal: (d && d.tasksInternal) || split.tasksInternal,
-    challenges: tracker.challenges || [],
-    risks: tracker.risks || [],
+    panels: { supportRequired: [] },
+    projectTracker: resolveProjectTracker(state.parsed && state.parsed.tracker, store.settings),
+    challenges: [],
+    risks: [],
     scorecard: (store.settings && store.settings.scorecard) || [],
     displayNames: (store.settings && store.settings.displayNames) || {},
     reportOptions: (store.settings && store.settings.reportOptions) || undefined,
@@ -279,10 +268,10 @@ export async function render(container, ctx) {
   // Both modules are guarded → engine deltas if either is absent.
   // An SGH / KAMC + SGH model is re-stamped by model/hospital-report.js (each hospital
   // with its own policy — applyWindowDeltas routes it); guarded like the other two.
-  const dwMod = await tryImport('../model/delta-window.js?v=v2026-10-11.2');
-  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-10-11.2');
+  const dwMod = await tryImport('../model/delta-window.js?v=v2026-10-13.1');
+  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-10-13.1');
   const hrMod = hospitalOf(model) !== 'kamc'
-    ? await tryImport('../model/hospital-report.js?v=v2026-10-11.2')
+    ? await tryImport('../model/hospital-report.js?v=v2026-10-13.1')
     : null;
   const recordSnapshot = dbMod && dbMod.recordSnapshot;
   applyWindowDeltas(model, state, store, dwMod && dwMod.stampWindowDeltas, hrMod);
@@ -396,20 +385,10 @@ export async function render(container, ctx) {
     // Persist the FULL number snapshot — next run's "+N" chips (E6 rule) compare
     // every exec/journey number against these. Shared with automated runs so an
     // unattended generation feeds the same delta/history features.
-    // recordShownTasks also writes the closed-task grace log (v6) from this very
-    // model — guarded import, so an older/partial build just keeps the numbers path.
-    // A SCOPED model is a side report: recordRunSnapshot returns before either write
+    // Numbers only: nothing writes the closed-task log any more (recordRunSnapshot).
+    // A SCOPED model is a side report: recordRunSnapshot returns before writing
     // (see its guard), so it is still called unconditionally here — one owner of the rule.
-    const tlMod = await tryImport('../model/task-lifecycle.js?v=v2026-10-11.2');
-    recordRunSnapshot({
-      model, store, state, date, recordSnapshot,
-      recordShownTasks: tlMod && tlMod.recordShownTasks,
-      // Per-variant grace consumption: only a variant that actually produced a file
-      // gets its task list recorded. Without this, an internal-only success would
-      // consume the NUPCO closures' one-shot appearance on a deck NUPCO never saw
-      // (produceReportFiles swallows per-file failures, so produced can be partial).
-      shippedVariants: produced.map((p) => p.def && p.def.variant).filter(Boolean),
-    });
+    recordRunSnapshot({ model, store, state, date, recordSnapshot });
 
     // Auto-download works on desktop; iOS/Safari may drop programmatic clicks
     // that fire without recent user activation, so it's attempted on desktop only

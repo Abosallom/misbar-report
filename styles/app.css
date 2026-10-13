@@ -304,6 +304,8 @@ input, select, textarea { font-family: inherit; font-size: 1rem; }
 .dropzone__title { font-weight: 700; color: var(--brand-ink); }
 .dropzone__hint { font-size: .85rem; color: var(--slate-500); }
 .dropzone__file { font-size: .85rem; color: var(--green); font-weight: 700; word-break: break-all; }
+.dropzone.is-error .dropzone__file { color: var(--slate-600); font-weight: 600; }
+.dropzone__error { font-size: .85rem; color: var(--red-dark); font-weight: 700; text-align: center; }
 .dropzone input[type="file"] { display: none; }
 
 /* ---------- Summary cards ---------- */
@@ -433,6 +435,65 @@ input, select, textarea { font-family: inherit; font-size: 1rem; }
 .etable .status-cell select { text-align: center; font-weight: 600; }
 
 .table-actions { margin-top: 8px; }
+
+/* ---------- «متابعة المشروع» tracker editor (ui/components.js trackerEditor) ----------
+   Row = one-line summary button (WBS · task · status pill · due) + move/delete icons;
+   opening it shows a form with all 16 fields. Built for the ~400px review controls
+   column and phone width: no horizontal scroll, the form grid collapses to one column. */
+.trk-meta { margin: 0 0 8px; overflow-wrap: anywhere; }
+.trk-toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.trk-empty { margin: 4px 0; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--bg-light); color: var(--slate-600); }
+.trk-group {
+  margin: 12px 0 4px; padding: 4px 8px; border-radius: 6px;
+  background: var(--bg-lighter); color: var(--brand-ink); font-weight: 700; font-size: .8rem;
+  overflow-wrap: anywhere;
+}
+.trk-row { border: 1px solid var(--border); border-radius: var(--radius-sm); margin-bottom: 6px; background: var(--white); }
+.trk-row.is-open { border-color: var(--border-dark); box-shadow: var(--shadow); }
+.trk-row__head { display: flex; align-items: stretch; gap: 2px; min-width: 0; }
+.trk-row__toggle {
+  flex: 1 1 auto; min-width: 0; min-height: 44px; display: flex; align-items: center; gap: 6px;
+  border: 0; background: transparent; color: var(--text); font: inherit; font-size: .84rem;
+  text-align: start; padding: 6px 8px; cursor: pointer; border-radius: var(--radius-sm);
+}
+.trk-row__toggle:focus-visible, .trk-iconbtn:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
+.trk-row__wbs { flex: 0 0 auto; font-weight: 700; color: var(--slate-500); font-size: .76rem; unicode-bidi: isolate; }
+.trk-row__task { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trk-row__pill { flex: 0 0 auto; }
+.trk-row__due { flex: 0 0 auto; font-size: .76rem; color: var(--slate-600); unicode-bidi: isolate; max-width: 6.5em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trk-pill {
+  display: inline-block; border-radius: 999px; padding: 1px 8px; font-size: .72rem; font-weight: 700;
+  white-space: nowrap; max-width: 9em; overflow: hidden; text-overflow: ellipsis; vertical-align: middle;
+}
+.trk-row__actions { flex: 0 0 auto; display: flex; align-items: center; }
+.trk-iconbtn {
+  min-width: 32px; min-height: 36px; padding: 0 4px; border: 0; background: transparent;
+  color: var(--slate-600); cursor: pointer; border-radius: 6px; font-size: .85rem; line-height: 1;
+}
+.trk-iconbtn:hover:not(:disabled) { background: var(--bg-light); }
+.trk-iconbtn:disabled { opacity: .3; cursor: default; }
+.trk-row__actions .trk-iconbtn:last-child { color: var(--red); }
+.trk-row__body { padding: 4px 10px 10px; border-top: 1px solid var(--border); }
+.trk-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px 10px; }
+.trk-field { min-width: 0; }
+.trk-field--wide { grid-column: 1 / -1; }
+.trk-field > label { display: block; font-size: .76rem; font-weight: 600; color: var(--slate-600); margin: 6px 0 3px; }
+.trk-field input[type="text"], .trk-field textarea {
+  width: 100%; min-width: 0; border: 1px solid var(--border-dark); border-radius: 6px;
+  padding: 6px 8px; min-height: 38px; background: var(--white); color: var(--text); font: inherit; font-size: .85rem;
+}
+.trk-field textarea { resize: vertical; line-height: 1.5; }
+.trk-field input:focus, .trk-field textarea:focus { outline: none; border-color: var(--blue); }
+.trk-due { display: flex; align-items: center; gap: 4px; position: relative; }
+.trk-due input[type="text"] { flex: 1 1 auto; }
+.trk-due__btn { flex: 0 0 auto; border: 1px solid var(--border-dark); background: var(--white); }
+/* The native picker stays in the DOM (showPicker needs a rendered input) but out of
+   sight; a browser without showPicker gets it shown instead (.is-visible). */
+.trk-due__pick { position: absolute; inset-inline-end: 0; bottom: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; border: 0; padding: 0; }
+.trk-due__pick.is-visible {
+  position: static; width: auto; height: auto; opacity: 1; pointer-events: auto;
+  border: 1px solid var(--border-dark); border-radius: 6px; padding: 4px; min-height: 38px; background: var(--white); color: var(--text);
+}
 
 /* ---------- Live preview ---------- */
 .preview-frame {

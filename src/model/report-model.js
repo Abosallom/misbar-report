@@ -1,40 +1,83 @@
 // model/report-model.js — assemble the single ReportModel consumed by build-spec.
-// Auto-drafts from the tracker are shallow-merged with the reviewer's edits.
 // ONE hospital's numbers per model (KAMC or SGH): unchanged by the per-hospital work.
 // The per-hospital builders (KAMC / SGH / KAMC+SGH) live in model/hospital-report.js,
 // which calls this for each hospital with that hospital's own engine output and rows.
-import { autoDraft } from './drafts.js?v=v2026-10-11.2';
-import { analyseSendout, hasMaster } from './sendout.js?v=v2026-10-11.2';
+//
+// THE PROJECT TRACKER (2026-10-13, tracker CONTRACT §1.4): the model carries the NEW
+// «ملف متابعة المشروع» as ONE field, `projectTracker` (the tagged ProjectTracker the
+// upload screen parses / the settings cache holds, or null). Nothing is drafted from it
+// any more: the old tasksCurrent / tasksInternal split (model/drafts.js) and the
+// closed-task-once log (model/task-lifecycle.js, settings.taskLog) keyed on the OLD
+// file's Arabic categories and statuses — the new file has neither, a stable WBS id and
+// an explicit 'Completed' status, so the tracker slides show the document as it is.
+// drafts.js / task-lifecycle.js stay importable (their own tests, old backups), inert.
+import { analyseSendout, hasMaster } from './sendout.js?v=v2026-10-13.1';
+// The ProjectTracker's shape is owned by the ingest module (a leaf: no imports, no DOM).
+// isProjectTracker = the tag check: a value without TRACKER_FORMAT is the OLD format (an
+// install or a backup from before 2026-10-13) and is never fed on.
+import { isProjectTracker } from '../ingest/task-tracker.js?v=v2026-10-13.1';
+
+export { isProjectTracker };
+
+/**
+ * The ProjectTracker a report carries: the run's parsed one (state.parsed.tracker), else
+ * the persisted document (settings.cachedTracker — `{model, updatedAt}` as store.js
+ * writes it; a bare tagged tracker is tolerated), else null. Anything UNTAGGED — the old
+ * {tasks, challenges, risks} shape, a half-written cache — counts as "no tracker": no
+ * tracker slides, never the old rows under the new design and never a mock.
+ * Returns the very object (no copy): the review editor edits the model's tracker and
+ * persists it through store.updateCachedTracker, so the two must stay one document.
+ * @returns {Object|null} the ProjectTracker or null
+ */
+export function resolveProjectTracker(tracker, settings) {
+  if (isProjectTracker(tracker)) return tracker;
+  const ct = settings && settings.cachedTracker;
+  if (ct && isProjectTracker(ct.model)) return ct.model;
+  if (isProjectTracker(ct)) return ct;
+  return null;
+}
+
+/**
+ * The `projectTracker` a model built from (tracker, settings, edits) carries — the ONE rule
+ * every builder applies (buildReportModel here, hospital-report.js buildBothModel's top
+ * level): a review edit (`edits.projectTracker`, even null) wins, else
+ * resolveProjectTracker. An untagged edit counts as null, like an untagged cache.
+ * @returns {Object|null}
+ */
+export function projectTrackerFor(tracker, settings, edits) {
+  if (edits && edits.projectTracker !== undefined) {
+    return isProjectTracker(edits.projectTracker) ? edits.projectTracker : null;
+  }
+  return resolveProjectTracker(tracker, settings);
+}
 
 /**
  * buildReportModel({engineOutput, tracker, settings, reportDate, orders, sendoutMaster, edits}) -> ReportModel
  *
+ * `tracker` is the run's parsed ProjectTracker (state.parsed.tracker) or null; the model's
+ * `projectTracker` falls back to settings.cachedTracker (resolveProjectTracker).
+ *
  * edits is a partial override bundle from the review screen:
- *   { panels?, tasksCurrent?, tasksInternal?, challenges?, risks? }
- *   - panels is shallow-merged per key over the auto-drafted panels.
- *   - task/challenge/risk lists, when present, replace the auto-drafted list wholesale.
+ *   { projectTracker?, panels?, challenges?, risks? }
+ *   - projectTracker, when present (even null), replaces the resolved tracker.
+ *   - panels is shallow-merged per key over the (empty) default panels.
+ *   - challenges / risks, when present, replace the empty default list. They are MANUAL
+ *     content now (the new tracker file has no challenge / risk sheets): the single-hospital
+ *     deck renders its challenges slide only when they are non-empty.
  *
  * @returns {import('../contracts.js').ReportModel}
  */
 export function buildReportModel({
   engineOutput, tracker, settings, reportDate, orders, sendoutMaster, edits = {},
 }) {
-  // settings.taskLog drives the closed-task grace rule (model/task-lifecycle.js).
-  // Threading it here covers the automation path for free — the unattended run
-  // builds its model through this very function.
-  const draft = autoDraft(tracker, reportDate, { taskLog: settings && settings.taskLog });
+  const ed = edits || {};
+  const projectTracker = projectTrackerFor(tracker, settings, ed);
 
-  const draftPanels = {
-    supportRequired: draft.supportRequired,
-    completedTasks: draft.completedTasks,
-    plannedTasks: draft.plannedTasks,
-  };
-  const panels = { ...draftPanels, ...(edits.panels || {}) };
-
-  const tasksCurrent = edits.tasksCurrent ?? draft.tasksCurrent;
-  const tasksInternal = edits.tasksInternal ?? draft.tasksInternal;
-  const challenges = edits.challenges ?? ((tracker && tracker.challenges) || []);
-  const risks = edits.risks ?? ((tracker && tracker.risks) || []);
+  // supportRequired stays (build-spec's challenges slide reads it) but nothing drafts it:
+  // the old source — solutions of open challenges in the old file — no longer exists.
+  const panels = { supportRequired: [], ...(ed.panels || {}) };
+  const challenges = ed.challenges ?? [];
+  const risks = ed.risks ?? [];
 
   // Send-out attribution needs the ORDER ROWS (which the engine output does not
   // carry) AND the decrypted catalogue (which ships encrypted, so it cannot be
@@ -50,8 +93,7 @@ export function buildReportModel({
     kpi: engineOutput,
     sendout,
     panels,
-    tasksCurrent,
-    tasksInternal,
+    projectTracker,
     challenges,
     risks,
     scorecard: (settings && settings.scorecard) || [],

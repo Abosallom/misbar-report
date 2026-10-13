@@ -1,8 +1,15 @@
 // model/drafts.js — auto-draft the editable report content from the tracker.
 // Every output is a heuristic seed the user edits on the review screen.
+//
+// RETIRED for the report (2026-10-13, tracker CONTRACT §1.4): it drafts from the OLD
+// «ملف متابعة المشروع» shape (Arabic categories 'لين' / statuses 'مغلق', dd-mm-yyyy dues),
+// which the new task tracker replaced. No report model is built through it any more —
+// models carry the new file as `projectTracker` (model/report-model.js) and the tracker
+// slides show it as it is. Kept importable, unchanged, for its own tests and the inert
+// closed-task log (model/task-lifecycle.js); do not wire new code to it.
 import {
   LIST_EXTERNAL, LIST_INTERNAL, isGraceRow, taskKey,
-} from './task-lifecycle.js?v=v2026-10-11.2';
+} from './task-lifecycle.js?v=v2026-10-13.1';
 
 const CLOSED = 'مغلق'; // closed/done
 const CAT_INTERNAL = 'لين'; // فئة التقرير value that routes a task to the internal slide (داخلي)

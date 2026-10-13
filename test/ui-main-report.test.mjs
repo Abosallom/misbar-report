@@ -11,8 +11,9 @@
 //   3. the review wording — the hint names the main report and the file-name tag; no
 //      side-report banner for the main or the unscoped KAMC report, kept for SGH;
 //   4. published history — an unscoped main report records KAMC's numbers from its KAMC
-//      sub-model, EQUAL to what a KAMC report records for the same date; it never touches
-//      the task log; KAMC keeps snapshot + history + task log; SGH writes nothing;
+//      sub-model, EQUAL to what a KAMC report records for the same date; KAMC keeps
+//      snapshot + history; SGH writes nothing; NO report type writes the (retired,
+//      2026-10-13) closed-task log;
 //   5. the automation publishes the main report (historic names, the real combined
 //      model) and keeps TAT / lab files / history on KAMC's rows and numbers.
 // SYNTHETIC rows only (made-up ids, labs and tests); the hospital name/id pairs are the
@@ -76,16 +77,17 @@ const sghRows = () => [
 ];
 const thirdRows = () => [row(THIRD, 'Lab Gamma', 'Assay Z', '2026-10-01', { col: '2026-10-01' })];
 
-// A tracker with an external task, an internal one and a CLOSED one (its single grace
-// showing is exactly what a main report must not spend).
+// A SYNTHETIC tagged ProjectTracker (UPDATED 2026-10-13, tracker CONTRACT §1.2 — the old
+// {tasks, challenges, risks} fixture is now "no tracker"): an open task, a delayed one and
+// a completed one (under the retired lifecycle a closed row's one grace showing was what
+// a report "spent" — nothing spends anything now).
 const TRACKER = () => ({
-  tasks: [
-    { task: 'مهمة خارجية', status: 'مستمر', category: 'نوبكو', hidden: false },
-    { task: 'مهمة داخلية', status: 'مستمر', category: 'لين', hidden: false },
-    { task: 'مهمة مغلقة', status: 'مغلق', category: 'نوبكو', hidden: false },
-  ],
-  challenges: [],
-  risks: [],
+  format: 'misbar-task-tracker-v1', fileName: 'synthetic-tracker.xlsx', loadedAt: '2026-10-07T06:00:00.000Z', editedAt: null, warnings: [],
+  tasks: [['1.1', 'In Progress'], ['1.2', 'Delayed'], ['1.3', 'Completed']].map(([wbs, status]) => ({
+    id: wbs, wbs, track: 'Track Q', milestone: 'Milestone Q', workstream: 'WS', workPackage: 'WP', task: `Synthetic ${wbs}`,
+    taskType: 'Deliverable', organization: 'NUPCO / LEAN', owner: 'Owner Q', priority: 'Medium', status, due: '2026-10-20',
+    predecessor: '', nextAction: '', definitionOfDone: '', notes: '',
+  })),
 });
 
 const SETTINGS = () => ({
@@ -282,27 +284,28 @@ test('history PROOF: a main report for D records exactly the numbers a KAMC repo
   }
 });
 
-test('history: the main report never touches the task log; KAMC still writes it; SGH writes nothing', () => {
+// UPDATED 2026-10-13 (tracker CONTRACT §1.4): was "the main report never touches the task
+// log; KAMC still writes it". The closed-task log is retired, so NO report type writes it —
+// not even when a legacy caller still hands recordShownTasks — and an existing log survives
+// byte for byte. The numbers rules are unchanged.
+test('history: NO report type touches the task log; KAMC + main record numbers; SGH writes nothing', () => {
   const rows = [...kamcRows(), ...sghRows()];
   const build = (h) => modelFor(loadedState(rows, { reportHospital: h }), memStore(), compute, quiet);
+  const log = { 'ext|x': { openOn: '2026-10-01', closedOn: '2026-10-01' } };
 
   const kamc = build('kamc');
-  assert.ok(kamc.tasksCurrent.length > 0, 'the fixture shows tasks');
   const k = record(kamc);
-  assert.equal(k.shown.length, 1, 'KAMC: recordShownTasks called');
-  assert.ok(Object.keys(k.doc.taskLog || {}).length > 0, 'KAMC: taskLog written');
+  assert.deepEqual(k.shown, [], 'KAMC: recordShownTasks never called');
+  assert.equal(k.doc.taskLog, undefined, 'KAMC: taskLog untouched');
+  assert.equal(k.snapshots.length, 1, 'KAMC: the numbers ARE recorded');
+  assert.deepEqual(record(kamc, { ...SETTINGS(), taskLog: log }).doc.taskLog, log, 'KAMC: an existing log survives');
 
   const both = build('both');
-  assert.ok(both.tasksCurrent.length > 0, 'the main model carries the drafted lists too');
   const b = record(both);
   assert.deepEqual(b.shown, [], 'main report: recordShownTasks never called');
   assert.equal(b.doc.taskLog, undefined, 'main report: taskLog untouched');
   assert.equal(b.snapshots.length, 1, '…while the numbers ARE recorded');
-
-  // An existing log survives a main report byte for byte.
-  const log = { 'ext|x': { openOn: '2026-10-01', closedOn: '2026-10-01' } };
-  const kept = record(both, { ...SETTINGS(), taskLog: log });
-  assert.deepEqual(kept.doc.taskLog, log);
+  assert.deepEqual(record(both, { ...SETTINGS(), taskLog: log }).doc.taskLog, log, 'main: an existing log survives');
 
   const s = record(build('sgh'));
   assert.deepEqual(s.snapshots, [], 'SGH: no snapshot');
@@ -338,7 +341,11 @@ test('history: a main report is recorded only unscoped — a scope on it or on i
  *  builder; only the I/O seams are faked. */
 async function automate(pulled, { options = {}, deps = {}, settings = SETTINGS() } = {}) {
   const seen = { produced: null, labs: null, tat: null };
+  // A real session: the uploaded tracker is ALSO the persisted document (upload and every
+  // edit write both) — and the automation publishes the persisted one (tracker CONTRACT
+  // §1.8; UPDATED 2026-10-13 review R-2: state.parsed.tracker is no longer read by the run).
   const store = memStore({
+    cachedTracker: { model: TRACKER(), updatedAt: '2026-10-07T06:00:00.000Z' },
     ...settings,
     grafana: { enabled: true, baseUrl: 'https://grafana.test', accessToken: 'tok', dataKey: '' },
   });
@@ -384,6 +391,7 @@ test('automation: the deck is the combined report — the real buildBothModel ov
   const m = seen.produced;
   assert.equal(m.hospital, 'both');
   assert.equal(state.reportModel, m);
+  assert.deepEqual(m.projectTracker, state.parsed.tracker, 'the deck\'s model carries the session\'s (persisted) project tracker');
   // Byte-for-byte the main report the review would build from the same load and date.
   const direct = hospitalReport.buildBothModel({
     kamcRows: state.parsed.orders, sghRows: state.parsed.ordersByHospital.sgh, settings,

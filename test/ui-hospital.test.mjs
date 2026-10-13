@@ -331,7 +331,11 @@ test('recordRunSnapshot: SGH / unknown types (and a BOTH model with no KAMC sub-
   }
 });
 
-test('recordRunSnapshot: the KAMC report (explicit or absent hospital) records as before', () => {
+// UPDATED 2026-10-13 (tracker CONTRACT §1.4): the KAMC report still records its numbers,
+// but NOTHING writes the task log any more — the old tracker's closed-task-once lifecycle
+// is retired (the new tracker slides show the document as it is), even for a model that
+// still carries old task lists.
+test('recordRunSnapshot: the KAMC report (explicit or absent hospital) records its numbers, never the task log', () => {
   for (const over of [{}, { hospital: 'kamc' }, { hospital: null }]) {
     const st = spyStore();
     const calls = { snapshot: 0, tasks: 0 };
@@ -341,7 +345,7 @@ test('recordRunSnapshot: the KAMC report (explicit or absent hospital) records a
       recordShownTasks: () => { calls.tasks += 1; return {}; },
     });
     assert.equal(st.snapshots.length, 1, JSON.stringify(over));
-    assert.deepEqual(calls, { snapshot: 1, tasks: 1 });
+    assert.deepEqual(calls, { snapshot: 1, tasks: 0 });
   }
 });
 
@@ -640,13 +644,17 @@ test('shareText: KAMC / SGH (single-hospital) name their type; SGH prints «–�
   assert.ok(b.includes('• ملغاة: 2'));
 });
 
-test('slide chips: KAMC / SGH offer all six; KAMC + SGH only the three its deck honours', () => {
+// UPDATED 2026-10-13 (tracker CONTRACT §1.5): the «متابعة المشروع» chip ('tracker')
+// replaced «المهام» ('action', retired with the old tracker) and is offered in ALL three
+// report types — the tracker slides sit in the main KAMC + SGH deck too.
+test('slide chips: KAMC / SGH offer all six; KAMC + SGH the four its deck honours (tracker included)', () => {
   const keys = (h) => slideTogglesFor(h).map((t) => t.key);
-  const all = ['execFunnel', 'monthly', 'sendout', 'compliance', 'action', 'challenges'];
+  const all = ['execFunnel', 'monthly', 'sendout', 'compliance', 'tracker', 'challenges'];
   assert.deepEqual(keys('kamc'), all);
   assert.deepEqual(keys('sgh'), all);
-  // build-spec-both.js reads on('monthly' | 'sendout' | 'compliance') only (decision 10).
-  assert.deepEqual(keys('both'), ['monthly', 'sendout', 'compliance']);
+  // build-spec-both.js reads on('monthly' | 'sendout' | 'compliance' | 'tracker').
+  assert.deepEqual(keys('both'), ['monthly', 'sendout', 'compliance', 'tracker']);
+  for (const h of ['kamc', 'sgh', 'both']) assert.ok(!keys(h).includes('action'), `${h}: the retired «المهام» chip`);
 });
 
 test('upload notices: SGH lines are KEPT (counted + pointed at the review screen), third hospitals excluded', () => {

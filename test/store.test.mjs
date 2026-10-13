@@ -13,6 +13,7 @@ import {
   AUTOMATION_SEED,
 } from '../src/seeds/defaults.js';
 import * as store from '../src/store.js';
+import { TRACKER_FORMAT, TASK_FIELDS } from '../src/ingest/task-tracker.js';
 // The delta-mode enum has exactly ONE owner (model/delta-baseline.js). The seed is
 // pinned against DEFAULT_DELTA_MODE below so a future default change cannot land in
 // the model without the stored seed following it.
@@ -214,7 +215,9 @@ test('v1 stored doc migrates to v2: cancelledByMonth reset to the manual seed, o
   assert.equal(s.snapshot.asOf, '2026-06-01');
   assert.equal(s.grafana.baseUrl, 'https://g/h');
   assert.equal(s.grafana.panelId, 12);
-  assert.equal(s.cachedTracker.model.tasks.length, 1);
+  // The one deliberate exception (2026-10-13): the cache holds the OLD tracker's
+  // untagged shape, which nothing reads any more — dropped, not preserved.
+  assert.equal(s.cachedTracker, null, 'old-format tracker cache dropped');
   // Persisted with the bump so the migration runs only once.
   const stored = JSON.parse(mock.getItem(SETTINGS_KEY));
   assert.equal(stored.schemaVersion, store.SCHEMA_VERSION);
@@ -493,20 +496,38 @@ test('load backfills missing grafana/cachedTracker on an old (v1) stored doc dur
 });
 
 // ---- updateCachedTracker ----------------------------------------------------
+// A SYNTHETIC ProjectTracker document (contracts.js) — invented tasks only.
+function trackerDoc(over = {}) {
+  const task = (wbs, extra = {}) => {
+    const t = {};
+    for (const f of TASK_FIELDS) t[f] = '';
+    return { ...t, id: wbs, wbs, task: `Synthetic task ${wbs}`, status: 'In Progress', ...extra };
+  };
+  return {
+    format: TRACKER_FORMAT, fileName: 'synthetic.xlsx', loadedAt: '2026-10-13T08:00:00.000Z',
+    editedAt: null, warnings: [], tasks: [task('1.1.1'), task('1.2.1', { status: 'Deleyed', due: 'daily' })],
+    ...over,
+  };
+}
+// The OLD tracker's untagged cache shape, as every pre-2026-10-13 install holds it.
+const OLD_TRACKER = { tasks: [{ num: 1, task: 'مهمة قديمة', status: 'مفتوح', category: 'لين' }], challenges: [], risks: [] };
+
 test('updateCachedTracker stores, clears, and enforces the size cap', () => {
   fresh();
   store.loadSettings();
 
-  const model = { tasks: [{ task: 'a' }, { task: 'b' }], challenges: [], risks: [] };
+  const model = trackerDoc();
   const out = store.updateCachedTracker(model);
   assert.ok(out.cachedTracker);
   assert.deepEqual(out.cachedTracker.model, model);
+  assert.notEqual(out.cachedTracker.model, model, 'stored as a copy, not the live object');
   assert.ok(typeof out.cachedTracker.updatedAt === 'string' && out.cachedTracker.updatedAt.length > 0);
 
   // Persisted across a reload.
   store.__resetForTests();
   const reloaded = store.loadSettings();
   assert.equal(reloaded.cachedTracker.model.tasks.length, 2);
+  assert.deepEqual(reloaded.cachedTracker.model, model);
 
   // Clearing with null.
   const cleared = store.updateCachedTracker(null);
@@ -515,9 +536,85 @@ test('updateCachedTracker stores, clears, and enforces the size cap', () => {
   assert.equal(store.loadSettings().cachedTracker, null);
 
   // Size cap: a model serializing to >= 300k chars must throw and not persist.
-  const huge = { tasks: [{ task: 'x'.repeat(300000) }] };
+  const huge = trackerDoc({ tasks: [{ id: 'x', wbs: 'x', notes: 'x'.repeat(300000) }] });
   assert.throws(() => store.updateCachedTracker(huge), /كبير|الحد|300000/);
   assert.equal(store.loadSettings().cachedTracker, null);
+});
+
+test('updateCachedTracker keeps a website edit (editedAt) and persists only the documented keys', () => {
+  fresh();
+  store.loadSettings();
+  store.updateCachedTracker(trackerDoc());
+  // An edit: the caller changes a field, adds a row, stamps editedAt — and the live
+  // object carries UI-only keys that must not reach localStorage.
+  const edited = trackerDoc({ editedAt: '2026-10-13T09:30:00.000Z', uiState: { open: 1 } });
+  edited.tasks[0].owner = 'Synthetic Owner';
+  edited.tasks[0]._expanded = true;
+  edited.tasks.push({ id: 'new-1', task: 'Added on the website' });
+  store.updateCachedTracker(edited);
+
+  store.__resetForTests();
+  const m = store.loadSettings().cachedTracker.model;
+  assert.equal(m.editedAt, '2026-10-13T09:30:00.000Z', 'editedAt survives a reload');
+  assert.equal(m.fileName, 'synthetic.xlsx');
+  assert.equal(m.tasks[0].owner, 'Synthetic Owner');
+  assert.equal(m.tasks.length, 3);
+  assert.equal(m.tasks[2].wbs, '', 'an added row is completed with empty-string fields');
+  assert.equal(m.uiState, undefined, 'unknown top-level key not persisted');
+  assert.equal(m.tasks[0]._expanded, undefined, 'unknown task key not persisted');
+  assert.deepEqual(Object.keys(m.tasks[2]).sort(), [...TASK_FIELDS].sort());
+});
+
+test('updateCachedTracker refuses the old untagged shape (it would be unreadable)', () => {
+  fresh();
+  store.loadSettings();
+  store.updateCachedTracker(trackerDoc());
+  assert.throws(() => store.updateCachedTracker(OLD_TRACKER), /صيغة/);
+  assert.throws(() => store.updateCachedTracker({ format: 'something-else', tasks: [] }), /صيغة/);
+  assert.equal(store.loadSettings().cachedTracker.model.format, TRACKER_FORMAT, 'the current cache is untouched');
+});
+
+test('a current-schema stored doc with an OLD-format tracker cache loads with it nulled, persisted once', () => {
+  const mock = fresh();
+  mock.setItem(
+    SETTINGS_KEY,
+    JSON.stringify({
+      schemaVersion: store.SCHEMA_VERSION,
+      tatLookup: { X: 1 },
+      cachedTracker: { model: OLD_TRACKER, updatedAt: '2026-10-01T00:00:00.000Z' },
+    }),
+  );
+  const s = store.loadSettings();
+  assert.equal(s.cachedTracker, null, 'old tracker never reaches the new slides / editor');
+  assert.equal(s.tatLookup.X, 1, 'nothing else touched');
+  const stored = JSON.parse(mock.getItem(SETTINGS_KEY));
+  assert.equal(stored.cachedTracker, null, 'the drop is written back, not redone every load');
+  // Malformed caches are not trackers either.
+  for (const bad of [5, { model: { format: TRACKER_FORMAT, tasks: 'x' }, updatedAt: 'y' }, { model: trackerDoc() }]) {
+    mock.setItem(SETTINGS_KEY, JSON.stringify({ schemaVersion: store.SCHEMA_VERSION, cachedTracker: bad }));
+    store.__resetForTests();
+    assert.equal(store.loadSettings().cachedTracker, null, `dropped: ${JSON.stringify(bad).slice(0, 60)}`);
+  }
+});
+
+test('a stored TAGGED tracker cache survives a load untouched (incl. editedAt)', () => {
+  const mock = fresh();
+  const ct = { model: trackerDoc({ editedAt: '2026-10-12T10:00:00.000Z' }), updatedAt: '2026-10-12T10:00:01.000Z' };
+  const raw = JSON.stringify({ schemaVersion: store.SCHEMA_VERSION, cachedTracker: ct });
+  mock.setItem(SETTINGS_KEY, raw);
+  assert.deepEqual(store.loadSettings().cachedTracker, ct);
+  assert.equal(mock.getItem(SETTINGS_KEY), raw, 'a clean same-version load writes nothing');
+});
+
+test('an OLDER-schema stored doc also drops an old-format tracker cache while migrating', () => {
+  for (const v of [1, 5, 8]) {
+    const mock = fresh();
+    mock.setItem(SETTINGS_KEY, JSON.stringify({
+      schemaVersion: v, cachedTracker: { model: OLD_TRACKER, updatedAt: '2026-07-01T00:00:00.000Z' },
+    }));
+    assert.equal(store.loadSettings().cachedTracker, null, `v${v}`);
+    assert.equal(JSON.parse(mock.getItem(SETTINGS_KEY)).cachedTracker, null, `v${v} persisted`);
+  }
 });
 
 // ---- reportOptions seeding + backfill ---------------------------------------
@@ -606,6 +703,21 @@ test('importSettings validates grafana and cachedTracker shapes', () => {
     () => store.importSettings(JSON.stringify({ schemaVersion: 1, cachedTracker: { model: {}, updatedAt: 5 } })),
     /cachedTracker\.updatedAt/,
   );
+  // A TAGGED model is validated as the tracker document.
+  assert.throws(
+    () => store.importSettings(JSON.stringify({ schemaVersion: 9, cachedTracker: { model: { format: TRACKER_FORMAT, tasks: {} }, updatedAt: 'y' } })),
+    /cachedTracker\.model\.tasks/,
+  );
+  assert.throws(
+    () => store.importSettings(JSON.stringify({ schemaVersion: 9, cachedTracker: { model: trackerDoc({ tasks: [5] }), updatedAt: 'y' } })),
+    /cachedTracker\.model\.tasks/,
+  );
+  assert.throws(
+    () => store.importSettings(JSON.stringify({ schemaVersion: 9, cachedTracker: { model: trackerDoc({ tasks: [{ id: 'x', notes: 'x'.repeat(300000) }] }), updatedAt: 'y' } })),
+    /كبير/,
+    'the cache cap applies to an imported tracker too',
+  );
+  assert.equal(store.loadSettings().cachedTracker, null, 'nothing persisted by a rejected import');
 });
 
 test('importSettings accepts valid grafana/cachedTracker and coerces enabled', () => {
@@ -616,7 +728,7 @@ test('importSettings accepts valid grafana/cachedTracker and coerces enabled', (
     JSON.stringify({
       schemaVersion: 1,
       grafana: { baseUrl: 'https://x/y', accessToken: 'tok', panelId: 7, enabled: 1 },
-      cachedTracker: { model: { tasks: [{ task: 'a' }] }, updatedAt: '2026-07-01T00:00:00.000Z' },
+      cachedTracker: { model: trackerDoc({ tasks: [{ id: 'a', wbs: 'a', task: 'a' }] }), updatedAt: '2026-07-01T00:00:00.000Z' },
     }),
   );
 
@@ -631,6 +743,50 @@ test('importSettings accepts valid grafana/cachedTracker and coerces enabled', (
   // A null cachedTracker import clears it.
   store.importSettings(JSON.stringify({ schemaVersion: 1, cachedTracker: null }));
   assert.equal(store.loadSettings().cachedTracker, null);
+});
+
+test('importing an old backup\'s untagged tracker cache keeps this device\'s tracker (and imports the rest)', () => {
+  fresh();
+  store.loadSettings();
+  store.updateCachedTracker(trackerDoc());
+  store.importSettings(JSON.stringify({
+    schemaVersion: 8,
+    tatLookup: { 'IMPORTED TEST': 4 },
+    cachedTracker: { model: OLD_TRACKER, updatedAt: '2026-07-01T00:00:00.000Z' },
+  }));
+  const s = store.loadSettings();
+  assert.equal(s.tatLookup['IMPORTED TEST'], 4, 'the old backup is still importable');
+  assert.equal(s.cachedTracker.model.format, TRACKER_FORMAT, 'the device\'s own tracker kept');
+  assert.equal(s.cachedTracker.model.tasks.length, 2);
+  assert.equal(s.cachedTracker.model.challenges, undefined, 'nothing of the old shape grafted on');
+  // …and on a device with no tracker, the old cache simply does not arrive.
+  fresh();
+  store.loadSettings();
+  store.importSettings(JSON.stringify({ schemaVersion: 8, cachedTracker: { model: OLD_TRACKER, updatedAt: 'x' } }));
+  assert.equal(store.loadSettings().cachedTracker, null);
+});
+
+test('an imported tracker REPLACES the device\'s document (never a key-wise merge) and is cleaned', () => {
+  fresh();
+  store.loadSettings();
+  store.updateCachedTracker(trackerDoc({ editedAt: '2026-10-13T09:00:00.000Z', fileName: 'device.xlsx' }));
+  const incoming = trackerDoc({ fileName: null, editedAt: null, bogus: 1, tasks: [{ id: 'z', wbs: 'z', task: 'Imported', extra: 'x' }] });
+  delete incoming.warnings; // a sparse document: missing keys must NOT be filled from the device's
+  store.importSettings(JSON.stringify({ schemaVersion: store.SCHEMA_VERSION, cachedTracker: { model: incoming, updatedAt: '2026-10-13T10:00:00.000Z' } }));
+  const ct = store.loadSettings().cachedTracker;
+  assert.equal(ct.updatedAt, '2026-10-13T10:00:00.000Z');
+  assert.equal(ct.model.fileName, null, 'not the device\'s fileName');
+  assert.equal(ct.model.editedAt, null, 'not the device\'s editedAt');
+  assert.deepEqual(ct.model.warnings, []);
+  assert.deepEqual(ct.model.tasks.map((t) => t.task), ['Imported'], 'tasks replaced wholesale');
+  assert.equal(ct.model.bogus, undefined);
+  assert.equal(ct.model.tasks[0].extra, undefined);
+  // export → import round-trips the document exactly.
+  const before = store.loadSettings().cachedTracker;
+  fresh();
+  store.loadSettings();
+  store.importSettings(JSON.stringify({ schemaVersion: store.SCHEMA_VERSION, cachedTracker: before }));
+  assert.deepEqual(store.loadSettings().cachedTracker, before);
 });
 
 // ---- pickImportKeys strips unknown grafana subkeys --------------------------
@@ -697,7 +853,7 @@ test('importSettings whitelists reportOptions keys, coerces flags, drops unknown
       schemaVersion: 2,
       reportOptions: {
         excludeNoTat: 1, // coerce → true
-        slides: { execFunnel: 0, monthly: 1, bogusSlide: true }, // bogus dropped
+        slides: { execFunnel: 0, monthly: 1, bogusSlide: true, tracker: 0 }, // bogus dropped
         kpiCards: { total: 0, evilCard: 1 }, // evil dropped
         labels: { total: 'الإجمالي' }, // string kept
         unknownSub: { x: 1 }, // whole key dropped
@@ -710,6 +866,7 @@ test('importSettings whitelists reportOptions keys, coerces flags, drops unknown
   assert.equal(ro.slides.execFunnel, false); // coerced from 0
   assert.equal(ro.slides.monthly, true); // coerced from 1
   assert.equal(ro.slides.bogusSlide, undefined); // unknown slide dropped
+  assert.equal(ro.slides.tracker, false); // the «متابعة المشروع» toggle is importable (coerced from 0)
   assert.equal(ro.slides.compliance, true); // untouched seed key survives the merge
   assert.equal(ro.slides.action, true);
   assert.equal(ro.kpiCards.total, false); // coerced from 0

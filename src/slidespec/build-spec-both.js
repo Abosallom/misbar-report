@@ -14,10 +14,14 @@
 // Same slide ids as the single-hospital deck, so every consumer (PDF export, the preview)
 // treats them alike. The variant changes NOTHING here: the BOTH deck has no action /
 // challenges slides (CONTRACT §1.10), and those were the only variant-dependent ones.
+// PROJECT TRACKER (2026-10-13): the «متابعة المشروع» slides (build-tracker.js, shared with
+// the single-hospital deck) follow compliance, before thanks, under the 'tracker' toggle —
+// a project-wide addition to the reference shape, identical for both variants, and absent
+// when no tracker is loaded. Nothing else in this deck changes.
 //
-// SLIDE TOGGLES. reportOptions.slides.monthly / .sendout / .compliance switch those slides
-// off exactly as in the single-hospital deck (CONTRACT §1.10); cover, exec and thanks always
-// render. reportOptions.kpiCards.turnaround (explicit-true, like build-spec.js OPT_IN_CARDS)
+// SLIDE TOGGLES. reportOptions.slides.monthly / .sendout / .compliance (and .tracker) switch
+// those slides off exactly as in the single-hospital deck (CONTRACT §1.10); cover, exec and
+// thanks always render. reportOptions.kpiCards.turnaround (explicit-true, like build-spec.js OPT_IN_CARDS)
 // switches the monthly slide's turnaround block — line chart, navy card and both «KAMC فقط»
 // chips — and the block also needs both overall averages to exist (build-spec.js guard).
 // With the block off, the rest of the monthly slide moves down as one piece and sits
@@ -43,9 +47,12 @@
 //
 // HOSPITAL NAMES. The old "no hospital name on any slide" rule applies to the KAMC report
 // only (CONTRACT §1.13): this deck prints the names the reference prints.
-import { COLORS as C } from '../theme.js?v=v2026-10-11.2';
-import { AR_COUNTRY } from '../model/sendout.js?v=v2026-10-11.2';
-import { HOSPITALS } from '../model/hospital.js?v=v2026-10-11.2';
+import { COLORS as C } from '../theme.js?v=v2026-10-13.1';
+import { AR_COUNTRY } from '../model/sendout.js?v=v2026-10-13.1';
+import { HOSPITALS } from '../model/hospital.js?v=v2026-10-13.1';
+// The project-tracker slides — a leaf module (imports nothing from either spec file), so it
+// is safe to import at top level despite the cycle described below.
+import { buildTrackerSlides } from './build-tracker.js?v=v2026-10-13.1';
 // DEFAULT_LABELS (the registry) and SGH_TEXT (the reference's SGH sentences, shared with the
 // single-SGH deck so both print one source) come from build-spec.js.
 // CIRCULAR IMPORT, SAFE ONLY AT CALL TIME: build-spec.js imports this file to dispatch
@@ -54,7 +61,7 @@ import { HOSPITALS } from '../model/hospital.js?v=v2026-10-11.2';
 // inside a function, never at this module's top level (that would be a TDZ ReferenceError)
 // — which is also why the palette below keeps its own literal hexes (the same values as
 // build-spec.js SGH_COLORS) instead of reading them at load time.
-import { DEFAULT_LABELS, SGH_TEXT } from './build-spec.js?v=v2026-10-11.2';
+import { DEFAULT_LABELS, SGH_TEXT } from './build-spec.js?v=v2026-10-13.1';
 
 // ---- palette added by the BOTH reference (not in theme.js) ---------------------------
 const KAMC_C = '#00897B';      // KAMC teal — slices, segments, dots, counts, tags
@@ -918,7 +925,6 @@ function buildThanks(m) {
  *                        deck is the same for both variants
  * @returns {import('../contracts.js').SlideSpec}
  */
-// eslint-disable-next-line no-unused-vars
 export function buildBothSpec(model, { variant = 'internal' } = {}) {
   const m = model || {};
   const slides = m.reportOptions?.slides;
@@ -931,6 +937,8 @@ export function buildBothSpec(model, { variant = 'internal' } = {}) {
   if (on('monthly')) middle.push(buildMonthly(m));
   if (on('sendout') && sendoutData) middle.push(buildCountries(m), buildLabs(m));
   if (on('compliance')) middle.push(buildCompliance(m));
+  // Project tracker: after compliance, before thanks; [] without a tracker.
+  if (on('tracker')) middle.push(...buildTrackerSlides(m.projectTracker, { reportDate: m.reportDate, variant, labels: labelOf(m) }));
   middle.forEach((s, i) => s.elements.push(pageFooter(i + 1)));
   return [buildCover(m), ...middle, buildThanks(m)];
 }

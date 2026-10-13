@@ -4,7 +4,8 @@
 // A scoped report (labs / shipments / order-date range, chosen on the review screen) is
 // a SIDE REPORT. What this suite pins:
 //   • recordRunSnapshot writes NOTHING for it — not settings.snapshot, not
-//     snapshotHistory, not the taskLog — and writes exactly as before when unscoped;
+//     snapshotHistory — and writes exactly as before when unscoped (numbers only: since
+//     2026-10-13 no report writes the closed-task taskLog — tracker CONTRACT §1.4);
 //   • its file names say so ('(مخصص)', and 'from-to' for a range) while an unscoped
 //     name stays byte-identical;
 //   • formatRangeAr's three shapes;
@@ -168,10 +169,13 @@ test('recordRunSnapshot: an unscoped model writes exactly as before', () => {
     assert.equal(st.snapshots.length, 1, `${name}: snapshot written`);
     assert.equal(st.snapshots[0].asOf, DATE);
     assert.equal(st.snapshots[0].numbers.completed, 5);
-    assert.deepEqual(w.calls, { snapshot: 1, tasks: 1 }, `${name}: both writers ran`);
-    assert.equal(st.docs.length, 2, `${name}: history doc + taskLog doc saved`);
+    // UPDATED 2026-10-13 (tracker CONTRACT §1.4): the closed-task log is retired — a
+    // legacy caller may still hand recordShownTasks, and it is never called; only the
+    // history doc is saved, with no taskLog key.
+    assert.deepEqual(w.calls, { snapshot: 1, tasks: 0 }, `${name}: numbers only`);
+    assert.equal(st.docs.length, 1, `${name}: history doc saved, no taskLog doc`);
     assert.equal(st.docs[0].snapshotHistory[DATE].completed, 5);
-    assert.ok(Object.keys(st.docs[1].taskLog).length > 0, `${name}: shown tasks recorded`);
+    assert.equal(st.docs[0].taskLog, undefined, `${name}: no taskLog written`);
   }
 });
 
@@ -185,7 +189,8 @@ test('recordRunSnapshot against the real store: scoped leaves settings byte-iden
   });
   assert.equal(s.raw(), before, 'scoped run: settings untouched');
 
-  // Unscoped: the same call records the snapshot, the history row and the task log.
+  // Unscoped: the same call records the snapshot and the history row — and leaves the
+  // (retired, inert) task log exactly as seeded (UPDATED 2026-10-13, tracker CONTRACT §1.4).
   s = realStore();
   const seeded = store.loadSettings();
   assert.equal(seeded.snapshotHistory && seeded.snapshotHistory[DATE], undefined, 'precondition');
@@ -197,7 +202,7 @@ test('recordRunSnapshot against the real store: scoped leaves settings byte-iden
   assert.equal(after.snapshot.asOf, DATE);
   assert.equal(after.snapshot.numbers.completed, 5);
   assert.equal(after.snapshotHistory[DATE].completed, 5);
-  assert.ok(Object.keys(after.taskLog || {}).length > 0, 'taskLog written');
+  assert.deepEqual(after.taskLog, seeded.taskLog, 'taskLog untouched');
   // No scope ever reaches settings, on either path.
   assert.equal(after.scope, undefined);
 });

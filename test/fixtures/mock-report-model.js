@@ -118,45 +118,54 @@ const BY_LAB = [
   { lab: 'Anwa  Medical Company',                 total: 7,   pipeline: 0,  awaitingResult: 7,  completed: 0,   onTime: 0,  resulted: 0,   resultedLate: 0,   rejected: 0,  late: 0,  latePct: 0 },
 ];
 
-// slide 5 (المهام) — current (external) tasks, i.e. the NUPCO variant's rows.
-// PLACEHOLDER content (public repo): same row counts, statuses, and date shapes as the
-// reference deck, but names and task texts are generic — real content comes from the
-// dropped Tracker.
-const TASKS_CURRENT = [
-  { num: 1, status: 'مستمر',      dueDate: 'يومي',       owner: 'مسؤول أ',        responsible: 'لين',        task: 'مهمة تشغيلية يومية تجريبية للمعاينة', category: '', hidden: false },
-  { num: 2, status: 'مستمر',      dueDate: 'يومي',       owner: 'مسؤول ب',        responsible: 'نوبكو',      task: 'مهمة تشغيلية يومية تجريبية ثانية',    category: '', hidden: false },
-  { num: 3, status: 'متأخر',      dueDate: '02-07-2026', owner: 'مسؤول ج / مسؤول د', responsible: 'لين/نوبكو',  task: 'مهمة تجريبية متأخرة عن موعدها',       category: '', hidden: false },
-  { num: 4, status: 'قيد التنفيذ', dueDate: '20-07-2026', owner: 'مسؤول هـ',       responsible: 'لين',        task: 'مهمة تجريبية قيد التنفيذ ١',          category: '', hidden: false },
-  { num: 5, status: 'قيد التنفيذ', dueDate: '31-08-2026', owner: 'مسؤول د / مسؤول و', responsible: 'نوبكو/ لين', task: 'مهمة تجريبية قيد التنفيذ ٢',          category: '', hidden: false },
-  { num: 6, status: 'قيد التنفيذ', dueDate: '12-07-2026', owner: 'مسؤول د / مسؤول و', responsible: 'نوبكو/ لين', task: 'مهمة تجريبية قيد التنفيذ ٣',          category: '', hidden: false },
-  { num: 7, status: 'قيد التنفيذ', dueDate: '14-07-2026', owner: 'مسؤول هـ',       responsible: 'لين',        task: 'مهمة تجريبية قيد التنفيذ ٤',          category: '', hidden: false },
-  { num: 8, status: 'قيد التنفيذ', dueDate: '16-07-2026', owner: 'مسؤول ز / مسؤول ح', responsible: 'نوبكو/ لين', task: 'مهمة تجريبية قيد التنفيذ ٥',          category: '', hidden: false },
-];
+// The project tracker («متابعة المشروع» slides, src/slidespec/build-tracker.js) — a
+// ProjectTracker as src/ingest/task-tracker.js returns it. SYNTHETIC content (public repo:
+// never the user's workbook rows, nor paraphrases of them): deliberately silly invented
+// tasks, placeholder owners and Alpha / Beta / Gamma track and milestone names; only the
+// two organisation values are the parties' generic names. The SHAPE is deliberate, so the
+// preview and every deck test exercise each branch of the slide:
+//  · three tracks (6 / 5 / 7 rows) with merged milestones → two slides, 11 + 7 rows, no
+//    track split (the third track does not fit under the first two);
+//  · every status bucket: the six known ones (incl. the workbook's own 'Deleyed'), a word
+//    outside the vocabulary (printed verbatim), 'Not Found' and blank (printed «–»);
+//  · every due shape: ISO dates before / on / after the report date (2026-07-09), a
+//    day-first text date, free text ('daily') and blank — so overdue marking shows;
+//  · every priority, plus one blank.
+// It replaces the old fixture's tasksCurrent / tasksInternal (the retired «المهام» slide).
+const T = (wbs, track, milestone, task, organization, owner, priority, status, due) => ({
+  id: wbs, wbs, track, milestone, workstream: '', workPackage: '', task, taskType: '',
+  organization, owner, priority, status, due,
+  predecessor: '', nextAction: '', definitionOfDone: '', notes: '',
+});
+const PROJECT_TRACKER = {
+  format: 'misbar-task-tracker-v1',
+  fileName: 'sample-task-tracker.xlsx',
+  loadedAt: '2026-07-09T06:00:00.000Z',
+  editedAt: null,
+  warnings: [],
+  tasks: [
+    T('1.1.1', 'Track Alpha', 'Alpha One', 'Prepare the demo dataset for the preview deck', 'NUPCO / LEAN', 'Owner A / Owner B', 'High', 'Completed', '2026-06-20'),
+    T('1.1.2', 'Track Alpha', 'Alpha One', 'Review the sample dashboard colours and labels', 'LEAN', 'Owner C', 'Critical', 'In Progress', '2026-07-02'),
+    T('1.1.3', 'Track Alpha', 'Alpha One', 'Proofread the placeholder glossary page', 'NUPCO / LEAN', 'Owner A', 'High', 'Deleyed', '1/7/2026'),
+    T('1.2.1', 'Track Alpha', 'Alpha Two', 'Order the mock printer paper for the pilot room', 'NUPCO', 'Owner D', 'Medium', 'On Hold', '2026-07-09'),
+    T('1.2.2', 'Track Alpha', 'Alpha Two', 'Sketch three layout ideas for the welcome banner', 'NUPCO', 'Owner D', 'High', 'In Progress', ''),
+    T('1.3.1', 'Track Alpha', 'Alpha Three', 'Water the office plants on the demo floor', 'LEAN', 'Owner C', 'High', 'In Progress', 'daily'),
+    T('2.1.1', 'Track Beta', 'Beta One', 'Book the large room for the practice session', 'NUPCO / LEAN', 'Owner E', 'High', 'Completed', '2026-06-30'),
+    T('2.1.2', 'Track Beta', 'Beta One', 'Replace the broken projector cable before the dry run', 'NUPCO', 'Owner E', 'Critical', 'Blocked', '2026-07-05'),
+    T('2.2.1', 'Track Beta', 'Beta Two', 'Collect feedback cards from the mock audience', 'LEAN', 'Owner F', 'Medium', 'Not Started', '2026-08-15'),
+    T('2.2.2', 'Track Beta', 'Beta Two', 'Translate the sample flyer into a second language', 'LEAN', 'Owner F', 'Low', 'Awaiting vendor', '2026-07-01'),
+    T('2.3.1', 'Track Beta', 'Beta Three', 'Archive last quarter\'s practice slides', 'NUPCO / LEAN', 'Owner B', '', 'Not Found', '2026-07-03'),
+    T('3.1.1', 'Track Gamma', 'Gamma One', 'Pick a name for the fictional mascot', 'NUPCO', 'Owner G', 'Critical', 'In Progress', '2026-06-25'),
+    T('3.1.2', 'Track Gamma', 'Gamma One', 'Bake cookies for the imaginary launch party', 'NUPCO', 'Owner G', 'High', 'Completed', '2026-07-08'),
+    T('3.1.3', 'Track Gamma', 'Gamma One', 'Count the chairs in the training corner', 'NUPCO', 'Owner H', 'Medium', 'In Progress', ''),
+    T('3.1.4', 'Track Gamma', 'Gamma One', 'Test the doorbell chime in the lobby', 'NUPCO / LEAN', 'Owner A', 'High', '', '2026-07-20'),
+    T('3.1.5', 'Track Gamma', 'Gamma One', 'Repaint the whiteboard frame in sample blue', 'LEAN', 'Owner H', 'High', 'Delayed', '2026-07-06'),
+    T('3.1.6', 'Track Gamma', 'Gamma One', 'Label the storage boxes with fake codes', 'NUPCO', 'Owner G', 'Medium', 'In Progress', '2026-09-30'),
+    T('3.1.7', 'Track Gamma', 'Gamma One', 'Sort the demo stickers by colour', 'NUPCO', 'Owner H', 'Low', 'In Progress', ''),
+  ],
+};
 
-// slide 5 (المهام) — INTERNAL variant rows (the NUPCO variant prints TASKS_CURRENT
-// instead; since 2026-07-19 the variant changes the task ROWS, not slide presence).
-// PLACEHOLDER content, but the SHAPE is deliberate:
-//  · category is 'لين' (2026-08-04, was 'داخلي'). This array feeds build-spec DIRECTLY,
-//    so nothing re-derives it — and the internal report is defined as the لين-category
-//    actions (drafts.js splits the Tracker on exactly that value). 'داخلي' was a string
-//    the real pipeline never produces, i.e. the fixture disagreed with the rule it stands
-//    in for.
-//  · the statuses now cover FOUR of the five STATUS_FILL chips (قيد التنفيذ · متأخر ·
-//    مغلق · مستمر) instead of five identical 'قيد التنفيذ' rows, so the tasks slide's
-//    status-chip colours are actually exercised by the preview and the smoke render.
-//    The مغلق row stands for a lifecycle GRACE row — a task closed since the previous
-//    report, shown once in green and then dropped.
-// Row COUNT is unchanged (5) on purpose: the tests that pin task counts read the real
-// Tracker samples, not this fixture.
-const TASKS_INTERNAL = [
-  { num: 1, status: 'قيد التنفيذ', dueDate: '16-07-2026', owner: 'مسؤول أ', responsible: 'لين', task: 'مهمة داخلية تجريبية ١', category: 'لين', hidden: false },
-  { num: 2, status: 'قيد التنفيذ', dueDate: '10-07-2026', owner: 'مسؤول أ', responsible: 'لين', task: 'مهمة داخلية تجريبية ٢', category: 'لين', hidden: false },
-  { num: 3, status: 'متأخر',      dueDate: '09-07-2026', owner: 'مسؤول ب', responsible: 'لين', task: 'مهمة داخلية تجريبية ٣ متأخرة عن موعدها', category: 'لين', hidden: false },
-  { num: 4, status: 'مغلق',       dueDate: '09-07-2026', owner: 'مسؤول ب', responsible: 'لين', task: 'مهمة داخلية تجريبية ٤ أُغلقت منذ التقرير السابق', category: 'لين', hidden: false },
-  { num: 5, status: 'مستمر',      dueDate: 'يومي',       owner: 'مسؤول أ', responsible: 'لين', task: 'مهمة داخلية تجريبية ٥ مستمرة', category: 'لين', hidden: false },
-];
-
-// slide 6 (التحديات والمخاطر) — challenges & risks. PLACEHOLDER.
+// التحديات والمخاطر slide — challenges & risks. PLACEHOLDER.
 const CHALLENGES = [
   { id: 'c1', title: '', desc: 'تحدٍ تجريبي أول للمعاينة',  impact: 'متوسط', owner: 'جهة أ', status: '', solution: 'إجراء وقائي تجريبي أول' },
   { id: 'c2', title: '', desc: 'تحدٍ تجريبي ثانٍ للمعاينة', impact: 'حرج',   owner: 'جهة ب', status: '', solution: 'إجراء وقائي تجريبي ثانٍ' },
@@ -204,7 +213,7 @@ export const MOCK_REPORT_MODEL = {
     // card simply reads '437 · +47 · تشمل المرفوضة' instead of '422 · +47 · …'.
     deltas: { total: 0, collected: 0, dispatched: 0, received: 0, completed: 47, rejected: 0, awaitingDispatch: 0, shippedNotReceived: 0, awaitingResults: 0, lateNoResult: 0 },
   },
-  panels: { // PLACEHOLDER bullets (public repo) — real content is auto-drafted from the Tracker
+  panels: { // PLACEHOLDER bullets (public repo) — once drafted from the old Tracker; supportRequired still feeds the challenges slide
     completedTasks: [
       'بند منجز تجريبي أول للمعاينة',
       'بند منجز تجريبي ثانٍ للمعاينة',
@@ -219,14 +228,15 @@ export const MOCK_REPORT_MODEL = {
       'بند دعم مطلوب تجريبي ثالث للمعاينة',
     ],
   },
-  tasksCurrent: TASKS_CURRENT,
-  tasksInternal: TASKS_INTERNAL,
+  projectTracker: PROJECT_TRACKER,
+  // MANUAL review-screen content since the new tracker; non-empty, so the challenges slide
+  // still renders in the default deck (it needs its toggle AND content).
   challenges: CHALLENGES,
   risks: RISKS,
   scorecard: SCORECARD_SEED,
   displayNames: {}, // BY_TEST already carries short chart labels
-  // Presentation options unset (undefined) → build-spec applies its defaults: all 7
-  // slides on, all 7 KPI cards on, DEFAULT_LABELS text. No manual number overrides.
+  // Presentation options unset (undefined) → build-spec applies its defaults: every
+  // default-on slide on, all 7 KPI cards on, DEFAULT_LABELS text. No manual number overrides.
   // Both fields are the byte-stable "defaults" case, so the mock render is unchanged.
   reportOptions: undefined,
   overrides: {},

@@ -5,11 +5,11 @@
 // build-spec reads from the very same predicate. A local re-derivation here is exactly
 // how a filename would one day say «مخصص» while the cover says nothing (or the reverse).
 // scope.js is pure (no DOM, no vendor, no ar.js back-edge), so this adds no cycle.
-import { isScoped, normalizeScope } from '../model/scope.js?v=v2026-10-11.2';
+import { isScoped, normalizeScope } from '../model/scope.js?v=v2026-10-13.1';
 // The hospital registry's short codes (KAMC / SGH) are what the file-name tag, the report
 // type pills and the share text print — read from the ONE registry, never re-typed here.
 // hospital.js is pure (no imports at all), so this adds no cycle either.
-import { HOSPITALS } from '../model/hospital.js?v=v2026-10-11.2';
+import { HOSPITALS } from '../model/hospital.js?v=v2026-10-13.1';
 
 /** Join ids for a sentence: Arabic comma, tolerant of a bare string or a missing list. */
 const joinIds = (ids) => [].concat(ids == null ? [] : ids).map(String).join('، ');
@@ -47,7 +47,7 @@ export const STR = {
   },
   upload: {
     title: 'رفع الملفات',
-    subtitle: 'ارفع ملف الطلبات (CSV) وملف متابعة المشروع (Excel) للبدء.',
+    subtitle: 'ارفع ملف الطلبات (CSV) للبدء، ومعه ملف متابعة المشروع (Excel) إن أردت شرائح المتابعة.',
     grafanaTitle: 'السحب المباشر من Grafana',
     grafanaFetch: 'سحب البيانات مباشرة',
     grafanaFetching: 'جاري السحب…',
@@ -64,7 +64,10 @@ export const STR = {
     csvZoneTitle: 'ملف الطلبات (CSV)',
     csvZoneHint: 'اسحب ملف KAMC Order details هنا، أو اضغط للاختيار',
     trackerZoneTitle: 'ملف متابعة المشروع (Excel)',
-    trackerZoneHint: 'اسحب ملف Misbar Project Tracker هنا، أو اضغط للاختيار',
+    // The NEW file (2026-10-13): MISBAR Task Tracker — sheets «Hierarchical Tracker» +
+    // «Portfolio Tracker». The old Arabic-sheet tracker is rejected by the parser with its
+    // own message (ingest/task-tracker.js), shown in this zone.
+    trackerZoneHint: 'اسحب ملف MISBAR Task Tracker (Hierarchical / Portfolio) هنا، أو اضغط للاختيار — اختياري',
     pick: 'اختيار ملف',
     parsing: 'جاري التحليل…',
     csvSummaryTitle: 'ملخص ملف الطلبات',
@@ -74,15 +77,24 @@ export const STR = {
     cancelled: 'الملغاة',
     dateRange: 'الفترة',
     tasks: 'المهام',
-    challenges: 'التحديات',
-    risks: 'المخاطر',
+    // The tracker summary card (screen-upload.js): parser notes (sheet disagreements…),
+    // and — when the file replaced a document edited on the website — one line saying so,
+    // because the upload silently overwrote those edits (tracker CONTRACT §1.3).
+    trackerWarningsTitle: 'ملاحظات على ملف المتابعة',
+    trackerEditsReplaced: (when) => `استبدل هذا الملف تعديلات الموقع السابقة على متابعة المشروع${when ? ` (آخر تعديل ${when})` : ''}.`,
+    // A rejected tracker upload leaves the previous document active — the zone names it.
+    trackerStillUsing: (name) => `لم يُعتمد الملف المرفوع — ما زال المعتمد: ${name}`,
+    trackerModuleMissing: 'وحدة قراءة ملف متابعة المشروع غير متوفرة — لم يُحمَّل الملف.',
+    // No tracker loaded: the report goes ahead without the tracker slides.
+    trackerOptional: 'ملف متابعة المشروع اختياري: بدونه لا تظهر شرائح «متابعة المشروع» في التقرير.',
     errorsTitle: 'أخطاء أثناء التحليل',
     unmatchedTitle: 'فحوصات بدون مدة معيارية (TAT)',
     unmatchedHint: 'هذه الفحوصات غير موجودة في جدول المدد المعيارية. أضف المدة (بالأيام) لكل منها:',
     unmatchedDays: 'المدة (أيام)',
     unmatchedSaved: 'تم الحفظ',
     proceed: 'متابعة للمراجعة',
-    proceedNeedBoth: 'ارفع الملفين للمتابعة',
+    // The tracker is OPTIONAL (tracker CONTRACT §1.7): only the orders gate «متابعة».
+    proceedNeedOrders: 'ارفع ملف الطلبات (أو اسحب البيانات مباشرة) للمتابعة',
     running: 'جاري تشغيل المحرك…',
     loadSamples: 'تحميل عينات',
     mockLoaded: 'تم تحميل بيانات تجريبية',
@@ -207,13 +219,8 @@ export const STR = {
       // The generate click found a different report type than the one on screen.
       changed: 'تغيّر نوع التقرير قبل التوليد ولم يُولَّد شيء — راجع التقرير المعروض.',
     },
-    panelsTitle: 'نقاط الشريحة الثانية',
-    panelSupport: 'الدعم المطلوب',
-    panelCompleted: 'المهام المنجزة',
-    panelPlanned: 'المهام المخطط لها',
-    panelHint: 'نقطة واحدة في كل سطر.',
-    tasksCurrentTitle: 'المهام الحالية (خارجية)',
-    tasksInternalTitle: 'المهام الداخلية',
+    // The old «الدعم المطلوب» and current/internal task cards were retired with the old
+    // tracker (2026-10-13); the project tracker has its own editor (STR.tracker).
     challengesTitle: 'التحديات',
     risksTitle: 'المخاطر',
     kpiTitle: 'المؤشرات (للقراءة فقط)',
@@ -309,7 +316,9 @@ export const STR = {
       execFunnel: 'الملخص',
       monthly: 'الشهرية',
       compliance: 'الالتزام',
-      action: 'المهام',
+      // «متابعة المشروع» — the new tracker slides, offered in ALL three report types
+      // (the old «المهام» chip, key 'action', is retired: the tracker replaced its slide).
+      tracker: 'متابعة المشروع',
       challenges: 'التحديات والمخاطر',
       sendout: 'محلي/دولي',
     },
@@ -357,6 +366,78 @@ export const STR = {
       closed: 'مغلق',
       inProgress: 'قيد التنفيذ',
     },
+  },
+  // «متابعة المشروع» — the project tracker document (ingest/task-tracker.js) and its
+  // website editor (ui/components.js trackerEditor), shared by the review screen (the
+  // editor card), the upload screen (summary card) and Settings (the cached document).
+  // Field values are the workbook's own words (English) and are never translated in the
+  // data; `status` / `priority` are only the Arabic DISPLAY labels of the known values,
+  // the same wording as the slide (slidespec/build-tracker.js).
+  tracker: {
+    title: 'متابعة المشروع',
+    hint: 'كل الأعمدة قابلة للتعديل. تُحفظ التعديلات تلقائيًا في هذا المتصفح، وتظهر في المعاينة وفي التقرير الآلي، ويستبدلها رفع ملف جديد.',
+    none: 'لم يُحمَّل ملف متابعة المشروع، فلن تظهر شرائح المتابعة. ارفع الملف من شاشة الرفع، أو أضف مهمة لبدء متابعة يدوية.',
+    empty: 'لا توجد مهام — لن تظهر شرائح المتابعة حتى تُضاف مهمة.',
+    manualName: 'متابعة يدوية',
+    count: (n) => `${n} مهمة`,
+    loaded: (when) => `حُمّل ${when}`,
+    edited: (when) => `آخر تعديل على الموقع ${when}`,
+    notEdited: 'بلا تعديلات على الموقع',
+    addTask: 'إضافة مهمة',
+    addAfter: 'إضافة مهمة بعد هذه',
+    expandAll: 'فتح كل المهام',
+    collapseAll: 'طي كل المهام',
+    moveUp: 'نقل المهمة لأعلى',
+    moveDown: 'نقل المهمة لأسفل',
+    remove: 'حذف المهمة',
+    removeConfirm: (label) => `حذف المهمة «${label}» من متابعة المشروع؟`,
+    untitled: 'مهمة بدون عنوان',
+    noTrack: 'بدون مسار',
+    noMilestone: 'بدون مرحلة',
+    pickDate: 'اختيار تاريخ من التقويم',
+    dueHint: 'تاريخ (يوم/شهر/سنة أو YYYY-MM-DD)، أو نص مثل daily',
+    suggestHint: 'اختر من القائمة أو اكتب قيمة جديدة',
+    saveFailed: 'تعذّر حفظ تعديلات متابعة المشروع في هذا المتصفح',
+    // The 16 editable task fields (every column of the workbook + Portfolio's Track /
+    // Milestone). Order = the editor's field order.
+    fields: {
+      task: 'المهمة / المخرج',
+      status: 'الحالة',
+      due: 'الاستحقاق',
+      owner: 'المسؤول',
+      priority: 'الأولوية',
+      organization: 'الجهة',
+      wbs: 'رقم WBS',
+      track: 'المسار',
+      milestone: 'المرحلة',
+      workstream: 'مسار العمل (Workstream)',
+      workPackage: 'حزمة العمل (Work Package)',
+      taskType: 'نوع المهمة',
+      predecessor: 'المهمة السابقة (WBS)',
+      nextAction: 'الإجراء التالي',
+      definitionOfDone: 'معيار الإنجاز',
+      notes: 'ملاحظات',
+    },
+    status: {
+      completed: 'مكتمل',
+      inProgress: 'قيد التنفيذ',
+      delayed: 'متأخر',
+      blocked: 'متوقف',
+      onHold: 'معلّق',
+      notStarted: 'لم يبدأ',
+      unknown: 'غير محدد',
+    },
+    priority: {
+      critical: 'حرجة',
+      high: 'عالية',
+      medium: 'متوسطة',
+      low: 'منخفضة',
+    },
+    // Settings → الاتصال المباشر: the persisted document.
+    settingsLabel: 'ملف متابعة المشروع المحفوظ',
+    settingsNone: 'لا يوجد',
+    settingsOld: 'ملف بالصيغة القديمة (لا يُستخدم)',
+    settingsClearConfirm: 'مسح ملف متابعة المشروع المحفوظ وكل تعديلاته على الموقع؟ لن تظهر شرائح المتابعة حتى يُرفع الملف من جديد.',
   },
   generate: {
     title: 'توليد التقارير',

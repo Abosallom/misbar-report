@@ -5,6 +5,12 @@
 // SEVEN-slide deck (both variants, since 2026-08-04):
 //   cover · execFunnel · monthly · compliance · action (المهام) · challenges (التحديات
 //   والمخاطر) · thanks.
+// SINCE 2026-10-13 THE «المهام» SLIDE IS GONE with the old tracker file: its slot holds the
+// project-tracker slides («متابعة المشروع», build-tracker.js, key 'tracker' — one or more
+// pages, the SAME for both variants, none when no tracker is loaded), and challenges is
+// manual content, rendered only when the operator entered a challenge or a risk. So the
+// default deck is cover · execFunnel · monthly · compliance · tracker… · thanks. The notes
+// below about the action slide and the variant's task rows are history.
 // The action slide used to carry the tasks table AND the support band AND the challenges +
 // risks tables; the user's 2026-08-04 review split the last three onto their own slide so
 // every block has room (tasks 15 → 18 rows, challenges/risks 3 → 10 rows each).
@@ -57,14 +63,16 @@
 // standing rule, unchanged for it). The SGH and BOTH decks print exactly the names the
 // reference deck prints («SGH», «مستشفى الألماني السعودي») — the reference supersedes the
 // old rule for those two report types only.
-import { COLORS as C, GEOM } from '../theme.js?v=v2026-10-11.2';
-import { AR_COUNTRY, AR_COUNTRY_SHORT, reflabShort } from '../model/sendout.js?v=v2026-10-11.2';
-import { isScoped, hasRange } from '../model/scope.js?v=v2026-10-11.2';
+import { COLORS as C, GEOM } from '../theme.js?v=v2026-10-13.1';
+import { AR_COUNTRY, AR_COUNTRY_SHORT, reflabShort } from '../model/sendout.js?v=v2026-10-13.1';
+import { isScoped, hasRange } from '../model/scope.js?v=v2026-10-13.1';
+// The project-tracker slides (shared with build-spec-both.js; a leaf module, no cycle).
+import { buildTrackerSlides, TRACKER_LABELS } from './build-tracker.js?v=v2026-10-13.1';
 // NAMESPACE import on purpose: build-spec-both.js may import helpers back from this file
 // (an ESM cycle). A namespace binding is only read inside buildSpec, at CALL time, when
 // both modules have finished evaluating — and it tolerates either a named
 // `buildBothSpec` export (the contract's name) or a default export.
-import * as bothSpecModule from './build-spec-both.js?v=v2026-10-11.2';
+import * as bothSpecModule from './build-spec-both.js?v=v2026-10-13.1';
 
 // EXPLICIT-TRUE kpiCards KEYS. reportOptions.kpiCards normally reads "on unless === false"
 // (see buildExec's cardDefs filter). The keys in this set INVERT that: they render only
@@ -114,6 +122,11 @@ export const DEFAULT_LABELS = {
   subheadTasks: 'المهام الحالية',
   subheadChallenges: 'تحديات',
   subheadRisks: 'المخاطر',
+  // Project tracker slides («متابعة المشروع», build-tracker.js): titles, the eight column
+  // headers and the two summary-strip words. Defined once in build-tracker.js (which cannot
+  // import this file — see there) and spread here so the labels editor lists them and an
+  // override reaches all three decks.
+  ...TRACKER_LABELS,
   // Cover + thanks
   // ALWAYS 'الأسبوعي' — for BOTH variants (user decision 2026-08-10). The deck's chips
   // now report a WEEK's activity window (see execDeltaLegendWeekWindow), so a cover that
@@ -309,7 +322,7 @@ export const DEFAULT_LABELS = {
   // مرفوضة sits away from its parent (see compRejected). Measured 7.071in at 9pt in the
   // deck's self-hosted Cairo against the table's 11.667in width → one line, +4.6in slack.
   compPartition: 'مجموع الطلبات = قبل الاستلام + بانتظار نتيجة + فحوصات مكتملة · المرفوضة ضمن المكتملة، والمتأخرة ضمن بانتظار نتيجة — لا تُجمع معهما',
-  // Tasks table headers
+  // Tasks table headers — RETIRED with the old action slide (registry parity orphans).
   taskStatus: 'الحالة',
   taskDue: 'تاريخ الإكتمال',
   taskOwner: 'المالك',
@@ -439,12 +452,24 @@ export const LABEL_NAMES = {
   titleExec: 'عنوان شريحة الملخص التنفيذي',
   titleMonthly: 'عنوان شريحة الطلبات الشهرية',
   titleCompliance: 'عنوان شريحة مقياس الالتزام',
-  titleAction: 'عنوان شريحة المهام',
+  titleAction: 'عنوان شريحة المهام (غير مستخدم حالياً)',
   titleChallenges: 'عنوان شريحة التحديات والمخاطر',
-  titleActionCont: 'عنوان شريحة تتمة المهام',
-  subheadTasks: 'عنوان فرعي: المهام الحالية',
+  titleActionCont: 'عنوان شريحة تتمة المهام (غير مستخدم حالياً)',
+  subheadTasks: 'عنوان فرعي: المهام الحالية (غير مستخدم حالياً)',
   subheadChallenges: 'عنوان فرعي: تحديات',
   subheadRisks: 'عنوان فرعي: المخاطر',
+  titleTracker: 'عنوان شريحة متابعة المشروع',
+  titleTrackerCont: 'عنوان شريحة تتمة متابعة المشروع',
+  trkTrack: 'عمود المتابعة: المسار',
+  trkMilestone: 'عمود المتابعة: المرحلة',
+  trkTask: 'عمود المتابعة: المهمة',
+  trkOrg: 'عمود المتابعة: الجهة',
+  trkOwner: 'عمود المتابعة: المسؤول',
+  trkPriority: 'عمود المتابعة: الأولوية',
+  trkStatus: 'عمود المتابعة: الحالة',
+  trkDue: 'عمود المتابعة: تاريخ الاستحقاق',
+  trkTotal: 'ملخص المتابعة: إجمالي المهام',
+  trkOverdue: 'ملخص المتابعة: متجاوزة الموعد',
   coverTitle: 'عنوان الغلاف',
   coverSubtitle: 'العنوان الفرعي للغلاف',
   coverPreparedBy: 'سطر جهة الإعداد في الغلاف',
@@ -485,12 +510,12 @@ export const LABEL_NAMES = {
   compRejected: 'عمود الالتزام: ↳ منها مرفوضة (جزء من المكتملة)',
   compLatePct: 'عمود الالتزام: نسبة الطلبات المتأخرة',
   compPartition: 'حاشية معادلة مجموع الطلبات (مقياس الالتزام)',
-  taskStatus: 'عمود المهام: الحالة',
-  taskDue: 'عمود المهام: تاريخ الإكتمال',
-  taskOwner: 'عمود المهام: المالك',
-  taskResponsible: 'عمود المهام: المسؤول',
-  taskAction: 'عمود المهام: الإجراء',
-  taskHash: 'عمود المهام: الرقم',
+  taskStatus: 'عمود المهام: الحالة (غير مستخدم حالياً)',
+  taskDue: 'عمود المهام: تاريخ الإكتمال (غير مستخدم حالياً)',
+  taskOwner: 'عمود المهام: المالك (غير مستخدم حالياً)',
+  taskResponsible: 'عمود المهام: المسؤول (غير مستخدم حالياً)',
+  taskAction: 'عمود المهام: الإجراء (غير مستخدم حالياً)',
+  taskHash: 'عمود المهام: الرقم (غير مستخدم حالياً)',
   supportTitle: 'عنوان لوحة الدعم المطلوب',
   funnelStage: 'ترويسة القمع: المرحلة',
   funnelCount: 'ترويسة القمع: العدد',
@@ -1358,7 +1383,7 @@ const SHIP_MIX_ORDER = ['completed', 'awaitingResult', 'inTransit', 'notShipped'
 // PAGINATION — AT MOST 12 ROWS A PAGE (user spec), FEWER WHEN ROWS WRAP. Geometry
 // mirrors the send-out lab table, the deck's other full-width Latin-name table: x 0.833,
 // w 11.667, rowH 0.361, table top 1.167 under a 9pt subtitle at y 0.722. A page's table
-// must end on or above the deck's content floor, SHIP_FLOOR 6.95 (= CONT_Y_BOT), i.e.
+// must end on or above the deck's content floor, SHIP_FLOOR 6.95, i.e.
 // header + rows (+ totals on the last page) must fit SHIP_BAND = 5.783in. Twelve one-line
 // rows + header + totals are 14 × 0.361 = 5.054, so a deck whose rows all set on one line
 // still paginates at exactly 12, as it always did.
@@ -2074,45 +2099,14 @@ function buildCompliance(m) {
 }
 
 // ============================================================================
-// Slide 5 — Tasks ('المهام') — variant changes the task ROWS
+// The old slide 5 — Tasks ('المهام', key 'action') — RETIRED with the old tracker
 // ============================================================================
-// Status chip fills as the 20-07 reference build had them — 'مغلق' is C.green (#16A34A);
-// the later switch to C.greenBright (#00B050) was a post-reference cosmetic change.
-const STATUS_FILL = { 'مستمر': { fill: C.taskNavy, color: C.white }, 'متأخر': { fill: C.redDark, color: C.white }, 'قيد التنفيذ': { fill: C.amberStatus, color: C.black }, 'مغلق': { fill: C.green, color: C.white }, 'مفتوح': { fill: C.slate500, color: C.white } };
-
-// Full-width tasks table. '#' is renumbered by row index (startIndex + i + 1) —
-// internal rows do NOT keep their own tk.num (which restarts at 1). startIndex lets a
-// continuation slide's '#' CONTINUE (e.g. 16..) instead of restarting at 1. rowH/fonts
-// are parametrized.
-function taskTable(tasks, { y, rowH, bodySize, headerSize, L, startIndex = 0 }) {
-  // rtl=0 in deck: visual == authored order [الحالة, تاريخ, المالك, المسؤول, الإجراء, #]
-  const header = [L('taskStatus'), L('taskDue'), L('taskOwner'), L('taskResponsible'), L('taskAction'), L('taskHash')];
-  const rows = tasks.map((tk, i) => {
-    const st = STATUS_FILL[tk.status] || { fill: C.slate500, color: C.white };
-    return [
-      { text: tk.status, fill: st.fill, color: st.color, bold: true },
-      String(tk.dueDate),
-      { text: tk.owner, align: 'right' },
-      tk.responsible,
-      { text: tk.task, align: 'right' },
-      String(startIndex + i + 1),
-    ];
-  });
-  return {
-    t: 'table', x: 0.641, y, w: 12.259, rtl: true, rowH, bodySize, headerSize,
-    header: { fill: C.navy, color: C.white, bold: true },
-    colW: [1.138, 1.471, 1.95, 1.47, 5.893, 0.337],
-    rows: [header, ...rows],
-  };
-}
-
-function tasksSubhead(title, y = 1.217) {
-  return [
-    rect(12.45, y + 0.02, 0.3, 0.3, C.navy, { radius: 0.15 }),
-    text(12.45, y + 0.02, 0.3, 0.3, '⚡', 14, { bold: true, color: C.white, align: 'center', valign: 'middle' }),
-    text(0.6, y, 11.8, 0.4, title, 14, { bold: true, color: C.navy, align: 'right', valign: 'middle', rtl: true }),
-  ];
-}
+// Its source, the old «ملف متابعة المشروع» (Arabic sheets سجل المهام / التحديات / المخاطر)
+// and the tasksCurrent / tasksInternal lists drafted from it, is gone: the NEW project task
+// tracker renders through build-tracker.js («متابعة المشروع», key 'tracker') in the same
+// position of the deck, identically for both variants. The 'action' key may still sit in
+// saved reportOptions; nothing reads it any more. Its labels stay in the registry as parity
+// orphans (marked غير مستخدم حالياً in LABEL_NAMES), like the retired legend keys.
 
 // Challenges/risks geometry. Until the 2026-08-04 split these two tables shared the
 // BOTTOM STRIP of the action slide — header + at most THREE body rows at rowH 0.28 from
@@ -2135,107 +2129,6 @@ const crNote = (x, hidden) => text(
   { italic: true, color: C.slate600, align: 'center', valign: 'middle', rtl: true },
 );
 
-// ---- task-table pagination ---------------------------------------------------
-// The internal report's task list can be long (every non-closed لين action plus the
-// one-report grace row of anything newly closed), so rows past the first slide's block
-// flow onto full-band continuation slides ('المهام — تتمة'); the first slide gets a small
-// 'يتبع…' continuation marker instead of the old '+ N مهمة أخرى' drop note.
-// CAP RAISED 15 → 18 (2026-08-04): the action slide is TASKS ONLY now, so the table owns
-// the whole content band (TASKS_Y_TOP 1.15 → CONT_Y_BOT 6.95 = 5.80in) instead of the
-// 3.35in strip left over above the support band. 18 body rows + the header = 19 slots at
-// the 0.30 row cap = 5.70in, which fits with 0.10in to spare — a 19th row would force
-// rowH below the cap. Pagination stays as the overflow safety net it always was.
-const TASK_CAP = 18;                       // first-slide task rows
-const CONT_CAP = 30;                       // task rows per continuation slide (~30 at min rowH 0.18)
-// Two-line date RANGES (e.g. '25-06-2026\n16-07-2026') render ~38px of ink, which needs
-// rowH ≈ 0.44 to clear the next row. That cap only engages at ≤12 rows/slide
-// (band/13 → 0.44); a 16-row page falls to rowH 0.35 and the stacked dates collide
-// (browser Range probe: 15 offenders). So two-line continuation pages carry ≤12 rows
-// and spill onto further continuation slides — no truncation, no ink collision.
-const CONT_CAP_TWOLINE = 12;               // task rows per continuation slide when dates wrap
-const CONT_Y_TOP = 1.0, CONT_Y_BOT = 6.95; // full-band table window
-const CONT_BAND = CONT_Y_BOT - CONT_Y_TOP; // 5.95in
-// The FIRST tasks slide uses the same window, pushed 0.15in down to clear the
-// 'المهام الحالية' subhead (a continuation slide has no subhead, hence the two constants).
-const TASKS_Y_TOP = 1.15;
-const TASKS_BAND = CONT_Y_BOT - TASKS_Y_TOP; // 5.80in
-
-// One continuation slide: a full-band task table, same columns/colW as the first
-// slide. rowH = clamp(0.18, band/(rows+1), cap) — cap 0.34, raised to 0.44 when any
-// row carries a two-line date range (reuses the first-slide adaptive-cap logic so
-// stacked date ranges don't collide). The table height = (rows+1)*rowH ≤ band, so it
-// never crosses CONT_Y_BOT (6.95). '#' continues from startIndex (16, 46, …).
-function buildActionCont(tasks, startIndex, contNo, L) {
-  const rowCount = tasks.length;
-  const hasTwoLine = tasks.some((t) =>
-    Object.values(t || {}).some((v) => typeof v === 'string' && v.includes('\n')));
-  const rowCap = hasTwoLine ? 0.44 : 0.34;
-  const rowH = Math.max(0.18, Math.min(rowCap, CONT_BAND / (rowCount + 1)));
-  const bodySize = rowH >= 0.26 ? 9.5 : rowH >= 0.21 ? 9 : 8;
-  const table = taskTable(tasks, { y: CONT_Y_TOP, rowH, bodySize, headerSize: bodySize, L, startIndex });
-  return { id: `action-cont-${contNo}`, bg: C.white, elements: [...chrome(L('titleActionCont')), table] };
-}
-
-// Returns an ARRAY of slides: [action, action-cont-1, …]. buildSpec flattens it so the
-// continuation slides land right after the action slide and pick up sequential footers.
-//
-// TASKS ONLY since 2026-08-04 (user review). This builder used to stack FOUR blocks on
-// one page — tasks table (y 1.15, a 3.35in strip), the الدعم المطلوب red band (y 4.62),
-// and the challenges + risks tables (y 5.88, three rows each) — which is why the tasks
-// were capped at 15 rows in a strip and the other two tables at three rows. The support
-// band, challenges and risks moved to their own slide (buildChallenges below); the tasks
-// table now owns the full content band, exactly like a continuation slide does.
-function buildAction(m, variant) {
-  const L = labelOf(m);
-  // Tasks table. Internal report = لين-category actions; NUPCO = the remaining actions.
-  const taskRows = variant === 'nupco' ? m.tasksCurrent : m.tasksInternal;
-  const n = taskRows.length;
-  const CAP = TASK_CAP;
-  const shown = Math.min(n, CAP);
-  const hasNote = n > CAP;
-  // Reserve the 'يتبع…' marker slot (0.26in) out of the band up front, so the rows shrink
-  // to fit and the marker still lands inside the content floor: markerY + 0.24 ≤ 6.95.
-  // The band is untouched when there is no overflow, so the n ≤ CAP layout is unaffected.
-  const AREA = hasNote ? TASKS_BAND - 0.26 : TASKS_BAND;
-  // Two-line cells (date RANGES like '25-06-2026\n16-07-2026') need ~0.42in of
-  // Cairo ink — with the default 0.30 cap adjacent rows' dates collide. Raise
-  // the cap only when multi-line content exists AND the row count leaves room.
-  const hasTwoLine = taskRows.slice(0, shown).some((t) =>
-    Object.values(t || {}).some((v) => typeof v === 'string' && v.includes('\n')));
-  const rowCap = hasTwoLine ? 0.44 : 0.30;
-  const rowH = Math.max(0.18, Math.min(rowCap, AREA / (shown + 1)));
-  const bodySize = rowH >= 0.26 ? 9.5 : rowH >= 0.21 ? 9 : 8;
-  const headerSize = bodySize;
-  const table = taskTable(taskRows.slice(0, shown), { y: TASKS_Y_TOP, rowH, bodySize, headerSize, L });
-
-  const els = [
-    ...chrome(L('titleAction')),
-    ...tasksSubhead(L('subheadTasks'), 0.84),
-    table,
-  ];
-  if (hasNote) {
-    // Truncation is not acceptable for the internal report: rows CAP+1.. move to
-    // continuation slides, so the first slide gets a small 'يتبع…' (continued…) marker
-    // instead of the old '+ N مهمة أخرى' drop note.
-    const markerY = TASKS_Y_TOP + (shown + 1) * rowH;
-    els.push(text(0.641, markerY, 12.259, 0.24, 'يتبع…', bodySize, { italic: true, color: C.slate600, align: 'center', valign: 'middle', rtl: true }));
-  }
-
-  const slides = [{ id: 'action', bg: C.white, elements: els }];
-  // Continuation slides for rows CAP+1..n. Page size shrinks to CONT_CAP_TWOLINE when ANY
-  // continuation row carries a wrapping date range, so those taller rows never collide;
-  // otherwise ~30 single-line rows per slide. '#' continues from the row's absolute
-  // position (start), so it never restarts at 1.
-  const rest = taskRows.slice(CAP);
-  const restTwoLine = rest.some((t) =>
-    Object.values(t || {}).some((v) => typeof v === 'string' && v.includes('\n')));
-  const pageSize = restTwoLine ? CONT_CAP_TWOLINE : CONT_CAP;
-  for (let start = CAP, contNo = 1; start < n; start += pageSize, contNo++) {
-    slides.push(buildActionCont(taskRows.slice(start, start + pageSize), start, contNo, L));
-  }
-  return slides;
-}
-
 // ============================================================================
 // Slide 6 — Challenges & risks ('التحديات والمخاطر') — NEW 2026-08-04
 // ============================================================================
@@ -2248,6 +2141,12 @@ function buildAction(m, variant) {
 // flag as ON (`slides[key] !== false`). Settings/store/seed registration of the new key is
 // owned elsewhere; until it lands, existing saved reportOptions (which have no such key)
 // render the slide, which is the intended default.
+// MANUAL CONTENT SINCE THE NEW TRACKER (2026-10-13). The new project tracker has no
+// challenges / risks sheets, so nothing drafts them any more: they are what the operator
+// types on the review screen. The slide therefore needs CONTENT as well as its toggle —
+// see hasChallengeContent — so an untouched report does not ship two empty tables.
+const hasChallengeContent = (m) => (Array.isArray(m.challenges) && m.challenges.length > 0)
+  || (Array.isArray(m.risks) && m.risks.length > 0);
 function buildChallenges(m) {
   const L = labelOf(m);
   // Block 1 — support required, now a TOP block (was a 0.92in band squeezed at y 4.62).
@@ -2269,7 +2168,7 @@ function buildChallenges(m) {
   // = the shown bullets + the '+ N أخرى' line when it exists (at least one, so an empty
   // supportRequired still yields a sane band rather than a sliver).
   const SUP_CAP = 5;
-  const support = m.panels.supportRequired || [];
+  const support = m.panels?.supportRequired || [];
   const supShown = Math.min(support.length, SUP_CAP);
   const supLines = Math.max(1, supShown + (support.length > SUP_CAP ? 1 : 0));
   const supText = bullets(support.slice(0, SUP_CAP))
@@ -2289,7 +2188,7 @@ function buildChallenges(m) {
 
   // Blocks 2 & 3 — challenges (right) + risks (left), side-by-side, subheads at y 3.05.
   const chHeader = ['الإجراء الوقائي/الحل', 'التأثير', 'المسؤول', 'المشكلة', '#'];
-  const chRows = m.challenges.map((c, i) => [
+  const chRows = (m.challenges || []).map((c, i) => [
     { text: c.solution, align: 'right' },
     c.impact,
     { text: c.owner, align: 'center' },
@@ -2305,7 +2204,7 @@ function buildChallenges(m) {
   };
 
   const rkHeader = ['التأثير', 'إحتمالية', 'المسؤول', 'الخطر', '#'];
-  const rkRows = m.risks.map((r, i) => [
+  const rkRows = (m.risks || []).map((r, i) => [
     r.impact,
     r.probability,
     { text: r.owner, align: 'center' },
@@ -2702,10 +2601,10 @@ export function buildSpec(reportModel, { variant = 'internal' } = {}) {
   const slides = m.reportOptions?.slides;
   const OPT_IN_SLIDES = new Set(['definitions']);
   const on = (key) => (OPT_IN_SLIDES.has(key) ? slides?.[key] === true : (!slides || slides[key] !== false));
-  // Each builder returns an ARRAY of slides. Most yield exactly one; buildAction yields
-  // the action slide plus zero-or-more continuation slides (task pagination). flatMap
-  // splices those inline so continuation slides sit right after the action slide and
-  // pick up the sequential post-filter footer numbering automatically.
+  // Each builder returns an ARRAY of slides. Most yield exactly one; buildTrackerSlides yields
+  // the tracker slide plus zero-or-more tracker-cont-N slides (or none at all). flatMap
+  // splices them inline so they pick up the sequential post-filter footer numbering
+  // automatically.
   const middleDefs = [
     { key: 'execFunnel', build: () => [buildExecFunnel(m)] },
     // Shipments ('تفاصيل الشحنات') — SCOPED decks only, right after the exec slide (user
@@ -2722,13 +2621,17 @@ export function buildSpec(reportModel, { variant = 'internal' } = {}) {
     { key: 'sendout', build: () => (m.sendout && m.sendout.total
       ? [buildSendoutCountries(m), buildSendoutLabs(m)] : []) },
     { key: 'compliance', build: () => [buildCompliance(m)] },
-    { key: 'action', build: () => buildAction(m, variant) },
+    // Project tracker ('متابعة المشروع', build-tracker.js) — in the slot the retired 'action'
+    // (المهام) slide held, default ON ('tracker' is not in OPT_IN_SLIDES). The same slides
+    // for both variants; no tracker / no task → [] (no slide, no page number used).
+    { key: 'tracker', build: () => buildTrackerSlides(m.projectTracker, { reportDate: m.reportDate, variant, labels: labelOf(m) }) },
     // Challenges & risks — SPLIT OFF the action slide 2026-08-04. It is a NORMAL (default
     // ON) middle slide: 'challenges' is not in OPT_IN_SLIDES, so on() reads an absent
     // reportOptions.slides.challenges as ON. That matters for saved report options written
     // before this key existed — they carry no flag and must keep rendering the content the
-    // action slide used to hold, not silently drop it.
-    { key: 'challenges', build: () => [buildChallenges(m)] },
+    // action slide used to hold, not silently drop it. Since the new tracker it is manual
+    // content: rendered only when the operator entered a challenge or a risk.
+    { key: 'challenges', build: () => (hasChallengeContent(m) ? [buildChallenges(m)] : []) },
     // Definitions ('منهجية الأرقام') — default OFF (opt-in, see OPT_IN_SLIDES); when the
     // user switches it on in Settings it renders just before thanks and participates in
     // the sequential footer numbering like the other middle slides.

@@ -1,13 +1,13 @@
 // main.js — boot, settings store, top app bar, and screen router (Track E).
-import { state } from './state.js?v=v2026-10-11.2';
-import { STR } from './i18n/ar.js?v=v2026-10-11.2';
-import { APP_VERSION } from './version.js?v=v2026-10-11.2';
-import { el, toast } from './ui/components.js?v=v2026-10-11.2';
-import { startUpdateWatch, reloadUrlFor } from './update-check.js?v=v2026-10-11.2';
-import { SETTINGS_KEY } from './contracts.js?v=v2026-10-11.2';
-import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-10-11.2';
-import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-10-11.2';
-import { HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED, GRAFANA_SEED } from './seeds/defaults.js?v=v2026-10-11.2';
+import { state } from './state.js?v=v2026-10-13.1';
+import { STR } from './i18n/ar.js?v=v2026-10-13.1';
+import { APP_VERSION } from './version.js?v=v2026-10-13.1';
+import { el, toast } from './ui/components.js?v=v2026-10-13.1';
+import { startUpdateWatch, reloadUrlFor } from './update-check.js?v=v2026-10-13.1';
+import { SETTINGS_KEY } from './contracts.js?v=v2026-10-13.1';
+import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-10-13.1';
+import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-10-13.1';
+import { HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED, GRAFANA_SEED } from './seeds/defaults.js?v=v2026-10-13.1';
 
 /* ------------------------------------------------------------------ *
  * Settings store — prefers Track C's src/store.js, falls back to a
@@ -53,6 +53,10 @@ function canPersist() {
   } catch { return false; }
 }
 
+const isTaggedTracker = (v) => !!v && typeof v === 'object' && !Array.isArray(v)
+  && v.format === 'misbar-task-tracker-v1' && Array.isArray(v.tasks);
+const isTaggedCache = (ct) => !!ct && (isTaggedTracker(ct.model) || isTaggedTracker(ct));
+
 function readLocalSettings() {
   const seed = seedSettings();
   try {
@@ -77,7 +81,10 @@ function readLocalSettings() {
         if (!g.baseUrl) g.baseUrl = seed.grafana.baseUrl; // empty URL is never useful
         return g;
       })(),
-      cachedTracker: s.cachedTracker || null,
+      // Untagged (old {tasks, challenges, risks} format) ⇒ null, as store.js migrates it.
+      // Inline tag check (= task-tracker.js isProjectTracker) so the bootstrap path takes
+      // no extra import.
+      cachedTracker: isTaggedCache(s.cachedTracker) ? s.cachedTracker : null,
       scorecard: Array.isArray(s.scorecard) && s.scorecard.length ? s.scorecard : seed.scorecard,
     };
   } catch { return seed; }
@@ -136,13 +143,15 @@ function makeAdapter(backend, local) {
     saveSettings: (s) => { try { return call('saveSettings', s); } catch (e) { console.warn('[store] saveSettings failed; local', e); return local.saveSettings(s); } },
     updateSnapshot: (snap) => { try { return call('updateSnapshot', snap); } catch (e) { console.warn('[store] updateSnapshot failed; local', e); return local.updateSnapshot(snap); } },
     isEphemeral: () => (has('isEphemeral') ? backend.isEphemeral() : local.isEphemeral()),
+    // The backend's guards (untagged refusal, size cap, key normalization) must reach the
+    // caller: its error PROPAGATES (the upload screen and the review saver catch it and
+    // show it). The plain local write is only for the fallback store, which has no
+    // updateCachedTracker of its own.
     updateCachedTracker(model) {
-      try { return call('updateCachedTracker', model); } catch (e) {
-        console.warn('[store] updateCachedTracker failed; local', e);
-        const d = this.loadSettings();
-        d.cachedTracker = model ? { model, updatedAt: new Date().toISOString() } : null;
-        return this.saveSettings(d);
-      }
+      if (has('updateCachedTracker')) return backend.updateCachedTracker(model);
+      const d = this.loadSettings();
+      d.cachedTracker = model ? { model, updatedAt: new Date().toISOString() } : null;
+      return this.saveSettings(d);
     },
     exportSettings: () => call('exportSettings'),
     importSettings: (t) => call('importSettings', t),
@@ -163,7 +172,7 @@ async function resolveStore() {
   const local = createLocalStore(persistent);
   let backend = null;
   try {
-    const mod = await import('./store.js?v=v2026-10-11.2');
+    const mod = await import('./store.js?v=v2026-10-13.1');
     if (mod && typeof mod.loadSettings === 'function' && typeof mod.saveSettings === 'function') {
       const s = mod.loadSettings();
       if (s && s.tatLookup) backend = mod;
@@ -177,10 +186,10 @@ async function resolveStore() {
  * ------------------------------------------------------------------ */
 
 const SCREEN_MODULES = {
-  upload: './ui/screen-upload.js?v=v2026-10-11.2',
-  review: './ui/screen-review.js?v=v2026-10-11.2',
-  generate: './ui/screen-generate.js?v=v2026-10-11.2',
-  settings: './ui/screen-settings.js?v=v2026-10-11.2', // Track C
+  upload: './ui/screen-upload.js?v=v2026-10-13.1',
+  review: './ui/screen-review.js?v=v2026-10-13.1',
+  generate: './ui/screen-generate.js?v=v2026-10-13.1',
+  settings: './ui/screen-settings.js?v=v2026-10-13.1', // Track C
 };
 
 let appEl = null;
@@ -478,7 +487,7 @@ async function downloadAutoExtras(result) {
   if (!items.length) return 0;
   let mod = null;
   try {
-    mod = await import('./ui/late-labs-section.js?v=v2026-10-11.2');
+    mod = await import('./ui/late-labs-section.js?v=v2026-10-13.1');
   } catch (e) {
     console.warn('[auto] download helper unavailable — lab files/drafts not saved', e);
     return 0;
@@ -617,7 +626,7 @@ async function startAutomationRun(mode, store) {
 
   let mod = null;
   try {
-    mod = await import('./automation/pipeline.js?v=v2026-10-11.2');
+    mod = await import('./automation/pipeline.js?v=v2026-10-13.1');
   } catch (e) {
     console.warn('[auto] pipeline module unavailable — trigger ignored', e);
     release();
@@ -752,7 +761,7 @@ async function boot() {
   // ephemeral case then reaches buildShell/startApp's storage warning, which
   // tells the user the sign-in cannot be remembered on this browser.
   try {
-    lockMod = await import('./ui/lock.js?v=v2026-10-11.2');
+    lockMod = await import('./ui/lock.js?v=v2026-10-13.1');
   } catch { lockMod = null; /* lock module absent — open boot (dev) */ }
   if (lockMod && typeof lockMod.isUnlocked === 'function' && !lockMod.isUnlocked(store)) {
     const root = document.getElementById('app-shell') || document.body;
@@ -808,8 +817,8 @@ function startApp(store) {
   // TAT-lookup Excel merge hook consumed by the settings screen (Track C).
   state.onTatFileMerge = async (file) => {
     const [{ getXLSX }, { parseTatLookupXlsx }] = await Promise.all([
-      import('./vendor-loader.js?v=v2026-10-11.2'),
-      import('./ingest/xlsx.js?v=v2026-10-11.2'),
+      import('./vendor-loader.js?v=v2026-10-13.1'),
+      import('./ingest/xlsx.js?v=v2026-10-13.1'),
     ]);
     const XLSX = await getXLSX();
     const { tests } = parseTatLookupXlsx(await file.arrayBuffer(), XLSX);
@@ -829,7 +838,7 @@ function startApp(store) {
   // Connection test consumed by the settings screen's اختبار الاتصال button.
   state.onGrafanaTest = async () => {
     try {
-      const mod = await import('./ingest/grafana.js?v=v2026-10-11.2');
+      const mod = await import('./ingest/grafana.js?v=v2026-10-13.1');
       const g = store.loadSettings().grafana || {};
       const now = Date.now();
       const res = await mod.fetchKamcOrders(g, { fromMs: now - 7 * 86400000, toMs: now });
@@ -841,7 +850,7 @@ function startApp(store) {
       // the split, never the test result.
       let byHospital = null;
       try {
-        const hmod = await import('./model/hospital.js?v=v2026-10-11.2');
+        const hmod = await import('./model/hospital.js?v=v2026-10-13.1');
         const p = hmod.partitionHospitals(res.rows);
         byHospital = {
           kamc: p.kamc.length,

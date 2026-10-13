@@ -42,15 +42,15 @@
 // TAT table), the per-lab Late & Due workbooks and their drafts all read parsed.orders —
 // the KAMC rows only (model/hospital.js takeOrders). The operator's state.reportHospital
 // is never read.
-import { STR, todayISO, buildFileName } from '../i18n/ar.js?v=v2026-10-11.2';
-import { VARIANTS, normTest } from '../contracts.js?v=v2026-10-11.2';
-import { getGenLibs } from '../vendor-loader.js?v=v2026-10-11.2';
+import { STR, todayISO, buildFileName } from '../i18n/ar.js?v=v2026-10-13.1';
+import { VARIANTS, normTest } from '../contracts.js?v=v2026-10-13.1';
+import { getGenLibs } from '../vendor-loader.js?v=v2026-10-13.1';
 // STATIC on purpose, unlike the injected model modules below: isScoped gates the
 // published-history write, and neither guarded fallback is safe — "absent ⇒ unscoped"
 // would let a side report overwrite the history, "absent ⇒ scoped" would silently stop
 // recording full reports. scope.js is pure (no DOM, no vendor bundle), and ar.js above
 // already depends on it for the «(مخصص)» file-name suffix, so this adds no new failure mode.
-import { isScoped } from '../model/scope.js?v=v2026-10-11.2';
+import { isScoped } from '../model/scope.js?v=v2026-10-13.1';
 // THE HOSPITAL DOOR (2026-10-07, report types 2026-10-11): the feed carries KAMC's and
 // SGH's orders (and possibly a third hospital's). takeOrders puts the KAMC rows in
 // parsed.orders — they feed every KAMC-side step of this unattended run (TAT suggestions,
@@ -61,7 +61,12 @@ import { isScoped } from '../model/scope.js?v=v2026-10-11.2';
 // put another hospital's orders into an UNATTENDED morning report nobody reviews. A load failure abandons the run (main.js
 // catches the import) — no report, never a wrong one. hospital.js is pure (no DOM, no
 // vendor bundle).
-import { takeOrders } from '../model/hospital.js?v=v2026-10-11.2';
+import { takeOrders } from '../model/hospital.js?v=v2026-10-13.1';
+// THE TRACKER SHAPE CHECK (2026-10-13): resolveTracker below hands the unattended deck
+// only a TAGGED ProjectTracker. STATIC for isScoped's reason — "absent ⇒ accept anything"
+// would publish an old-format cache under the new slide design. task-tracker.js is a
+// leaf (no imports, no DOM; SheetJS is injected into its parser, never imported).
+import { isProjectTracker } from '../ingest/task-tracker.js?v=v2026-10-13.1';
 
 /* ------------------------------------------------------------------ *
  * Shared micro-helpers (same idioms the screens use)
@@ -230,53 +235,31 @@ export function isMainReport(model) {
   return !!model && model.hospital === 'both';
 }
 
-/** Variant → the model task list THAT variant's deck publishes (build-spec.js:1213). */
-const VARIANT_TASK_LIST = Object.freeze({ nupco: 'tasksCurrent', internal: 'tasksInternal' });
-
-/**
- * Normalize the "which variants actually shipped a file" hint into a Set — or null
- * when the caller did not, or could not, say. null means "assume both shipped",
- * which is byte-for-byte the behaviour this function had before the hint existed:
- * a caller that omits it (screen-generate today) and a test double whose file defs
- * carry no `variant` both keep recording both lists. Only a POSITIVE statement that
- * a variant is missing withholds that variant's list.
- */
-function shippedVariantSet(shippedVariants) {
-  if (!shippedVariants || typeof shippedVariants[Symbol.iterator] !== 'function') return null;
-  let raw;
-  try { raw = [...shippedVariants]; } catch { return null; }
-  const known = raw.filter((v) => Object.prototype.hasOwnProperty.call(VARIANT_TASK_LIST, v));
-  return known.length ? new Set(known) : null;
-}
-
 /**
  * Persist the FULL number snapshot + append it to snapshotHistory — the exact
  * store path (and warning strings) screen-generate has always used, shared so an
  * automated run feeds the delta/history features identically.
  *
- * ALSO records what this report SHOWED (`recordShownTasks`, the closed-task grace
- * log) in a second, INDEPENDENT block below: the numbers write is unchanged and a
- * failure in either one cannot take the other down.
+ * NO TASK LOG (2026-10-13, tracker CONTRACT §1.4 / §1.8): this used to ALSO record what
+ * the report showed into settings.taskLog (model/task-lifecycle.js, the old tracker's
+ * "a closed task is shown exactly once" rule, keyed on its Arabic categories / statuses).
+ * The new project tracker is a persisted document whose slides show it as it is — a
+ * stable WBS id and an explicit 'Completed' status — so nothing writes the log any more,
+ * from any report type, manual or automated. `recordShownTasks` / `shippedVariants`
+ * are still ACCEPTED (an older caller passing them keeps working) and IGNORED; the
+ * stored taskLog (and its import/export) stays as it is, inert.
  *
- * A SCOPED model (model.scope, set by the review screen) writes NOTHING — neither
- * block runs. See the guard below.
- * @param {{recordShownTasks?:Function, shippedVariants?:Iterable<string>}} args -
- *   `recordShownTasks` is the task-lifecycle writer; omitted = numbers-only
- *   behaviour, exactly as before. `shippedVariants` lists the deck variants that
- *   actually produced at least one file (see shippedVariantSet); omitted = both.
+ * A SCOPED model (model.scope, set by the review screen) writes NOTHING. See the guard below.
+ * @param {{model:Object, store:Object, state?:Object, date:string, recordSnapshot?:Function}} args
  */
 export function recordRunSnapshot({
-  model, store, state, date, recordSnapshot, recordShownTasks, shippedVariants,
+  model, store, state, date, recordSnapshot,
 } = {}) {
-  // SIDE REPORT ⇒ NO WRITE, before either block. A scoped deck's numbers describe a
+  // SIDE REPORT ⇒ NO WRITE. A scoped deck's numbers describe a
   // subset (some labs / shipments / an order-date window evaluated as of its end), so:
-  //   • snapshot / snapshotHistory — they are the PUBLISHED series the history panel
-  //     lists and the next report's comparisons read. One lab's totals stored under a
-  //     report date would stand in for the programme's on that day.
-  //   • taskLog — a closed task earns exactly ONE grace showing. Recording it here would
-  //     spend that showing on a side deck its real audience never receives, and the next
-  //     full report would prune the task unseen (the same harm the per-variant rule
-  //     below prevents for a failed variant).
+  // snapshot / snapshotHistory are the PUBLISHED series the history panel lists and the
+  // next report's comparisons read. One lab's totals stored under a report date would
+  // stand in for the programme's on that day.
   // FAIL CLOSED: a scope that cannot even be read is not provably the full report, and a
   // missed write heals on the next full run while a polluted history does not.
   //
@@ -290,19 +273,15 @@ export function recordRunSnapshot({
   //     a KAMC report for D writes. Only when that sub-model was built from KAMC rows: a
   //     main report over a load with NO KAMC lines holds no KAMC report (one could not
   //     even be generated — the review blocks it), and its zeros must not become the
-  //     published KAMC numbers for D. It NEVER writes the task log: its deck has no task
-  //     slides, and a closed task's one grace showing must not be spent on a deck that
-  //     never showed it (the second block below).
-  //   • 'kamc' — or ABSENT, a legacy KAMC-only model — records both blocks as it always did.
+  //     published KAMC numbers for D.
+  //   • 'kamc' — or ABSENT, a legacy KAMC-only model — records its own numbers.
   //   • anything else — 'sgh', unknown values — writes nothing (fail closed, as above).
   let scoped;
   try { scoped = isScoped(model && model.scope); } catch { scoped = true; }
   if (scoped) return;
   let numbersOf; // the model whose kpi is published
-  let recordsTasks;
   if (isKamcReport(model)) {
     numbersOf = model;
-    recordsTasks = true;
   } else if (isMainReport(model)) {
     const sub = model.kamc;
     if (!sub || !Array.isArray(sub.scopedRows) || !sub.scopedRows.length) return;
@@ -312,7 +291,6 @@ export function recordRunSnapshot({
     try { subScoped = isScoped(sub.scope); } catch { subScoped = true; }
     if (subScoped) return;
     numbersOf = sub;
-    recordsTasks = false;
   } else {
     return;
   }
@@ -347,43 +325,6 @@ export function recordRunSnapshot({
       if (state) state.settings = store.settings;
     }
   } catch (e) { console.warn('[generate] snapshot update failed', e); }
-
-  // ---- closed-task lifecycle (v6) — INDEPENDENT of the numbers block above ----
-  // Written from the FINAL model, so manual review edits are recorded exactly as
-  // published (a grace row the reviewer deleted keeps its grace for the next
-  // report — it was never actually shown). This runs only after files were really
-  // produced, and is NOT gated on numbers.completed: a report can legitimately
-  // publish tasks without a fresh number set.
-  // The length guard is what keeps the pipeline tests' minimal store/model stubs
-  // working — a model with no task arrays simply has nothing to record.
-  //
-  // PER VARIANT, not per run (review fix 2026-08-04): produceReportFiles skips a
-  // failed file instead of throwing, so a run can ship the internal pair while both
-  // نوبكو files time out. Recording BOTH lists then would stamp closedOn on every
-  // مغلق row of tasksCurrent — burning their single grace appearance on a deck the
-  // NUPCO audience never receives, and the next report prunes them for good. A
-  // variant that shipped nothing therefore contributes an EMPTY list: its entries
-  // keep openOn/closedOn:null and earn their grace on the next successful run.
-  // The main report's deck has no task slides — it showed no task (see the guard above).
-  if (!recordsTasks) return;
-  try {
-    if (typeof recordShownTasks !== 'function' || !model || !date) return;
-    const shipped = shippedVariantSet(shippedVariants);
-    const listOf = (variant) => {
-      const rows = model[VARIANT_TASK_LIST[variant]];
-      if (!Array.isArray(rows)) return [];
-      return (shipped && !shipped.has(variant)) ? [] : rows;
-    };
-    const tasksCurrent = listOf('nupco');
-    const tasksInternal = listOf('internal');
-    if (!tasksCurrent.length && !tasksInternal.length) return; // nothing was shown
-    if (!store || typeof store.loadSettings !== 'function'
-        || typeof store.saveSettings !== 'function') return;
-    const doc = store.loadSettings();
-    doc.taskLog = recordShownTasks(doc.taskLog, { reportDate: date, tasksCurrent, tasksInternal });
-    store.saveSettings(doc);
-    if (state) state.settings = store.settings;
-  } catch (e) { console.warn('[generate] task lifecycle write failed', e); }
 }
 
 /* ------------------------------------------------------------------ *
@@ -426,7 +367,7 @@ function installFastTimers() {
 // Build the SlideSpec per VARIANT — the variant changes slide-5 content
 // (task rows), so one shared spec would leak internal tasks into NUPCO files.
 async function buildVariantSpec(model, variant) {
-  const mod = await tryImport('../slidespec/build-spec.js?v=v2026-10-11.2');
+  const mod = await tryImport('../slidespec/build-spec.js?v=v2026-10-13.1');
   const fn = pickFn(mod, ['buildSpec', 'build', 'makeSpec', 'toSpec']);
   if (!fn) return null;
   let spec = fn(model, { variant });
@@ -452,7 +393,7 @@ async function toBlob(result, kind) {
 // renderPptx(spec, {variant, PptxGenJS}) -> Promise<Blob>
 async function makePptx(spec, variant, libs) {
   if (!spec) return null;
-  const mod = await tryImport('../render/pptx-renderer.js?v=v2026-10-11.2');
+  const mod = await tryImport('../render/pptx-renderer.js?v=v2026-10-13.1');
   const fn = pickFn(mod, ['renderPptx', 'buildPptx', 'toPptx', 'makePptx', 'render']);
   if (!fn) return null;
   const r = await fn(spec, { variant, PptxGenJS: libs.PptxGenJS });
@@ -464,9 +405,9 @@ async function makePptx(spec, variant, libs) {
 // the host and before capture starts — screen-generate clones them into live thumbnails.
 async function makePdf(spec, variant, libs, host, onProgress, onSlides) {
   if (!spec) return null;
-  const rMod = await tryImport('../render/html-renderer.js?v=v2026-10-11.2');
+  const rMod = await tryImport('../render/html-renderer.js?v=v2026-10-13.1');
   const renderSlides = pickFn(rMod, ['renderSlides', 'renderSpec', 'renderHtml', 'render']);
-  const pMod = await tryImport('../render/pdf-export.js?v=v2026-10-11.2');
+  const pMod = await tryImport('../render/pdf-export.js?v=v2026-10-13.1');
   const exportPdf = pickFn(pMod, ['exportPdf', 'renderPdf', 'toPdf', 'buildPdf', 'render']);
   if (!renderSlides || !exportPdf) return null;
   host.innerHTML = '';
@@ -664,30 +605,29 @@ const PULL_REUSE_MS = 15000;
 
 /** Default heavy dependencies — every one overridable through `deps` (tests inject fakes). */
 const DEFAULT_DEPS = Object.freeze({
-  loadGrafana: () => import('../ingest/grafana.js?v=v2026-10-11.2'),
-  loadEngine: () => tryImport('../engine/engine.js?v=v2026-10-11.2'),
-  loadReportModel: () => import('../model/report-model.js?v=v2026-10-11.2'),
+  loadGrafana: () => import('../ingest/grafana.js?v=v2026-10-13.1'),
+  loadEngine: () => tryImport('../engine/engine.js?v=v2026-10-13.1'),
+  loadReportModel: () => import('../model/report-model.js?v=v2026-10-13.1'),
   // The main report's builder (buildBothModel). NOT guarded, like the report model above:
   // without it there is no main report to publish, and the engine step fails loudly
   // (generate then skips) rather than publishing some other report as the weekly one.
-  loadHospitalReport: () => import('../model/hospital-report.js?v=v2026-10-11.2'),
-  loadDeltaBaseline: () => tryImport('../model/delta-baseline.js?v=v2026-10-11.2'),
+  loadHospitalReport: () => import('../model/hospital-report.js?v=v2026-10-13.1'),
+  loadDeltaBaseline: () => tryImport('../model/delta-baseline.js?v=v2026-10-13.1'),
   // The delta-chip stamper. Guarded like the rest: a build without it degrades to the
   // engine's own clamped deltas instead of failing this module at load time.
-  loadDeltaWindow: () => tryImport('../model/delta-window.js?v=v2026-10-11.2'),
-  loadTaskLifecycle: () => tryImport('../model/task-lifecycle.js?v=v2026-10-11.2'),
-  loadLateLabs: () => import('../export/late-labs.js?v=v2026-10-11.2'),
-  loadTatSuggest: () => tryImport('../ingest/tat-suggest.js?v=v2026-10-11.2'),
-  loadTatLoinc: () => tryImport('../seeds/tat-lookup.js?v=v2026-10-11.2'),
+  loadDeltaWindow: () => tryImport('../model/delta-window.js?v=v2026-10-13.1'),
+  loadLateLabs: () => import('../export/late-labs.js?v=v2026-10-13.1'),
+  loadTatSuggest: () => tryImport('../ingest/tat-suggest.js?v=v2026-10-13.1'),
+  loadTatLoinc: () => tryImport('../seeds/tat-lookup.js?v=v2026-10-13.1'),
   // Track 5's module; absent until it ships → the emails step reports 'skip'.
-  loadEmlDraft: () => tryImport('../export/eml-draft.js?v=v2026-10-11.2'),
+  loadEmlDraft: () => tryImport('../export/eml-draft.js?v=v2026-10-13.1'),
   // The encrypted send-out catalogue. Guarded: absent module or a failed decrypt
   // means the deck simply omits the two send-out slides.
-  loadSendoutMaster: () => tryImport('../ingest/sendout-master.js?v=v2026-10-11.2'),
+  loadSendoutMaster: () => tryImport('../ingest/sendout-master.js?v=v2026-10-13.1'),
   // The vendor contact book (To: per lab + the standard CC block). Guarded: a
   // build without it just means drafts fall back to the Settings map alone.
-  loadLabContacts: () => tryImport('../seeds/lab-contacts.js?v=v2026-10-11.2'),
-  loadDownload: () => tryImport('../ui/late-labs-section.js?v=v2026-10-11.2'),
+  loadLabContacts: () => tryImport('../seeds/lab-contacts.js?v=v2026-10-13.1'),
+  loadDownload: () => tryImport('../ui/late-labs-section.js?v=v2026-10-13.1'),
   produceReportFiles,
   now: () => Date.now(),
 });
@@ -705,11 +645,18 @@ function engineOpts(state, settings) {
   };
 }
 
-/** The upload screen's file-less fallback: last-parsed tracker cached in settings. */
-function resolveTracker(state, settings) {
-  if (state.parsed && state.parsed.tracker) return state.parsed.tracker;
+/** The run's ProjectTracker: the PERSISTED document only (settings.cachedTracker — the
+ *  user's latest uploaded or WEB-EDITED tracker, tracker CONTRACT §1.8), else null.
+ *  state.parsed.tracker is deliberately NOT read: in a real session it is the same document
+ *  (upload and every edit write both), but in a ?mock=1 / ?dev=1 tab it is the synthetic
+ *  buildMockTracker document — tagged, and never persisted — which must never reach a real
+ *  deck (§1.7). An UNTAGGED value (the old {tasks, challenges, risks} format from an
+ *  install or backup older than the new file) is "no tracker": the deck simply has no
+ *  tracker slides — never the old rows, never a mock. */
+function resolveTracker(settings) {
   const ct = settings.cachedTracker;
-  return (ct && ct.model) || null;
+  if (ct && isProjectTracker(ct.model)) return ct.model;
+  return isProjectTracker(ct) ? ct : null;
 }
 
 /**
@@ -936,10 +883,12 @@ export async function runAutomation({
 
   // Engine + ReportModel + delta chips — the same modules review/generate use — and then
   // the MAIN report (KAMC + SGH) the run publishes. The KAMC engine output stays the
-  // run's hero numbers (theState.engineOutput, as before); buildReportModel still drafts
-  // the run's non-order content (tasks, panels, challenges…) exactly as the review screen
-  // drafts it, so the model handed on has the same shape as the review's own KAMC + SGH
-  // model (its order figures replaced by buildBothModel's kamc / sgh / combined).
+  // run's hero numbers (theState.engineOutput, as before); buildReportModel still builds
+  // the run's non-order content (projectTracker, panels, challenges…) exactly as the
+  // review screen does, so the model handed on has the same shape as the review's own
+  // KAMC + SGH model (its order figures replaced by buildBothModel's kamc / sgh / combined).
+  // The tracker is the CACHED document (resolveTracker) — the user's latest web edits —
+  // so the unattended deck publishes what the review screen last showed.
   async function stepEngine() {
     const orders = theState.parsed.orders;
     if (!orders || !orders.length) return { status: 'skip', message: MSG.noOrders };
@@ -971,7 +920,7 @@ export async function runAutomation({
       errors.push(`sendout: ${(e && e.message) || String(e)}`);
     }
 
-    const tracker = resolveTracker(theState, settings);
+    const tracker = resolveTracker(settings);
     const base = buildReportModel({
       engineOutput: out,
       tracker,
@@ -1017,6 +966,10 @@ export async function runAutomation({
       sgh: both.sgh,
       combined: both.combined,
       deltaWindow: both.deltaWindow,
+      // The project tracker the deck's tracker slides read (top level, like the review's
+      // main model). buildReportModel's own answer when it gave one (it honours edits);
+      // else this run's resolved tracker — never undefined, never an untagged value.
+      projectTracker: base.projectTracker !== undefined ? base.projectTracker : tracker,
     });
     // Presentation options + per-run manual overrides, exactly as the screens stamp them.
     if (settings.reportOptions) model.reportOptions = settings.reportOptions;
@@ -1035,7 +988,8 @@ export async function runAutomation({
 
   // The 4 report files + the snapshot/history write a successful run owes the
   // delta features (KAMC's numbers from the main report's KAMC sub-model; no task log —
-  // recordRunSnapshot). autoDownload additionally pushes them to the browser.
+  // recordRunSnapshot). The deck carries the tracker slides when the model holds a
+  // ProjectTracker and reportOptions.slides.tracker is not false (build-spec-both.js). autoDownload additionally pushes them to the browser.
   // Renders ONLY this run's own model (runModel): no engine success → nothing to publish.
   async function stepGenerate() {
     const model = runModel;
@@ -1055,14 +1009,10 @@ export async function runAutomation({
     const produced = await D.produceReportFiles({
       model, ctx: ctx || { state: theState, store: theStore }, onProgress: null, host: null, signal,
     });
-    // Which VARIANTS actually shipped: a file whose render failed is skipped by
-    // produceReportFiles (logged, never thrown), so "some files landed" is not
-    // "both decks landed". The lifecycle write below is gated on this set.
-    const shippedVariants = new Set();
+    // A file whose render failed is skipped by produceReportFiles (logged, never thrown).
     for (const p of (produced || [])) {
       if (!p || !p.blob) continue;
       files.push({ name: (p.def && p.def.name) || '', blob: p.blob });
-      if (p.def && p.def.variant) shippedVariants.add(p.def.variant);
     }
     // A stop pressed mid-generation is a cancellation, not a failure.
     if (!files.length) {
@@ -1072,17 +1022,13 @@ export async function runAutomation({
     }
 
     const db = await D.loadDeltaBaseline();
-    // Guarded import, like the delta module: a build without task-lifecycle.js
-    // records the numbers and simply keeps the previous grace log.
-    const tl = typeof D.loadTaskLifecycle === 'function' ? await D.loadTaskLifecycle() : null;
+    // Numbers only — no task log (recordRunSnapshot: nothing writes settings.taskLog).
     recordRunSnapshot({
       model,
       store: theStore,
       state: theState,
       date: model.reportDate || todayISO(),
       recordSnapshot: db && db.recordSnapshot,
-      recordShownTasks: tl && tl.recordShownTasks,
-      shippedVariants,
     });
 
     if (opts.autoDownload) {

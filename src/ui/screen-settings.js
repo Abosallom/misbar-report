@@ -8,17 +8,22 @@
 // mirror of the automation panel), live source (Grafana + cached-tracker), and
 // backup (export/import).
 
-import { SNAPSHOT_SEED, REPORT_OPTIONS_SEED, AUTOMATION_SEED } from '../seeds/defaults.js?v=v2026-10-11.2';
-import { normalizeDeltaMode } from '../model/delta-baseline.js?v=v2026-10-11.2';
+import { SNAPSHOT_SEED, REPORT_OPTIONS_SEED, AUTOMATION_SEED } from '../seeds/defaults.js?v=v2026-10-13.1';
+import { normalizeDeltaMode } from '../model/delta-baseline.js?v=v2026-10-13.1';
 // The connection test's per-hospital line (STR.settings) — ar.js is pure and DOM-free
 // (every other screen imports it), so module-smoke's bare-Node import still holds.
-import { STR } from '../i18n/ar.js?v=v2026-10-11.2';
+import { STR } from '../i18n/ar.js?v=v2026-10-13.1';
 // NAMESPACE import on purpose: the access tab reads lock.currentUser(), which is a
 // newer export. A named import would throw at link time on any build of lock.js that
 // predates it (and take the whole settings screen down); a namespace import lets the
 // tab degrade to 'unknown user' instead. lock.js is DOM-free at module scope, so this
 // stays importable in bare Node (test/module-smoke).
-import * as lock from './lock.js?v=v2026-10-11.2';
+import * as lock from './lock.js?v=v2026-10-13.1';
+// The project tracker document (tracker CONTRACT §1.3): the review editor's pending save
+// (flushed before this screen loads its working copy — its autosave would otherwise
+// write the stale cache back), and the one "is this a tagged tracker" rule.
+import { trackerSaver, trackerMetaLine } from './components.js?v=v2026-10-13.1';
+import { resolveProjectTracker } from '../model/report-model.js?v=v2026-10-13.1';
 
 const TABS = [
   { id: 'tat', label: 'مدة الفحوصات' },
@@ -56,15 +61,30 @@ const ACCOUNT_COMMANDS = [
 
 // Report-options tab field lists. Slide keys toggle the middle slides; card keys
 // mirror EngineOutput.deltas / exec-slide KPI cards. Order is display order.
+// 'tracker' («متابعة المشروع», 2026-10-13) replaced 'action' («المهام» — the old tracker's
+// task slide; the key may linger in stored docs, inert). `optIn` = absent means OFF
+// (build-spec OPT_IN_SLIDES); every other slide reads an absent key as ON, so the
+// checkbox must too — a doc saved before a key existed would otherwise show a slide the
+// deck renders as unticked.
 const REPORT_SLIDE_FIELDS = [
   { key: 'execFunnel', label: 'الملخص التنفيذي ورحلة الطلب' },
   { key: 'monthly', label: 'الطلبات الشهرية' },
   { key: 'sendout', label: 'أين تُجرى الفحوصات — محلي مقابل دولي' },
   { key: 'compliance', label: 'مقياس الالتزام' },
-  { key: 'action', label: 'المهام' },
-  { key: 'challenges', label: 'التحديات والمخاطر' },
-  { key: 'definitions', label: 'منهجية الأرقام' },
+  { key: 'tracker', label: 'متابعة المشروع (كل أنواع التقارير)' },
+  { key: 'challenges', label: 'التحديات والمخاطر (تقرير المستشفى الواحد، عند وجود محتوى)' },
+  { key: 'definitions', label: 'منهجية الأرقام', optIn: true },
 ];
+
+/** Is a slide ON in reportOptions.slides? A stored boolean wins; an absent key is the
+ *  seed's value, else ON (OFF for an opt-in slide). Pure; exported for node tests. */
+export function slideFieldOn(slides, field) {
+  const v = slides && typeof slides === 'object' ? slides[field.key] : undefined;
+  if (typeof v === 'boolean') return v;
+  const seed = REPORT_OPTIONS_SEED.slides && REPORT_OPTIONS_SEED.slides[field.key];
+  if (typeof seed === 'boolean') return seed;
+  return !field.optIn;
+}
 const REPORT_CARD_FIELDS = [
   { key: 'total', label: 'إجمالي الطلبات' },
   { key: 'awaitingDispatch', label: 'في انتظار الشحن' },
@@ -124,15 +144,6 @@ const AUTOMATION_FIELDS = [
 const CORS_HINT =
   'إذا كان الخطأ بسبب CORS فيجب على مسؤول Grafana السماح للنطاق https://abosallom.github.io';
 
-// Deterministic 'YYYY-MM-DD HH:MM' formatter — avoids locale drift across browsers.
-function fmtDateTime(iso) {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return String(iso);
-  const p = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
-}
-
 // Editable snapshot numbers (E6): the full previous-report figure set, in the
 // order EngineOutput.deltas exposes them. Labels are Arabic, RTL-friendly.
 const SNAPSHOT_FIELDS = [
@@ -188,6 +199,9 @@ const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 export function render(container, ctx) {
   const store = ctx.store;
   const state = ctx.state || {};
+  // A review edit to the project tracker still inside its save debounce lands first, so
+  // the working copy below is current (see the import note).
+  trackerSaver.flush();
   // Working document holder; reassigned after every save so closures stay fresh.
   const S = { doc: store.loadSettings() };
   // extraLabs: lab keys typed by hand in the automation tab this session — they
@@ -959,7 +973,7 @@ export function render(container, ctx) {
         // (b) included slides
         groupHead('الشرائح المضمّنة'),
         ...REPORT_SLIDE_FIELDS.map((f) =>
-          checkField(f.label, () => ro().slides[f.key], (v) => { ro().slides[f.key] = v; })),
+          checkField(f.label, () => slideFieldOn(ro().slides, f), (v) => { ro().slides[f.key] = v; })),
         // (c) KPI cards
         groupHead('بطاقات المؤشرات'),
         // A field may carry an optional `hint` (one st-help line under its checkbox) —
@@ -1339,15 +1353,24 @@ export function render(container, ctx) {
       },
     });
 
-    // -- الملف المتتبع المحفوظ (cached tracker) -------------------------------
+    // -- ملف متابعة المشروع المحفوظ (settings.cachedTracker) --------------------
+    // The persisted project tracker: the last upload plus its website edits — what a
+    // file-less run and the automation use. Shows file · tasks · loaded · last web edit.
+    // An OLD-format cache (untagged, from before 2026-10-13) is no tracker: said so, and
+    // still clearable. «مسح» drops the document from this session too, so the open
+    // report does not keep showing (and re-saving) it.
     const cachedInfo = h('span', { class: 'st-badge' });
     const clearCachedBtn = h('button', {
       class: 'st-btn st-btn--danger',
       type: 'button',
       text: 'مسح',
       onClick: () => {
-        if (!confirm('مسح آخر ملف متتبع محفوظ؟')) return;
+        if (!confirm(STR.tracker.settingsClearConfirm)) return;
+        trackerSaver.cancel();
         store.updateCachedTracker(null);
+        if (state.parsed) state.parsed.tracker = null;
+        if (state.files) state.files.tracker = null;
+        if (state.reportModel) state.reportModel.projectTracker = null;
         S.doc = store.loadSettings();
         paintCached();
         toast('تم المسح');
@@ -1355,12 +1378,15 @@ export function render(container, ctx) {
     });
     function paintCached() {
       const ct = S.doc.cachedTracker;
-      if (ct && ct.model) {
-        const count = Array.isArray(ct.model.tasks) ? ct.model.tasks.length : 0;
-        cachedInfo.textContent = `${fmtDateTime(ct.updatedAt)} — ${count} مهمة`;
+      const tracker = resolveProjectTracker(null, S.doc);
+      if (tracker) {
+        cachedInfo.textContent = trackerMetaLine(tracker);
+        clearCachedBtn.style.display = '';
+      } else if (ct) {
+        cachedInfo.textContent = STR.tracker.settingsOld;
         clearCachedBtn.style.display = '';
       } else {
-        cachedInfo.textContent = 'لا يوجد';
+        cachedInfo.textContent = STR.tracker.settingsNone;
         clearCachedBtn.style.display = 'none';
       }
     }
@@ -1394,7 +1420,7 @@ export function render(container, ctx) {
         h('div', { class: 'st-addbar' }, [testBtn]),
         testMsg,
         h('div', { class: 'st-field' }, [
-          h('label', { class: 'st-label', text: 'آخر ملف متتبع محفوظ' }),
+          h('label', { class: 'st-label', text: STR.tracker.settingsLabel }),
           h('div', { class: 'st-toolbar' }, [cachedInfo, clearCachedBtn]),
         ]),
       ]),

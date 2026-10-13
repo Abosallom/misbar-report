@@ -105,7 +105,13 @@ test('buildHospitalModel kamc — deep-equals compute → buildReportModel (gold
     tatLookup: TAT_LOOKUP, historicalConstants: HISTORICAL_CONSTANTS_SEED, snapshot: SNAPSHOT_SEED,
     reportOptions: REPORT_OPTIONS_SEED,
   };
-  const tracker = { tasks: [{ task: 't', status: 'مستمر', dueDate: '10-07-2026', category: 'لين' }], challenges: [], risks: [] };
+  // UPDATED 2026-10-13 (tracker CONTRACT §1.4): a tagged ProjectTracker (synthetic), the
+  // only shape a model carries — the old {tasks, challenges, risks} one is now "no tracker".
+  const tracker = {
+    format: 'misbar-task-tracker-v1', fileName: 'synthetic.xlsx', loadedAt: '2026-07-09T06:00:00.000Z', editedAt: null, warnings: [],
+    tasks: [{ id: '1.1', wbs: '1.1', track: 'T', milestone: 'M', workstream: 'W', workPackage: 'P', task: 't', taskType: '', organization: 'LEAN',
+      owner: 'Owner A', priority: 'High', status: 'In Progress', due: '2026-07-10', predecessor: '', nextAction: '', definitionOfDone: '', notes: '' }],
+  };
   for (const excludeNoTat of [false, true]) {
     const s = { ...settings, reportOptions: { ...REPORT_OPTIONS_SEED, excludeNoTat } };
     // automation/pipeline.js stepEngine, verbatim.
@@ -121,6 +127,7 @@ test('buildHospitalModel kamc — deep-equals compute → buildReportModel (gold
     assert.equal(got.hospital, 'kamc');
     const { hospital, ...rest } = got;
     assert.deepStrictEqual(rest, want, `excludeNoTat=${excludeNoTat}`);
+    assert.equal(got.projectTracker, tracker, 'the model carries the very tracker document');
     assert.equal('noTestMenu' in got, false, 'the KAMC model carries no SGH flag');
     assert.equal('scope' in got, false, 'no scope given → no scope fields (the automation model)');
   }

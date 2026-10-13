@@ -41,9 +41,14 @@ export const REPORT_OPTIONS_SEED = {
   // 'challenges' is the «التحديات والمخاطر» slide split out of the old
   // tasks-and-challenges slide (2026-08-04); it ships ON like the other content
   // slides, and build-spec also renders it when the key is absent entirely.
+  // 'tracker' is the project-tracker «متابعة المشروع» slide(s) (2026-10-13), offered in all
+  // three report types; ON, and an absent key also reads ON in both deck builders, so
+  // store.backfillReportOptions filling it into an existing install changes nothing.
+  // 'action' (the old «المهام» slide) is RETIRED and inert — no builder reads it; it stays
+  // here only so saved settings and their import validation keep the same key set.
   slides: {
     execFunnel: true, monthly: true, compliance: true, action: true, challenges: true,
-    sendout: true, definitions: false,
+    sendout: true, definitions: false, tracker: true,
   },
   kpiCards: {
     total: true,

@@ -5,8 +5,13 @@
 // What IS stored is configuration plus two integration fields:
 //   • grafana — live-source config. grafana.accessToken is a Grafana PUBLIC-
 //     dashboard token: view-only, server-side-masked data, never a login/PHI key.
-//   • cachedTracker — the last parsed Project Tracker (PROJECT-management content:
-//     tasks/challenges/risks). This is explicitly allowed; it is NOT patient data.
+//   • cachedTracker — the project task tracker («ملف متابعة المشروع»), a PERSISTED
+//     DOCUMENT: the last uploaded MISBAR Task Tracker plus every edit made to it on the
+//     website (ProjectTracker, tagged format 'misbar-task-tracker-v1' — contracts.js,
+//     ingest/task-tracker.js). PROJECT-management content (tasks, owners, dates); this
+//     is explicitly allowed; it is NOT patient data. Only the tagged shape is ever kept:
+//     the OLD tracker's untagged {tasks, challenges, risks} cache is dropped on load and
+//     on import (see trackerCacheIsStale).
 //   • taskLog (v6) — the closed-task grace bookkeeping (model/task-lifecycle.js):
 //     normalized TASK TEXT → {openOn, closedOn}. NO NEW DATA CLASS: it is the same
 //     project-management content cachedTracker already stores, kept in plaintext so
@@ -15,17 +20,23 @@
 // throws on write; on failure we fall back to an in-memory doc and expose
 // isEphemeral() so the UI can warn the user their edits will not persist.
 
-import { SETTINGS_KEY } from './contracts.js?v=v2026-10-11.2';
-import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-10-11.2';
-import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-10-11.2';
+import { SETTINGS_KEY } from './contracts.js?v=v2026-10-13.1';
+import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-10-13.1';
+import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-10-13.1';
 import {
   HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED, GRAFANA_SEED, REPORT_OPTIONS_SEED,
   SNAPSHOT_HISTORY_SEED, AUTOMATION_SEED, TASK_LOG_SEED,
-} from './seeds/defaults.js?v=v2026-10-11.2';
-import { DELTA_MODES, canonicalDeltaMode } from './model/delta-baseline.js?v=v2026-10-11.2';
+} from './seeds/defaults.js?v=v2026-10-13.1';
+import { DELTA_MODES, canonicalDeltaMode } from './model/delta-baseline.js?v=v2026-10-13.1';
 import {
   sanitizeTaskLog, recordShownTasks, TASK_LOG_LIMIT, TASK_KEY_MAX,
-} from './model/task-lifecycle.js?v=v2026-10-11.2';
+} from './model/task-lifecycle.js?v=v2026-10-13.1';
+// The ProjectTracker shape has ONE owner — the module that produces it. The store only
+// asks "is this the tagged document?" and "give me its clean copy", exactly as it
+// defers the taskLog entry shape to task-lifecycle.js above.
+import {
+  TRACKER_FORMAT, isProjectTracker, normalizeProjectTracker,
+} from './ingest/task-tracker.js?v=v2026-10-13.1';
 
 export const SCHEMA_VERSION = 9;
 
@@ -172,9 +183,25 @@ function buildSeedDoc() {
 }
 
 // Defensive cap on the serialized cachedTracker model (chars). Keeps a single
-// oversized parse from bloating localStorage and tripping the quota for everything
-// else. The Project Tracker is small in practice; this only guards pathologies.
+// oversized document from bloating localStorage and tripping the quota for everything
+// else. The task tracker is small in practice — the user's 34-task workbook serializes
+// to ~15k chars, i.e. the cap leaves room for ~20x that (several hundred tasks with
+// long notes) — so this only guards pathologies. The SAME cap applies to an imported
+// backup's tracker, so export → import is closed under it.
 const CACHED_TRACKER_MAX = 300_000;
+
+/**
+ * True when doc.cachedTracker holds something that is not the tagged ProjectTracker
+ * — above all the OLD tracker's untagged {tasks, challenges, risks} model, which every
+ * install that used the retired «سجل المهام» file still carries. That cache must never
+ * reach the new tracker slides / editor, so it is dropped (→ null: "no cached tracker")
+ * on every load path. null / absent is not stale.
+ */
+function trackerCacheIsStale(doc) {
+  const ct = doc.cachedTracker;
+  if (ct == null) return false;
+  return !(isPlainObject(ct) && isProjectTracker(ct.model) && typeof ct.updatedAt === 'string');
+}
 
 function tryGet(key) {
   try {
@@ -236,6 +263,12 @@ function migrateSnapshotShape(doc) {
     if (typeof doc.grafana.dataKey !== 'string') doc.grafana.dataKey = '';
   }
   if (!('cachedTracker' in doc)) doc.cachedTracker = null;
+  // The tracker-format migration (2026-10-13). Shape-based and idempotent rather than a
+  // schemaVersion step: it has to hold for EVERY way an old cache can arrive (a stored
+  // doc of any version, the main.js fallback shim's writes), and a tag check is exact —
+  // unlike the default-reset migrations there is no user choice to protect here, the
+  // old shape simply cannot be read by anything any more.
+  if (trackerCacheIsStale(doc)) doc.cachedTracker = null;
   backfillReportOptions(doc); // add reportOptions + any new slide/card subkeys + deltaMode
   if (!isPlainObject(doc.snapshotHistory)) doc.snapshotHistory = {}; // v3 rolling history
   backfillAutomation(doc); // v4 automation block (all switches default false)
@@ -593,7 +626,14 @@ function migrate(doc) {
     console.warn('[misbar/store] settings root is not an object — resetting to seeds.');
     return persist(buildSeedDoc());
   }
-  if (doc.schemaVersion === SCHEMA_VERSION) return migrateSnapshotShape(doc);
+  if (doc.schemaVersion === SCHEMA_VERSION) {
+    // Same-version loads are not persisted (nothing changed) — EXCEPT when the pass
+    // drops an old-format tracker cache: write that once, so the stored doc stops
+    // carrying the dead tasks/challenges/risks instead of re-dropping them every load.
+    const staleTracker = trackerCacheIsStale(doc);
+    migrateSnapshotShape(doc);
+    return staleTracker ? persist(doc) : doc;
+  }
   if (doc.schemaVersion === 8) return persist(migrateV8toV9(doc));
   if (doc.schemaVersion === 7) return persist(migrateV7toV9(doc));
   if (doc.schemaVersion === 6) return persist(migrateV6toV9(doc));
@@ -694,12 +734,19 @@ export function updateSnapshot({ asOf, numbers } = {}) {
 }
 
 /**
- * Stores (or clears) the last successfully parsed Project Tracker. Pass a
- * TrackerModel to cache it as {model, updatedAt}; pass null to clear it. This is
- * project-management content (tasks/challenges/risks), NOT patient data.
- * Guard: the serialized model must be under CACHED_TRACKER_MAX chars, else we
- * throw rather than risk exhausting the localStorage quota.
- * @param {import('./contracts.js').TrackerModel|null} model
+ * Stores (or clears) the project task tracker document. Pass a ProjectTracker to cache
+ * it as {model, updatedAt}; pass null to clear it. Called for a fresh upload (editedAt
+ * null) AND for every website edit (the caller stamps editedAt) — the cache IS the
+ * document, so edits survive reloads and the automation publishes them. This is
+ * project-management content (tasks, owners, dates), NOT patient data.
+ * The stored copy is normalizeProjectTracker's: exactly the documented keys, string
+ * fields, unique ids — anything a screen attaches to the live object (UI state, the
+ * parser's internals) is not persisted. editedAt / fileName / loadedAt / warnings are
+ * kept as given.
+ * Guards: an UNTAGGED model (the old tracker's shape, or anything else) is refused,
+ * and the serialized model must be under CACHED_TRACKER_MAX chars — both throw rather
+ * than persist something no reader accepts or risk exhausting the localStorage quota.
+ * @param {import('./contracts.js').ProjectTracker|null} model
  */
 export function updateCachedTracker(model) {
   const doc = loadSettings();
@@ -707,14 +754,18 @@ export function updateCachedTracker(model) {
     doc.cachedTracker = null;
     return saveSettings(doc);
   }
-  const serialized = JSON.stringify(model);
+  const clean = normalizeProjectTracker(model);
+  if (!clean) {
+    throw new Error('صيغة ملف متابعة المشروع غير معروفة — لم يُحفظ. (المتوقع مستند MISBAR Task Tracker.)');
+  }
+  const serialized = JSON.stringify(clean);
   if (serialized.length >= CACHED_TRACKER_MAX) {
     throw new Error(
       `نموذج المتتبع كبير جداً للتخزين (${serialized.length} حرفاً، الحد ${CACHED_TRACKER_MAX}). ` +
         'لن يُحفظ للحفاظ على سلامة التخزين المحلي.',
     );
   }
-  doc.cachedTracker = { model: clone(model), updatedAt: nowIso() };
+  doc.cachedTracker = { model: clean, updatedAt: nowIso() };
   return saveSettings(doc);
 }
 
@@ -884,6 +935,24 @@ function validateImport(doc) {
       if (typeof ct.updatedAt !== 'string') {
         throw new Error('حقل cachedTracker.updatedAt غير صالح: يجب أن يكون نصاً.');
       }
+      // A TAGGED model is the task tracker document and is checked as one. An untagged
+      // model is the retired tracker's cache (every pre-2026-10-13 backup has one): NOT
+      // an error — rejecting it would make every old backup unimportable — it is simply
+      // discarded by pickImportKeys, keeping this device's own tracker.
+      if (ct.model.format === TRACKER_FORMAT && !Array.isArray(ct.model.tasks)) {
+        throw new Error('حقل cachedTracker.model.tasks غير صالح: يجب أن يكون مصفوفة.');
+      }
+      if (isProjectTracker(ct.model)) {
+        ct.model.tasks.forEach((t, i) => {
+          if (!isPlainObject(t)) {
+            throw new Error(`مهمة غير صالحة في cachedTracker.model.tasks (رقم ${i + 1}).`);
+          }
+        });
+        const size = JSON.stringify(normalizeProjectTracker(ct.model)).length;
+        if (size >= CACHED_TRACKER_MAX) {
+          throw new Error(`حقل cachedTracker كبير جداً (${size} حرفاً، الحد ${CACHED_TRACKER_MAX}).`);
+        }
+      }
     }
   }
   if ('reportOptions' in doc) {
@@ -1001,7 +1070,10 @@ const IMPORT_KEYS = ['schemaVersion', 'tatLookup', 'displayNames', 'scorecard', 
 // NOT a scope key: the review screen's report scope (labs / shipments / date range)
 // is per-run state and is never persisted — there is deliberately no settings field
 // for it, here or anywhere in IMPORT_KEYS.
-const REPORT_OPTION_SLIDE_KEYS = ['execFunnel', 'monthly', 'compliance', 'action', 'challenges', 'sendout', 'definitions'];
+// 'tracker' (2026-10-13) is the «متابعة المشروع» slide(s) built from the task tracker,
+// offered in every report type. 'action' — the retired task-list slide it replaced —
+// stays importable for compatibility (old backups carry it); nothing reads it any more.
+const REPORT_OPTION_SLIDE_KEYS = ['execFunnel', 'monthly', 'compliance', 'action', 'challenges', 'sendout', 'definitions', 'tracker'];
 const REPORT_OPTION_CARD_KEYS = [
   'total', 'awaitingDispatch', 'awaitingResults', 'completed', 'rejected', 'lateNoResult', 'shippedNotReceived',
   // 'turnaround' (v9): the monthly slide's line chart + overall-average card. It was
@@ -1135,12 +1207,17 @@ function pickImportKeys(doc) {
   }
   if ('cachedTracker' in out) {
     const ct = out.cachedTracker;
+    const model = isPlainObject(ct) && typeof ct.updatedAt === 'string'
+      ? normalizeProjectTracker(ct.model) : null;
     if (ct === null) {
       out.cachedTracker = null;
-    } else if (isPlainObject(ct) && isPlainObject(ct.model) && typeof ct.updatedAt === 'string') {
-      out.cachedTracker = { model: ct.model, updatedAt: ct.updatedAt };
+    } else if (model) {
+      // The clean copy: known keys only, like every other picked block.
+      out.cachedTracker = { model, updatedAt: ct.updatedAt };
     } else {
-      // Anything else is not a valid cache — drop it rather than persist junk.
+      // Not the task tracker document — above all the OLD tracker's untagged cache in a
+      // pre-2026-10-13 backup. Drop it and keep this device's own tracker: the old
+      // shape is unreadable now, and it must not wipe a current one either.
       delete out.cachedTracker;
     }
   }
@@ -1313,6 +1390,11 @@ export function importSettings(jsonText) {
       && !('defVersion' in incoming.snapshot)) {
     delete merged.snapshot.defVersion;
   }
+  // The tracker document REPLACES, it never merges: it is one document, and a key-wise
+  // deep merge would graft this device's leftovers onto the imported one (a stale
+  // editedAt or fileName beside someone else's tasks, or the old tracker's
+  // challenges/risks beside the new document).
+  if ('cachedTracker' in incoming) merged.cachedTracker = clone(incoming.cachedTracker);
   // The taskLog merge is a per-key UNION, so two in-bounds logs can produce an
   // out-of-bounds one. Re-apply the cap the validator enforces (see capTaskLog),
   // and ONLY when the union actually overflowed — an in-bounds import must merge

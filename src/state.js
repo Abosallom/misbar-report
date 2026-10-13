@@ -27,6 +27,13 @@
 // kept rows of both hospitals index it by their own lineNo, so the pairing holds, and
 // the filtered-CSV download walks the orders it is given — an excluded line is never
 // handed back.
+//
+// parsed.tracker — the project task tracker («ملف متابعة المشروع»): the SAME
+// ProjectTracker document (contracts.js, ingest/task-tracker.js) that store.js keeps in
+// settings.cachedTracker.model, or null when none is loaded. A fresh upload replaces
+// both; a website edit updates this object and writes it back to the cache, so the two
+// never diverge. Project-management content, not PHI. The OLD tracker's untagged
+// {tasks, challenges, risks} model is never put here (store.js drops it from the cache).
 
 /** A fresh `parsed` bucket. `orders` is an ACCESSOR, not a plain field: replacing the
  *  order rows with a different array drops `raw` AND resets `ordersByHospital` to
@@ -71,7 +78,7 @@ function freshParsed() {
 
 /** @type {{
  *   files:{csv:File|null, tracker:File|null},
- *   parsed:{orders:import('./contracts.js').OrderRow[]|null, tracker:import('./contracts.js').TrackerModel|null, summary:Object|null,
+ *   parsed:{orders:import('./contracts.js').OrderRow[]|null, tracker:import('./contracts.js').ProjectTracker|null, summary:Object|null,
  *           raw:{fields:string[], records:Object[], fileName?:string}|null,
  *           ordersByHospital:{kamc:import('./contracts.js').OrderRow[]|null, sgh:import('./contracts.js').OrderRow[]|null},
  *           excludedHospitals:{id:string|null, name:string|null, count:number}[]},

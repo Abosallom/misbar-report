@@ -92,8 +92,11 @@ test('UNSCOPED: slide ids are the historic deck, with no tag and no shipments sl
   for (const variant of VARIANTS) {
     const spec = build({ ...clone(), scope: EMPTY_SCOPE, shipmentDetails: [detail('ELAB1', { completed: 2 })] }, variant);
     // The mock has no send-out figures and definitions is opt-in, so this is the default
-    // seven-slide deck. Stale shipmentDetails without a scope must not summon the slide.
-    assert.deepEqual(spec.map((s) => s.id), ['cover', 'execFunnel', 'monthly', 'compliance', 'action', 'challenges', 'thanks']);
+    // deck. Stale shipmentDetails without a scope must not summon the slide.
+    // UPDATED 2026-10-13 (new project tracker): the retired 'action' (المهام) slot now holds
+    // the «متابعة المشروع» pages — the fixture's synthetic 18-task tracker is two of them —
+    // and they are the same in both variants.
+    assert.deepEqual(spec.map((s) => s.id), ['cover', 'execFunnel', 'monthly', 'compliance', 'tracker', 'tracker-cont-1', 'challenges', 'thanks']);
     for (const s of spec) assert.ok(!texts(s).includes(TAG), `${s.id}: no scoped pill on an unscoped deck`);
     assert.ok(texts(spec[0]).some((t) => t.startsWith('تاريخ التقرير: ')), 'the cover keeps the report-date line');
     assert.ok(!texts(spec[0]).some((t) => t.startsWith('النطاق: ') || t.startsWith('الفترة: ')));
@@ -233,7 +236,8 @@ const sendoutOf = (n) => ({
 });
 const withEverySlide = (scope, details = [], countries = 2) => scoped(scope, details, {
   reportOptions: { slides: { definitions: true } },
-  tasksInternal: Array.from({ length: 40 }, (_, i) => ({ ...MOCK_REPORT_MODEL.tasksInternal[0], task: `t${i}` })),
+  // 40 tracker rows → continuation pages (was 40 tasksInternal rows for the retired action slide).
+  projectTracker: { ...MOCK_REPORT_MODEL.projectTracker, tasks: Array.from({ length: 40 }, (_, i) => ({ ...MOCK_REPORT_MODEL.projectTracker.tasks[0], id: `t${i}`, task: `t${i}` })) },
   sendout: sendoutOf(countries),
 });
 

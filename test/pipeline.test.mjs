@@ -431,53 +431,104 @@ test('the snapshot fallback runs when the direct query fails with a TypeError', 
 });
 
 /* ------------------------------------------------------------------ *
- * Task-lifecycle state (settings.taskLog)
+ * Task-lifecycle state (settings.taskLog) + the project tracker
  *
- * UPDATED 2026-10-11 (user rule): the automated run now publishes the MAIN report —
- * KAMC + SGH — whose deck has NO task slides, so it must NOT spend the closed-task grace
- * log (a closed task's one grace showing would be burnt on a deck that never showed
- * it). The run's model still CARRIES the drafted task lists (the review screen reuses
- * them), which is exactly why the guard lives in recordRunSnapshot and is pinned here.
- * The KAMC report keeps writing the log (test/ui-hospital.test.mjs).
+ * UPDATED 2026-10-13 (tracker CONTRACT §1.4 / §1.8): the closed-task log is RETIRED —
+ * nothing writes settings.taskLog any more (the old tracker's "closed task shown once"
+ * rule keyed on its Arabic categories/statuses; the new tracker is a persisted document
+ * shown as it is). The automation does not even load model/task-lifecycle.js. The run's
+ * model carries the NEW tracker as `projectTracker` — resolved from this run's parsed
+ * tracker, else the cached (web-edited) document, tagged ProjectTrackers only.
+ * (Previously: the run's model carried the drafted tasksCurrent/tasksInternal and the
+ * guard lived in recordRunSnapshot's main-report branch.)
  * ------------------------------------------------------------------ */
 
+/** A SYNTHETIC tagged ProjectTracker (made-up WBS / tasks / owners). */
+const projectTracker = (n = 2, tag = 'misbar-task-tracker-v1') => ({
+  format: tag, fileName: 'synthetic-tracker.xlsx', loadedAt: '2026-07-19T06:00:00.000Z', editedAt: null, warnings: [],
+  tasks: Array.from({ length: n }, (_, i) => ({
+    id: `9.${i + 1}`, wbs: `9.${i + 1}`, track: 'Track Z', milestone: 'Milestone Z', workstream: 'WS', workPackage: 'WP',
+    task: `Synthetic task ${i + 1}`, taskType: 'Deliverable', organization: 'LEAN', owner: 'Owner Z', priority: 'High',
+    status: 'In Progress', due: '2026-07-30', predecessor: '', nextAction: '', definitionOfDone: '', notes: '',
+  })),
+});
+
+// The OLD rows a legacy model carried — kept on the fake to prove that even a model that
+// still HAS task arrays gets no task-log write.
 const LIFECYCLE_ROWS = {
   tasksCurrent: [{ task: 'مهمة خارجية', status: 'قيد التنفيذ', category: 'نوبكو', hidden: false }],
   tasksInternal: [{ task: 'مهمة داخلية', status: 'مستمر', category: 'لين', hidden: false }],
 };
 
-// A model fake that DOES carry the two task arrays (the real report-model always does).
-const withTasksDeps = (over = {}) => fakeDeps({
-  loadReportModel: async () => ({
-    buildReportModel: ({ engineOutput, reportDate }) => ({
-      reportDate, kpi: engineOutput, ...LIFECYCLE_ROWS,
+/** Deps whose report-model fake records the `tracker` it was handed and carries it on as
+ *  projectTracker (as the real one does), plus a lifecycle seam that counts every touch. */
+const withTasksDeps = (over = {}) => {
+  const seen = { trackers: [], bothTrackers: [], lifecycleLoads: 0, shownTasks: 0 };
+  const deps = fakeDeps({
+    loadReportModel: async () => ({
+      buildReportModel: ({ engineOutput, reportDate, tracker }) => {
+        seen.trackers.push(tracker);
+        return { reportDate, kpi: engineOutput, projectTracker: tracker, ...LIFECYCLE_ROWS };
+      },
     }),
-  }),
-  loadTaskLifecycle: async () => taskLifecycle,
-  ...over,
-});
-
-test('a successful (main-report) run records the numbers but NOT the task log', async () => {
-  const store = makeStore();
-  const state = makeState();
-  let shownTasks = 0;
-  const res = await run({
-    store,
-    state,
-    deps: withTasksDeps({
-      loadTaskLifecycle: async () => ({ ...taskLifecycle, recordShownTasks: (...a) => { shownTasks += 1; return taskLifecycle.recordShownTasks(...a); } }),
-    }),
+    loadTaskLifecycle: async () => {
+      seen.lifecycleLoads += 1;
+      return { ...taskLifecycle, recordShownTasks: (...a) => { seen.shownTasks += 1; return taskLifecycle.recordShownTasks(...a); } };
+    },
+    ...over,
   });
+  const bothDeps = deps.loadHospitalReport;
+  deps.loadHospitalReport = async () => {
+    const hr = await bothDeps();
+    return { ...hr, buildBothModel: (args) => { seen.bothTrackers.push(args.tracker); return hr.buildBothModel(args); } };
+  };
+  return { deps, seen };
+};
+
+test('a successful (main-report) run records the numbers but NEVER the task log', async () => {
+  const store = makeStore({ cachedTracker: { model: projectTracker(), updatedAt: '2026-07-19T06:00:00.000Z' } });
+  const state = makeState();
+  const { deps, seen } = withTasksDeps();
+  const res = await run({ store, state, deps });
   assert.equal(statusOf(res, 'generate'), 'done');
-  // The model handed on still carries the drafted lists (the review screen reuses them)…
-  assert.deepEqual(state.reportModel.tasksCurrent, LIFECYCLE_ROWS.tasksCurrent);
-  // …but the main report never showed them: no lifecycle write at all.
-  assert.equal(shownTasks, 0, 'recordShownTasks is never called');
+  assert.equal(state.reportModel.projectTracker, store.settings.cachedTracker.model, 'the model carries the cached tracker');
+  assert.equal(seen.lifecycleLoads, 0, 'the task-lifecycle module is not even loaded');
+  assert.equal(seen.shownTasks, 0, 'recordShownTasks is never called');
   assert.deepEqual(store.docs, [], 'no settings write (snapshotHistory is null in the fakes)');
   // The numbers path still ran, under the run's report date.
   assert.equal(store.snapshots.length, 1);
   assert.equal(store.snapshots[0].asOf, '2026-07-20');
-  assert.ok(taskKey, 'taskKey stays importable for the KAMC-side cases');
+  assert.ok(taskKey, 'taskKey stays importable (task-lifecycle.js is kept, inert)');
+});
+
+// UPDATED 2026-10-13 (review R-2, tracker CONTRACT §1.7/§1.8): was "parsed tracker first".
+// The run publishes the PERSISTED document only — state.parsed.tracker is the same document
+// in a real session, but the never-persisted (tagged) buildMockTracker one in a mock/dev tab.
+test('resolveTracker: the cached (persisted) document only — tagged ProjectTrackers only; parsed is never read', async () => {
+  const cached = projectTracker(3);
+  const parsed = projectTracker(1);
+  const cache = (model) => ({ cachedTracker: { model, updatedAt: '2026-07-19T06:00:00.000Z' } });
+  const OLD = { tasks: [{ task: 'مهمة', status: 'مستمر', category: 'لين' }], challenges: [], risks: [] };
+  const cases = [
+    { name: 'cache only', settings: cache(cached), parsedTracker: null, want: cached },
+    { name: 'the cache wins over a parsed (e.g. mock) tracker', settings: cache(cached), parsedTracker: parsed, want: cached },
+    { name: 'a parsed tracker alone (never persisted) = no tracker', settings: {}, parsedTracker: parsed, want: null },
+    { name: 'no tracker anywhere', settings: {}, parsedTracker: null, want: null },
+    { name: 'untagged (OLD-format) cache = no tracker', settings: cache(OLD), parsedTracker: null, want: null },
+    { name: 'wrong tag = no tracker', settings: cache(projectTracker(2, 'misbar-task-tracker-v0')), parsedTracker: null, want: null },
+    { name: 'untagged parsed falls through to the tagged cache', settings: cache(cached), parsedTracker: OLD, want: cached },
+  ];
+  for (const c of cases) {
+    const store = makeStore(c.settings);
+    const state = makeState();
+    state.parsed.tracker = c.parsedTracker;
+    const { deps, seen } = withTasksDeps();
+    const res = await run({ store, state, deps });
+    assert.equal(statusOf(res, 'engine'), 'done', c.name);
+    assert.deepEqual(seen.trackers, [c.want], `${c.name}: buildReportModel's tracker`);
+    assert.deepEqual(seen.bothTrackers, [c.want], `${c.name}: buildBothModel's tracker`);
+    assert.equal(state.reportModel.projectTracker, c.want, `${c.name}: the main model's projectTracker`);
+  }
 });
 
 test('the minimal model fake (no task arrays) triggers NO taskLog write', async () => {
@@ -493,7 +544,7 @@ test('the minimal model fake (no task arrays) triggers NO taskLog write', async 
 
 test('a failed generate writes no taskLog at all', async () => {
   const store = makeStore();
-  const deps = withTasksDeps({ produceReportFiles: async () => [] });
+  const { deps } = withTasksDeps({ produceReportFiles: async () => [] });
   const res = await run({ store, deps });
   assert.equal(statusOf(res, 'generate'), 'error');
   assert.deepEqual(store.docs, [], 'no files produced → no lifecycle write');

@@ -1,15 +1,21 @@
 // ui/screen-upload.js — file upload + parse + engine kickoff (Track E).
-import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-10-11.2';
-import { el, dropZone, fileSummaryCard, toast } from './components.js?v=v2026-10-11.2';
-import { normTest } from '../contracts.js?v=v2026-10-11.2';
-import { getPapa, getXLSX } from '../vendor-loader.js?v=v2026-10-11.2';
-import { TAT_LOINC } from '../seeds/tat-lookup.js?v=v2026-10-11.2';
-import { buildLateLabsSection } from './late-labs-section.js?v=v2026-10-11.2';
-import { buildAutomationPanel } from './automation-panel.js?v=v2026-10-11.2';
+import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-10-13.1';
+import {
+  el, dropZone, fileSummaryCard, toast, trackerSaver, trackerStatusCounts, trackerStamp,
+} from './components.js?v=v2026-10-13.1';
+// The project tracker («ملف متابعة المشروع», tracker CONTRACT §1.7). resolveProjectTracker
+// is the model layer's ONE rule for "which tracker does this run have" (tagged only —
+// an install's OLD-shape cache is no tracker); static, report-model.js is pure.
+import { resolveProjectTracker } from '../model/report-model.js?v=v2026-10-13.1';
+import { normTest } from '../contracts.js?v=v2026-10-13.1';
+import { getPapa, getXLSX } from '../vendor-loader.js?v=v2026-10-13.1';
+import { TAT_LOINC } from '../seeds/tat-lookup.js?v=v2026-10-13.1';
+import { buildLateLabsSection } from './late-labs-section.js?v=v2026-10-13.1';
+import { buildAutomationPanel } from './automation-panel.js?v=v2026-10-13.1';
 // Optional filtered-CSV download (labs × order stages → the uploaded file's own rows).
 // It reads state.parsed.raw — PATIENT DATA, memory-only; see state.js for the pairing
 // rule this screen upholds at every site that writes state.parsed.orders.
-import { buildCsvExportSection } from './csv-export-section.js?v=v2026-10-11.2';
+import { buildCsvExportSection } from './csv-export-section.js?v=v2026-10-13.1';
 // THE HOSPITAL DOOR (2026-10-07; report types 2026-10-11): the feed carries KAMC's and
 // SGH's orders. Every site below that writes state.parsed.orders goes through
 // takeOrders(): parsed.orders = the KAMC rows — what EVERY surface of this screen reads
@@ -20,11 +26,11 @@ import { buildCsvExportSection } from './csv-export-section.js?v=v2026-10-11.2';
 // silently skipped the split would put another hospital's orders into every number (and
 // SGH test names into the global TAT table). hospital.js is pure (no DOM, no vendor
 // bundle), so this adds no failure mode.
-import { takeOrders } from '../model/hospital.js?v=v2026-10-11.2';
+import { takeOrders } from '../model/hospital.js?v=v2026-10-13.1';
 
 /** The SAME specifier main.js and ui/automation-panel.js import — resolving to
  *  the identical URL means the probe below hits the already-cached module. */
-const AUTOMATION_PIPELINE_URL = '../automation/pipeline.js?v=v2026-10-11.2';
+const AUTOMATION_PIPELINE_URL = '../automation/pipeline.js?v=v2026-10-13.1';
 
 /** Format an ISO timestamp as local 'HH:MM' for snapshot-freshness labels. */
 function fmtHHMM(iso) {
@@ -59,38 +65,45 @@ export function buildMockOrders() {
   ];
 }
 
+/** A SYNTHETIC ProjectTracker (the new «ملف متابعة المشروع» shape, ingest/task-tracker.js)
+ *  for the explicit dev mock mode (?mock=1) and the harnesses ONLY — never a fallback in a
+ *  real flow (a mock once printed fake tasks into a real deck). Made-up tasks and owners;
+ *  the field values use the workbook's own vocabulary (statuses incl. its 'Deleyed'
+ *  spelling, a 'daily' due, a blank status) so every display branch is exercised. */
+// Identity set of the mock documents handed out, so the review editor can tell one apart
+// WITHOUT a marker key on the document (its shape is the parser's, nothing extra rides
+// into storage): edits to a mock are previewed but never saved to settings.cachedTracker,
+// which the automation publishes from.
+const MOCK_TRACKERS = new WeakSet();
+/** True for a document buildMockTracker made (pure; exported for the review screen). */
+export function isMockTracker(t) {
+  return !!t && typeof t === 'object' && MOCK_TRACKERS.has(t);
+}
+
 export function buildMockTracker() {
-  return {
-    // فئة التقرير 'لين' routes a task to the internal (داخلي) deck — the COMPLETE لين
-    // log, every status including مغلق and hidden (collapsed done-work) rows. The rest
-    // are 'نوبكو' (external deck). Both variants get real content in demo/mock mode.
+  const at = '2026-10-01T08:00:00.000Z';
+  const task = (wbs, track, milestone, workstream, workPackage, text, taskType, organization, owner, priority, status, due, predecessor = '') => ({
+    id: wbs, wbs, track, milestone, workstream, workPackage, task: text, taskType, organization,
+    owner, priority, status, due, predecessor, nextAction: '', definitionOfDone: '', notes: '',
+  });
+  const doc = {
+    format: 'misbar-task-tracker-v1',
+    fileName: 'mock-task-tracker.xlsx',
+    loadedAt: at,
+    editedAt: null,
+    warnings: [],
     tasks: [
-      // ── لين (internal log — mixed statuses, incl. مغلق + hidden done-work) ──
-      { num: 1, task: 'تفعيل ربط النتائج آليًا مع نظام المستشفى', responsible: 'لين', owner: 'م. أحمد', dueDate: 'يومي', status: 'مستمر', category: 'لين', hidden: false },
-      { num: 2, task: 'اعتماد نموذج التقرير اليومي الموحد', responsible: 'لين', owner: 'أ. منى', dueDate: '2026-07-10', status: 'مغلق', category: 'لين', hidden: false },
-      { num: 3, task: 'تحديث جدول المدد المعيارية للفحوصات الجديدة', responsible: 'لين', owner: 'م. أحمد', dueDate: '2026-07-30', status: 'مفتوح', category: 'لين', hidden: false },
-      { num: 4, task: 'تدريب الفريق على لوحة المتابعة', responsible: 'لين', owner: 'أ. سارة', dueDate: '2026-08-01', status: 'مستمر', category: 'لين', hidden: false },
-      { num: 5, task: 'مراجعة صلاحيات المستخدمين على النظام', responsible: 'لين', owner: 'م. خالد', dueDate: '2026-07-18', status: 'متأخر', category: 'لين', hidden: false },
-      { num: 6, task: 'توثيق إجراءات التشغيل القياسية', responsible: 'لين', owner: 'أ. منى', dueDate: '2026-07-28', status: 'مفتوح', category: 'لين', hidden: false },
-      { num: 7, task: 'إعداد لوحة مؤشرات الأداء الأسبوعية', responsible: 'لين', owner: 'م. أحمد', dueDate: '2026-08-06', status: 'مفتوح', category: 'لين', hidden: false },
-      { num: 8, task: 'تحديث دليل المستخدم الداخلي', responsible: 'لين', owner: 'أ. منى', dueDate: '2026-07-22', status: 'مفتوح', category: 'لين', hidden: false },
-      { num: 9, task: 'أرشفة التقارير الشهرية السابقة', responsible: 'لين', owner: 'أ. سارة', dueDate: '2026-06-30', status: 'مغلق', category: 'لين', hidden: true },
-      { num: 10, task: 'مراجعة سجل الأخطاء الأسبوعي وإغلاقه', responsible: 'لين', owner: 'م. خالد', dueDate: '2026-06-25', status: 'مغلق', category: 'لين', hidden: true },
-      // ── نوبكو (external deck) ──
-      { num: 11, task: 'إغلاق فجوة الطلبات المعلقة لدى المختبر المرجعي', responsible: 'نوبكو', owner: 'أ. سارة', dueDate: '2026-07-25', status: 'مستمر', category: 'نوبكو', hidden: false },
-      { num: 12, task: 'مراجعة عقود المختبرات المتأخرة في الرفع', responsible: 'نوبكو', owner: 'م. خالد', dueDate: '2026-07-15', status: 'متأخر', category: 'نوبكو', hidden: false },
-      { num: 13, task: 'تسريع اعتماد المختبر المرجعي الجديد', responsible: 'نوبكو', owner: 'أ. منى', dueDate: '2026-07-27', status: 'مستمر', category: 'نوبكو', hidden: false },
-      { num: 14, task: 'متابعة توريد مستلزمات سحب العينات', responsible: 'نوبكو', owner: 'م. أحمد', dueDate: '2026-08-03', status: 'مفتوح', category: 'نوبكو', hidden: false },
-    ],
-    challenges: [
-      { id: 'c1', title: 'تأخر رفع النتائج', desc: 'بعض المختبرات ترفع النتائج يدويًا مما يؤخر الظهور في النظام', impact: 'عالٍ', owner: 'أ. سارة', status: 'مفتوح', solution: 'تفعيل الربط الآلي' },
-      { id: 'c2', title: 'نقص بيانات العينات', desc: 'حقول تواريخ الاستلام غير مكتملة لبعض الطلبات', impact: 'متوسط', owner: 'م. خالد', status: 'مستمر', solution: 'إلزام إدخال التواريخ عند الاستلام' },
-    ],
-    risks: [
-      { id: 'r1', title: 'انقطاع خدمة مختبر مرجعي', desc: 'اعتماد كبير على مزود واحد لبعض الفحوصات', probability: 'متوسط', impact: 'عالٍ', owner: 'أ. منى', status: 'مفتوح' },
-      { id: 'r2', title: 'تأخر التعاقد', desc: 'قد يؤثر على استمرارية بعض الفحوصات', probability: 'منخفض', impact: 'عالٍ', owner: 'م. خالد', status: 'مفتوح' },
+      task('1.1.1', 'Integration', 'Partner A', 'Product & Integration', 'Partner A Integration', 'Confirm Partner A integration scope (mock)', 'Integration', 'NUPCO / LEAN', 'Owner A', 'High', 'Completed', '2026-09-06'),
+      task('1.1.2', 'Integration', 'Partner A', 'Product & Integration', 'Partner A Integration', 'Complete Partner A integration testing (mock)', 'Integration', 'LEAN', 'Owner B', 'Critical', 'In Progress', '2026-09-14', '1.1.1'),
+      task('1.2.1', 'Integration', 'Labs', 'Operations', 'Laboratory Operations', 'Monitor overdue tests daily (mock)', 'Recurring Activity', 'LEAN', 'Owner B', 'High', 'In Progress', 'daily'),
+      task('2.1.1', 'Rollout', 'Site X', 'Onboarding', 'Site X Onboarding', 'Close Site X readiness gaps (mock)', 'Onboarding', 'NUPCO / LEAN', 'Owner C', 'Critical', 'Deleyed', '2026-09-13'),
+      task('2.1.2', 'Rollout', 'Site X', 'Onboarding', 'Site X Onboarding', 'Site X go-live (mock)', 'Milestone', 'NUPCO / LEAN', 'Owner C', 'Critical', 'Blocked', '2026-08-13', '2.1.1'),
+      task('3.1.1', 'Governance', 'Governance', 'Governance', 'Governance Framework', 'Finalize the governance framework (mock)', 'Deliverable', 'NUPCO', 'Owner D', 'Medium', 'In Progress', ''),
+      task('3.1.2', 'Governance', 'Governance', 'Governance', 'Product Roadmap', 'Draft the product roadmap (mock)', 'Deliverable', 'LEAN', 'Owner D', 'High', '', '2026-10-30'),
     ],
   };
+  MOCK_TRACKERS.add(doc);
+  return doc;
 }
 
 /** EngineOutput mock seeded from test/fixtures numbers; deltas computed vs settings.
@@ -224,24 +237,9 @@ function normalizeOrders(res) {
   return { orders, errors: errors.map(String), raw };
 }
 
-function normalizeTracker(res) {
-  if (!res) return null;
-  const t = res.tracker || res;
-  const tasks = Array.isArray(t) ? t : (t.tasks || []);
-  return {
-    orders: null,
-    tracker: {
-      tasks,
-      challenges: t.challenges || [],
-      risks: t.risks || [],
-    },
-    errors: (res.errors || t.errors || []).map(String),
-  };
-}
-
 async function ingestCsv(file) {
   const Papa = await getPapa();
-  const mod = await tryImport('../ingest/csv.js?v=v2026-10-11.2');
+  const mod = await tryImport('../ingest/csv.js?v=v2026-10-13.1');
   const fn = pickFn(mod, ['parseKamcCsv', 'parseCsv', 'ingestCsv', 'parseOrders', 'parse']);
   if (fn) {
     const text = await file.text();
@@ -252,17 +250,23 @@ async function ingestCsv(file) {
   return { orders: null, errors: [], _missing: true };
 }
 
+/* The «ملف متابعة المشروع» upload: the NEW MISBAR Task Tracker parser, called DIRECTLY —
+ * never through callFlexible, which retries other argument shapes and rethrows the LAST
+ * error, so the parser's specific Arabic rejection («هذا ملف المتابعة القديم…», «الملف لا
+ * يطابق صيغة…») would surface as an unrelated TypeError. Throws: handleFile shows the
+ * message in the zone's error list and leaves the previous tracker and the cache alone.
+ * The ingest module is loaded on demand like the other ingest modules; absent, the upload
+ * FAILS with a message (it used to fall back to mock tasks — never again). */
 async function ingestTracker(file) {
   const XLSX = await getXLSX();
-  const mod = await tryImport('../ingest/xlsx.js?v=v2026-10-11.2');
-  const fn = pickFn(mod, ['parseTracker', 'ingestXlsx', 'parseXlsx', 'parse']);
-  if (fn) {
-    const buf = await file.arrayBuffer();
-    const out = await callFlexible(fn, [[buf, XLSX], [file, XLSX], [XLSX, buf], [XLSX, file], [{ file, buf, XLSX }]]);
-    const norm = normalizeTracker(out);
-    if (norm && norm.tracker) return norm;
-  }
-  return { tracker: null, errors: [], _missing: true };
+  const mod = await tryImport('../ingest/task-tracker.js?v=v2026-10-13.1');
+  if (!mod || typeof mod.parseTaskTracker !== 'function') throw new Error(STR.upload.trackerModuleMissing);
+  const buf = await file.arrayBuffer();
+  let tracker = mod.parseTaskTracker(buf, XLSX, { fileName: file.name });
+  if (tracker && typeof tracker.then === 'function') tracker = await tracker;
+  if (!resolveProjectTracker(tracker, null)) throw new Error(STR.upload.trackerModuleMissing);
+  if (!tracker.fileName) tracker.fileName = file.name;
+  return tracker;
 }
 
 /* ------------------------------------------------------------------ *
@@ -327,6 +331,12 @@ export async function render(container, ctx) {
   // `let` lower in render() is in its TDZ for any paint() that runs before that line.
   let csvExportBuiltFor = null;
   const errorsByKind = { csv: [], tracker: [] };
+  // Set when THIS render's upload replaced a tracker document that had website edits
+  // (its editedAt) — the summary card says so: the upload overwrote them (CONTRACT §1.3).
+  let trackerEditsReplacedAt = null;
+  // A review edit still inside its save debounce lands NOW, before this screen reads the
+  // cache (restore below) or an upload replaces the document.
+  trackerSaver.flush();
 
   const head = el('div', { class: 'screen__head' }, [
     el('h1', { text: STR.upload.title }),
@@ -451,14 +461,18 @@ export async function render(container, ctx) {
     head, heroHost, grafanaBar, dropgrid, devBar, automationPanel, summaryHost, lateLabsHost, csvExportHost, unmatchedHost, actionsHost,
   ]));
 
-  // Reuse the last-parsed Project Tracker when no fresh file was dropped —
-  // it changes rarely, so with the live Grafana source generate needs no files.
-  if (!state.parsed.tracker) {
-    const ct = store.settings && store.settings.cachedTracker;
-    if (ct && ct.model) {
-      state.parsed.tracker = ct.model;
-      state.files.tracker = state.files.tracker || { name: STR.upload.cachedTrackerName };
-      trackerZone.setLoaded(`${STR.upload.cachedTrackerName} (${String(ct.updatedAt || '').slice(0, 10)})`);
+  // Reuse the persisted project tracker (settings.cachedTracker — the last upload plus
+  // its website edits) when no fresh file was dropped: it changes rarely, so with the
+  // live Grafana source generate needs no files. TAGGED documents only: an install still
+  // holding the OLD tracker's untagged cache restores nothing (no tracker, no slides).
+  if (!resolveProjectTracker(state.parsed.tracker, null)) {
+    const cached = resolveProjectTracker(null, store.settings);
+    state.parsed.tracker = cached;
+    if (cached) {
+      const when = trackerStamp(cached.editedAt || cached.loadedAt).slice(0, 10);
+      state.files.tracker = { name: `${STR.upload.cachedTrackerName}${cached.fileName ? ` — ${cached.fileName}` : ''}${when ? ` (${when})` : ''}` };
+    } else {
+      state.files.tracker = null; // no document (an old-shape cache restores nothing)
     }
   }
 
@@ -476,7 +490,7 @@ export async function render(container, ctx) {
     const gcfg = (store.settings && store.settings.grafana) || {};
     const dataKey = (gcfg.dataKey || '').trim();
     try {
-      const mod = await import('../ingest/grafana.js?v=v2026-10-11.2');
+      const mod = await import('../ingest/grafana.js?v=v2026-10-13.1');
       const asOf = state.reportDate || todayISO();
       const directConfigured = !!(gcfg.baseUrl && gcfg.accessToken);
       try {
@@ -537,7 +551,10 @@ export async function render(container, ctx) {
    *  orders load normally but raw stays null — the filtered-CSV download (patient
    *  columns) exists only for a file the user dropped themselves (state.js). */
   async function handleFile(kind, file, { dev = false } = {}) {
-    state.files[kind] = file;
+    // The tracker's file is recorded only once it PARSED: a rejected file (the old
+    // tracker, an unrelated workbook) leaves the previous document in place, and its
+    // name must not be shown as the loaded one when this screen is painted again.
+    if (kind === 'csv') state.files.csv = file;
     (kind === 'csv' ? csvZone : trackerZone).setBusy(true);
     errorsByKind[kind] = [];
     try {
@@ -567,18 +584,28 @@ export async function render(container, ctx) {
         }
         state.heroDataAt = new Date().toISOString(); // orders (re)landed — refresh hero freshness
       } else {
-        const res = await ingestTracker(file);
-        if (res._missing || !res.tracker) {
-          usedMock = true;
-          state.parsed.tracker = buildMockTracker();
-          toast(STR.upload.ingestMissing, 'warn');
-        } else {
-          state.parsed.tracker = res.tracker;
-          errorsByKind.tracker = res.errors || [];
-          // Persist for file-less runs (project content only — never patient data).
-          try {
-            if (typeof store.updateCachedTracker === 'function') store.updateCachedTracker(res.tracker);
-          } catch (err) { console.warn('[upload] tracker cache failed', err); }
+        // Throws on a wrong file (old tracker / unrelated workbook) with the parser's
+        // Arabic message → the catch below lists it and marks the zone; the previous
+        // tracker and the cache stay untouched.
+        const tracker = await ingestTracker(file);
+        // The document this upload REPLACES: had it been edited on the website, say so.
+        // A save still pending for it is dropped, not flushed — it would land on top of
+        // the new file in the cache.
+        trackerSaver.cancel();
+        const prev = resolveProjectTracker(state.parsed.tracker, store.settings);
+        trackerEditsReplacedAt = prev && prev.editedAt ? prev.editedAt : null;
+        state.parsed.tracker = tracker;
+        state.files.tracker = file;
+        // A review model drafted earlier carries the OLD document; the review re-sources
+        // it on render anyway (sessionProjectTracker) — this keeps the two in step now.
+        if (state.reportModel) state.reportModel.projectTracker = tracker;
+        // Persist for file-less runs and the automation (project content only — never
+        // patient data). The upload REPLACES the cached document and its web edits.
+        try {
+          if (typeof store.updateCachedTracker === 'function') store.updateCachedTracker(tracker);
+        } catch (err) {
+          console.warn('[upload] tracker cache failed', err);
+          errorsByKind.tracker = [(err && err.message) || String(err)];
         }
       }
       (kind === 'csv' ? csvZone : trackerZone).setLoaded(file.name);
@@ -589,7 +616,13 @@ export async function render(container, ctx) {
       // names the one that just failed — a download would carry that name over another
       // file's patient rows. Withhold the export until a file parses cleanly.
       if (kind === 'csv') state.parsed.raw = null;
-      (kind === 'csv' ? csvZone : trackerZone).setError();
+      if (kind === 'csv') csvZone.setError();
+      else {
+        // The rejected file is NOT in use: say why inside the zone, and name the document
+        // that still is (state.files.tracker is only ever set by a successful parse).
+        trackerZone.setError(errorsByKind.tracker[0],
+          state.files.tracker ? STR.upload.trackerStillUsing(state.files.tracker.name) : '');
+      }
     } finally {
       (kind === 'csv' ? csvZone : trackerZone).setBusy(false);
       paint();
@@ -597,24 +630,17 @@ export async function render(container, ctx) {
   }
 
   async function loadSamples() {
+    // Orders only: the dev sample tracker on disk is the OLD file, which the new parser
+    // rejects — drop a MISBAR Task Tracker into the zone to try the tracker.
     try {
-      const [csvResp, xlsxResp] = await Promise.all([
-        fetch('test/samples/orders.csv'),
-        fetch('test/samples/tracker.xlsx'),
-      ]);
+      const csvResp = await fetch('test/samples/orders.csv');
       if (csvResp.ok) {
         const blob = await csvResp.blob();
         const f = new File([blob], 'KAMC Order details (sample).csv', { type: 'text/csv' });
         csvZone.setLoaded(f.name);
         await handleFile('csv', f, { dev: true });
       }
-      if (xlsxResp.ok) {
-        const blob = await xlsxResp.blob();
-        const f = new File([blob], 'Misbar Project Tracker (sample).xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-        trackerZone.setLoaded(f.name);
-        await handleFile('tracker', f);
-      }
-      if (!csvResp.ok && !xlsxResp.ok) {
+      if (!csvResp.ok) {
         // No samples on disk — fall back to in-memory mock so the flow still works.
         loadMock();
       }
@@ -628,6 +654,8 @@ export async function render(container, ctx) {
     usedMock = true;
     takeOrders(state.parsed, buildMockOrders());
     state.parsed.raw = null; // mock rows: no original file, no export
+    // The explicit mock mode's SYNTHETIC tracker — memory only, never written to the cache
+    // (a real session's persisted document must not be replaced by mock tasks).
     state.parsed.tracker = buildMockTracker();
     state.heroDataAt = new Date().toISOString();
     state.files.csv = state.files.csv || { name: 'mock-orders.csv' };
@@ -687,16 +715,30 @@ export async function render(container, ctx) {
         }))));
       }
     }
-    if (state.parsed.tracker) {
-      const t = state.parsed.tracker;
-      summaryHost.appendChild(fileSummaryCard({
+    const tracker = resolveProjectTracker(state.parsed.tracker, null);
+    if (tracker) {
+      // Task count, then one stat per status (the slide's Arabic labels and order), then
+      // the parser's notes and — when this upload replaced website edits — that fact.
+      const card = fileSummaryCard({
         title: STR.upload.trackerSummaryTitle,
         stats: [
-          { label: STR.upload.tasks, value: (t.tasks || []).length },
-          { label: STR.upload.challenges, value: (t.challenges || []).length },
-          { label: STR.upload.risks, value: (t.risks || []).length },
+          { label: STR.upload.tasks, value: tracker.tasks.length },
+          ...trackerStatusCounts(tracker).map((c) => ({ label: c.label, value: c.count })),
         ],
-      }));
+      });
+      const notes = [];
+      if (trackerEditsReplacedAt) {
+        notes.push(STR.upload.trackerEditsReplaced(trackerStamp(trackerEditsReplacedAt)));
+      }
+      const warnings = Array.isArray(tracker.warnings) ? tracker.warnings : [];
+      if (notes.length || warnings.length) {
+        card.appendChild(el('div', { class: 'small', style: 'font-weight:700;margin:10px 0 4px', text: STR.upload.trackerWarningsTitle }));
+        card.appendChild(el('ul', { class: 'notelist' }, [
+          ...notes.map((n) => el('li', { class: 'warn', text: n })),
+          ...warnings.slice(0, 30).map((w) => el('li', { class: 'warn', text: w })),
+        ]));
+      }
+      summaryHost.appendChild(card);
     }
 
     // Errors
@@ -759,15 +801,17 @@ export async function render(container, ctx) {
       }
     }
 
-    // Continue action
-    const both = !!state.parsed.orders && !!state.parsed.tracker;
+    // Continue action — gated on the ORDERS only: the project tracker is optional content
+    // (no tracker ⇒ no tracker slides; the main report never needed one to be built).
+    const ready = !!state.parsed.orders;
     const btn = el('button', {
-      class: 'btn btn--primary btn--block', text: STR.upload.proceed, disabled: !both,
+      class: 'btn btn--primary btn--block', text: STR.upload.proceed, disabled: !ready,
       onClick: runEngineAndGo,
     });
     proceedBtn = btn;
     actionsHost.appendChild(btn);
-    if (!both) actionsHost.appendChild(el('p', { class: 'small muted', style: 'text-align:center;margin-top:6px', text: STR.upload.proceedNeedBoth }));
+    const gateNote = !ready ? STR.upload.proceedNeedOrders : (!tracker ? STR.upload.trackerOptional : null);
+    if (gateNote) actionsHost.appendChild(el('p', { class: 'small muted', style: 'text-align:center;margin-top:6px', text: gateNote }));
 
     // The moment orders exist, transform the top of the screen into a mini-dashboard.
     paintHero();
@@ -889,7 +933,7 @@ export async function render(container, ctx) {
     const seq = ++unmatchedSeq;
     let mod;
     try {
-      mod = await import('../ingest/tat-suggest.js?v=v2026-10-11.2');
+      mod = await import('../ingest/tat-suggest.js?v=v2026-10-13.1');
     } catch { return; } // module not present yet — keep the plain panel behavior
     if (seq !== unmatchedSeq) return; // a newer paint superseded this run
     const fn = pickFn(mod, ['suggestTats']);
@@ -1037,7 +1081,7 @@ export async function render(container, ctx) {
     if (!orders || !orders.length) { heroHost.innerHTML = ''; return; }
     let out;
     try {
-      const mod = await import('../engine/engine.js?v=v2026-10-11.2');
+      const mod = await import('../engine/engine.js?v=v2026-10-13.1');
       if (seq !== heroSeq) return; // a newer run superseded this one
       const compute = pickFn(mod, ['compute', 'runEngine', 'run']);
       if (typeof compute !== 'function') { heroHost.innerHTML = ''; return; }
@@ -1062,7 +1106,7 @@ export async function render(container, ctx) {
       let out = (state.engineOutput && state.engineOutput.totals) ? state.engineOutput : null;
       if (!out) {
         try {
-          const mod = await tryImport('../engine/engine.js?v=v2026-10-11.2');
+          const mod = await tryImport('../engine/engine.js?v=v2026-10-13.1');
           const compute = pickFn(mod, ['compute', 'runEngine', 'run']);
           if (compute) {
             out = compute(state.parsed.orders, (store.settings || {}).tatLookup, engineOpts());

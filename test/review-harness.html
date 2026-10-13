@@ -21,9 +21,16 @@
                   catalogue). ?master=1 (default) builds a tiny FAKE one — invented vendor
                   names, one fake country — from the fixture's own test names, enough to
                   exercise the by-test-name and unmapped cards; ?master=0 gives none.
+    • tracker   = «متابعة المشروع»: a SYNTHETIC ProjectTracker (screen-upload.js
+                  buildMockTracker — made-up tasks and owners, the new file's shape), CLONED
+                  so it is not the demo document the screen refuses to persist: editor edits
+                  are saved to the in-memory store's cachedTracker exactly as in the app
+                  (the live line shows the saved task count + last edit). ?tracker=0 starts
+                  with NO tracker (the «add task» path creates one).
   Query: ?date=YYYY-MM-DD (report date, default the golden asOf 2026-07-09), ?master=0|1,
          ?ambiguous=1 (adds two SYNTHETIC lines — see withAmbiguousBlank below),
-         ?sgh=1 (adds 30 SYNTHETIC second-hospital lines — see withSgh below).
+         ?sgh=1 (adds 30 SYNTHETIC second-hospital lines — see withSgh below),
+         ?tracker=0 (no project tracker), ?hospital=both|kamc|sgh (report type; default kamc).
 
   THE ENGINE is the real one, handed to the screen through ctx.compute (the screen's
   dev-harness seam; main.js never sets it) wrapped so the live line can COUNT the runs and
@@ -42,7 +49,7 @@
         cancellations. The figures (الإجمالي / المتأخرة / المستبعدة) must follow at once.
     «تشغيل آلي»  what an automation run started from the upload-screen panel does to the
         SHARED state while this screen stays open, WITHOUT a rerender: its own model in
-        state.reportModel (support line «AUTOMATION») — and, with «+ سحب», a new orders
+        state.reportModel (support line and tracker task «AUTOMATION») — and, with «+ سحب», a new orders
         array too. Then press «توليد»: the handed-over model must carry YOUR edits, never
         «AUTOMATION»; with a scope on and «+ سحب», generate must refuse and show the full
         report instead of publishing it unseen.
@@ -98,12 +105,15 @@
   import { HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED } from '../src/seeds/defaults.js';
   import { GOLDEN_ORDERS } from './fixtures/golden-orders.js';
   import { takeOrders } from '../src/model/hospital.js';
+  import { buildMockTracker } from '../src/ui/screen-upload.js';
 
   const params = new URLSearchParams(location.search);
   const REPORT_DATE = /^\d{4}-\d{2}-\d{2}$/.test(params.get('date') || '') ? params.get('date') : '2026-07-09';
   const WITH_MASTER = params.get('master') !== '0';
   const WITH_AMBIGUOUS = params.get('ambiguous') === '1';
   const WITH_SGH = params.get('sgh') === '1';
+  const WITH_TRACKER = params.get('tracker') !== '0';
+  const HOSPITAL = ['both', 'kamc', 'sgh'].includes(params.get('hospital')) ? params.get('hospital') : 'kamc';
   const UNATTRIBUTED = 'غير محدد'; // engine.js byLab caption for a blank facility
   const app = document.getElementById('app');
   const statusEl = document.getElementById('harness-status');
@@ -210,7 +220,11 @@
         doc.snapshot = { asOf: asOf ?? null, numbers: { ...((doc.snapshot || {}).numbers || {}), ...(numbers || {}) } };
         return clone(doc);
       },
-      updateCachedTracker: () => clone(doc),
+      // store.js's shape: {model, updatedAt}; null clears.
+      updateCachedTracker: (m) => {
+        doc.cachedTracker = m == null ? null : { model: clone(m), updatedAt: new Date().toISOString() };
+        return clone(doc);
+      },
       isEphemeral: () => true,
       get persistent() { return false; },
       get settings() { return clone(doc); },
@@ -247,20 +261,25 @@
   let state;
   let ctx;
 
+  /* The SYNTHETIC tracker, cloned out of buildMockTracker's demo identity (see header). */
+  const syntheticTracker = () => ({ ...clone(buildMockTracker()), fileName: 'synthetic-task-tracker.xlsx' });
+
   function freshState() {
     store = memStore();
     const s = store.settings;
     computeRuns = 0;
+    const tracker = WITH_TRACKER ? syntheticTracker() : null;
+    if (tracker) store.updateCachedTracker(tracker); // as the upload screen's cache write
     state = {
-      files: { csv: { name: 'golden-orders (synthetic)' }, tracker: null },
-      parsed: { orders: null, tracker: null, summary: null }, // tracker null → buildMockTracker()
+      files: { csv: { name: 'golden-orders (synthetic)' }, tracker: tracker ? { name: tracker.fileName } : null },
+      parsed: { orders: null, tracker, summary: null }, // null → no tracker slides (never a mock)
       engineOutput: null, // set below from the KAMC rows (the upload screen's cached output)
       reportModel: null,
       edits: {},
       reportDate: REPORT_DATE,
       // The single-hospital KAMC report: this harness drives the SCOPE paths (KAMC / SGH
       // reports only) and reads model.kpi — the main KAMC + SGH report has neither.
-      reportHospital: 'kamc',
+      reportHospital: HOSPITAL,
       settings: s,
       screen: 'review',
       sendoutMaster: WITH_MASTER ? fakeMaster(rows) : null, // set ⇒ the real loader never runs
@@ -299,6 +318,9 @@
       `تعديلات يدوية ${m && m.overrides ? Object.keys(m.overrides).length : 0}`,
       `إعدادات: TAT ${removedTat ? 'محذوف' : 'أصلي'} · استبعاد ${s.reportOptions && s.reportOptions.excludeNoTat ? 'نعم' : 'لا'} · إلغاءات ${cancelBumped ? '+50' : 'أصلية'}`,
     ];
+    const ct = s.cachedTracker && s.cachedTracker.model;
+    const live = state.parsed && state.parsed.tracker;
+    bits.push(`متابعة: ${live ? `${live.tasks.length} مهمة` : 'لا يوجد'} · المحفوظ: ${ct ? `${ct.tasks.length} مهمة، آخر تعديل ${ct.editedAt || '—'}` : 'لا يوجد'} · في النموذج ${m && m.projectTracker === live ? 'الوثيقة نفسها' : 'نسخة أخرى!'}`);
     if (ambiguous) bits.push(`صف غامض: الشحنة ${ambiguous.shipment} · ${ambiguous.lab} = ${labTotal(k, ambiguous.lab)}`);
     liveEl.textContent = bits.join(' • ');
   }
@@ -311,8 +333,10 @@
     const scoped = isScoped(m.scope);
     const names = buildFileDefs(m.reportDate, m.scope, m.hospital).map((f) => f.name).join(' | ');
     const support = ((m.panels && m.panels.supportRequired) || []).join(' / ') || '—';
+    const t = m.projectTracker;
+    const tracker = t ? `${t.tasks.length} مهمة (الأولى: ${(t.tasks[0] && t.tasks[0].task) || '—'})` : 'لا يوجد';
     return `→ generate: التاريخ ${m.reportDate} • ${scoped ? 'مخصص' : 'كامل'} • الإجمالي ${m.kpi && m.kpi.totals ? m.kpi.totals.total : '?'}`
-      + ` • شحنات ${(m.shipmentDetails || []).length} • الدعم المطلوب: ${support} • ${names}`;
+      + ` • شحنات ${(m.shipmentDetails || []).length} • الدعم المطلوب: ${support} • متابعة المشروع: ${tracker} • ${names}`;
   }
 
   /* Router stand-in: 'generate' only reports what the screen handed over (the model the
@@ -399,6 +423,11 @@
       ...cur,
       scope: undefined, scopedRows: undefined, shipmentDetails: undefined, overrides: {},
       panels: { ...(cur.panels || {}), supportRequired: ['AUTOMATION'] },
+      // pipeline.js carries the CACHED document (a copy): the screen must hand over the
+      // session's own document (the operator's edits), never this one.
+      projectTracker: cur.projectTracker
+        ? { ...clone(cur.projectTracker), tasks: [{ ...cur.projectTracker.tasks[0], id: 'auto-1', task: 'AUTOMATION' }] }
+        : null,
     };
     statusEl.textContent = withPull
       ? 'تشغيل آلي + سحب: نموذج آخر ومصفوفة طلبات جديدة في الحالة المشتركة — اضغط «توليد»'

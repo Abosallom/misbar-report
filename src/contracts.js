@@ -55,6 +55,53 @@
  */
 
 /**
+ * The project task tracker («ملف متابعة المشروع») — the MISBAR Task Tracker workbook as
+ * a PERSISTED, editable document (2026-10-13). Produced by ingest/task-tracker.js
+ * parseTaskTracker, cached in Settings.cachedTracker.model, edited on the review
+ * screen, rendered by slidespec/build-tracker.js. JSON-safe; project-management
+ * content, no patient data. One task:
+ * @typedef {Object} ProjectTask
+ * @property {string} id           - stable unique key: the WBS when unique, 'WBS#2'… for a
+ *                                   repeated WBS, 'row-N' without one, 'new-N' for a row added
+ *                                   on the website
+ * @property {string} wbs          - WBS ID ('2.1.1')
+ * @property {string} track        - Portfolio Track (Portfolio sheet; filled down)
+ * @property {string} milestone    - Milestone (Portfolio sheet; filled down within its track)
+ * @property {string} workstream
+ * @property {string} workPackage
+ * @property {string} task         - Task / Deliverable
+ * @property {string} taskType
+ * @property {string} organization - 'NUPCO' | 'LEAN' | 'NUPCO / LEAN' | free text
+ * @property {string} owner
+ * @property {string} priority     - Critical | High | Medium | Low | free text
+ * @property {string} status       - the file's word VERBATIM ('Deleyed' stays 'Deleyed';
+ *                                   a Portfolio-only row's 'Not Found' becomes '')
+ * @property {string} due          - 'YYYY-MM-DD' for a real date (serial or a day-first
+ *                                   '17/9/2026'), other text verbatim ('daily'), '' blank
+ * @property {string} predecessor
+ * @property {string} nextAction
+ * @property {string} definitionOfDone
+ * @property {string} notes
+ * Every field is a string ('' when empty); task order = slide order (Portfolio order,
+ * then Hierarchical-only rows).
+ */
+/**
+ * @typedef {Object} ProjectTracker
+ * @property {'misbar-task-tracker-v1'} format - the tag; an untagged cached tracker is
+ *   the retired format and is treated as "no tracker"
+ * @property {string|null} fileName  - the uploaded workbook's name
+ * @property {string} loadedAt       - ISO timestamp of the upload / parse
+ * @property {string|null} editedAt  - ISO timestamp of the last website edit; null = the
+ *   file exactly as uploaded (a new upload replaces any edits)
+ * @property {string[]} warnings     - parser notes for the upload card (sheet
+ *   disagreements, one-sheet rows, a missing sheet, repeated WBS)
+ * @property {ProjectTask[]} tasks
+ */
+
+/**
+ * LEGACY (retired 2026-10-13): the OLD tracker's task / model shapes (Arabic sheets
+ * سجل المهام / سجل التحديات / سجل المخاطر). Nothing parses that file any more; the
+ * typedefs remain for model/drafts.js and the manual challenges / risks content.
  * @typedef {Object} TrackerTask
  * @property {number|string|null} num
  * @property {string} task          - وصف المهمة
@@ -131,16 +178,23 @@
  *   by `noTestMenu: true`). 'both' = a DIFFERENT shape { hospital, reportDate,
  *   reportOptions, kamc, sgh, combined } (model/hospital-report.js buildBothModel)
  *   that build-spec dispatches to the KAMC+SGH design. Only an unscoped 'kamc' model
- *   ever writes the published history (snapshot / snapshotHistory / taskLog).
+ *   ever writes the published history (snapshot / snapshotHistory). Nothing writes
+ *   Settings.taskLog any more (since 2026-10-13; see that typedef).
  * @property {boolean} [noTestMenu] - set on an SGH model: its hospital has no Test Menu,
  *   so late / turnaround / country are UNKNOWN (printed «–»), not zero.
  * @property {EngineOutput} kpi
- * @property {{supportRequired:string[], completedTasks:string[], plannedTasks:string[]}} panels - slide-2 bullets (auto-drafted, user-edited)
- * @property {TrackerTask[]} tasksCurrent  - slide 7 rows (status != مغلق, external)
- * @property {TrackerTask[]} tasksInternal - internal-variant task rows (category 'لين').
- *     Both task lists follow the SAME membership rule (model/drafts.js
- *     splitTaskLists, user decision 2026-08-04): non-closed rows, plus a مغلق row
- *     for exactly ONE report after it closes. Superseded: "the complete لين log".
+ * @property {{supportRequired:string[]}} panels - slide-2 «الدعم المطلوب» bullets: MANUAL
+ *     content, empty unless the user typed some on the review screen (nothing is drafted
+ *     from the tracker any more). completedTasks / plannedTasks - RETIRED 2026-10-13 (were
+ *     auto-drafted from the old tracker's task log; no longer produced or read).
+ * @property {ProjectTracker|null} projectTracker - the project task tracker the
+ *     «متابعة المشروع» slides render (slidespec/build-tracker.js), identical in the
+ *     internal and the NUPCO deck; null = no tracker loaded → no tracker slides. Carried
+ *     by EVERY report model (KAMC, SGH, KAMC+SGH, automation) since 2026-10-13.
+ * @property {TrackerTask[]} [tasksCurrent]  - RETIRED 2026-10-13 (no longer produced from
+ *     a tracker; the tracker slides replaced the task-list slide). Was: slide 7 rows.
+ * @property {TrackerTask[]} [tasksInternal] - RETIRED 2026-10-13, as tasksCurrent. Was:
+ *     internal-variant task rows (category 'لين', model/drafts.js splitTaskLists).
  * @property {TrackerModel['challenges']} challenges
  * @property {TrackerModel['risks']} risks
  * @property {Settings['scorecard']} scorecard
@@ -241,6 +295,8 @@
  *     Written from the FINAL model after a successful generation (automation
  *     included), pruned to at most 300 entries. EMPTY MEANS "nothing remembered",
  *     which is exactly what keeps pre-existing مغلق tracker rows off the deck.
+ *     INERT since 2026-10-13: the old task-list slides it served are retired, so nothing
+ *     writes it; the stored value is kept (and still imported / exported) unchanged.
  * @property {{baseUrl:string, accessToken:string, panelId:number, enabled:boolean}} grafana
  *   - live data source (Grafana PUBLIC-dashboard query API). baseUrl like
  *     'https://elab.seha.sa/hpapm'. Empty/disabled → CSV drop only. The access
@@ -249,8 +305,9 @@
  * @property {{excludeNoTat:boolean, slides:Object<string,boolean>, kpiCards:Object<string,boolean>, labels:Object<string,string>, deltaMode:('daily'|'week'), autoDownloadFiles:boolean}} reportOptions
  *   - presentation defaults: excludeNoTat drops rows with no TAT from ANY source
  *     (lookup + CSV fallback = null → 'No Match') before aggregation; slides keys
- *     'execFunnel'|'monthly'|'compliance'|'action'|'challenges'|'definitions' toggle the middle
- *     slides (cover/thanks always render; page numbers renumber) — 'definitions'
+ *     'execFunnel'|'monthly'|'compliance'|'action'|'challenges'|'definitions'|'sendout'|'tracker' toggle the middle
+ *     slides ('tracker' = «متابعة المشروع», default ON, every report type, since
+ *     2026-10-13; 'action' is the retired task-list slide, kept inert for compatibility) (cover/thanks always render; page numbers renumber) — 'definitions'
  *     ('منهجية الأرقام') defaults OFF, so the delivered deck is the simple six-slide
  *     shape; kpiCards keys mirror the deltas
  *     keys and hide exec-slide cards (row geometry repacks); labels overrides the
@@ -288,10 +345,14 @@
  *     24-hour 'HH:MM'. labRecipients maps a lab name -> a comma-separated
  *     recipient list for the per-lab email drafts; a missing/empty entry means
  *     the draft carries no To: line.
- * @property {{model:TrackerModel, updatedAt:string}|null} cachedTracker
- *   - last successfully parsed Project Tracker, reused when no fresh file is
- *     dropped. NOTE on the no-PHI invariant: this is PROJECT-management content
- *     (tasks/challenges/risks), not patient data — patient rows remain memory-only.
+ * @property {{model:ProjectTracker, updatedAt:string}|null} cachedTracker
+ *   - the project task tracker DOCUMENT: the last uploaded MISBAR Task Tracker plus
+ *     every website edit (model.editedAt), reused when no fresh file is dropped and
+ *     read by the automation. updatedAt = when the cache was last written. Only the
+ *     TAGGED shape is kept: an untagged (old-format) cache becomes null on load, and an
+ *     old backup's untagged cache is discarded on import (store.js). NOTE on the no-PHI
+ *     invariant: this is PROJECT-management content (tasks, owners, dates), not
+ *     patient data — patient rows remain memory-only.
  */
 
 /** Screen module contract: each ui/screen-*.js exports render(containerEl, ctx)

@@ -45,10 +45,13 @@
 //
 // ── buildBothModel({kamcRows, sghRows, settings, reportDate, tracker, sendoutMaster,
 //                    engineOpts?, edits?, mode?}) → BothModel ─────────────────────────────
-//   { hospital: 'both', reportDate, reportOptions, deltaWindow,
+//   { hospital: 'both', reportDate, reportOptions, projectTracker, deltaWindow,
 //     kamc: <buildHospitalModel kamc, week deltas stamped from KAMC rows, + scopedRows>,
 //     sgh:  <buildHospitalModel sgh,  week deltas stamped from SGH rows,  + scopedRows>,
 //     combined: <combineHospitals(kamc, sgh)> }
+//   projectTracker sits at the TOP level (the BOTH deck reads only top-level + combined;
+//   tracker CONTRACT §1.4): the same object each sub-model carries — one project document,
+//   not a per-hospital one.
 //   No scope (decision 7: scope is disabled in BOTH mode), no top-level kpi (so the
 //   single-hospital stampers — pipeline.js applyWindowDeltas — leave it alone; re-stamp
 //   with stampBothDeltas, which also rebuilds `combined`).
@@ -64,17 +67,17 @@
 //   the «<0.1%» input), multi-country labs, compliance rows (continuous numbering) and
 //   totals (late KAMC only).
 
-import { compute, round1 } from '../engine/engine.js?v=v2026-10-11.2';
-import { buildReportModel } from './report-model.js?v=v2026-10-11.2';
-import { stampWindowDeltas, windowFor } from './delta-window.js?v=v2026-10-11.2';
+import { compute, round1 } from '../engine/engine.js?v=v2026-10-13.1';
+import { buildReportModel, projectTrackerFor } from './report-model.js?v=v2026-10-13.1';
+import { stampWindowDeltas, windowFor } from './delta-window.js?v=v2026-10-13.1';
 import {
   FACILITY_DISPLAY, norm, share, analyseSendout, hasMaster,
-} from './sendout.js?v=v2026-10-11.2';
+} from './sendout.js?v=v2026-10-13.1';
 import {
   EMPTY_SCOPE, normalizeScope, isScoped, hasRange, applyScope, shipmentDetails,
-} from './scope.js?v=v2026-10-11.2';
-import { HOSPITALS } from './hospital.js?v=v2026-10-11.2';
-import { normFacility } from '../contracts.js?v=v2026-10-11.2';
+} from './scope.js?v=v2026-10-13.1';
+import { HOSPITALS } from './hospital.js?v=v2026-10-13.1';
+import { normFacility } from '../contracts.js?v=v2026-10-13.1';
 
 /** The hospitals a BOTH report combines, in the registry's (display) order. */
 const BOTH_KEYS = Object.freeze(Object.keys(HOSPITALS));
@@ -626,8 +629,8 @@ export function stampBothDeltas(model, { settings, mode } = {}) {
  * buildHospitalModel on its own rows (never the union), stamped with its own week chips,
  * then summed by combineHospitals. Missing rows for a hospital = an empty list (its
  * cells print 0 / «–», decision 12). Throws when compute() cannot run (no reportDate).
- * @returns {{hospital:'both', reportDate:string, reportOptions:Object, deltaWindow:Object,
- *   kamc:Object, sgh:Object, combined:Object}}
+ * @returns {{hospital:'both', reportDate:string, reportOptions:Object, projectTracker:Object|null,
+ *   deltaWindow:Object, kamc:Object, sgh:Object, combined:Object}}
  */
 export function buildBothModel({
   kamcRows, sghRows, settings, reportDate, tracker, sendoutMaster, engineOpts, edits, mode,
@@ -639,6 +642,8 @@ export function buildBothModel({
     // The presentation options as the automation stamps them (settings.reportOptions);
     // the slides toggles decide monthly / send-out / compliance in BOTH too (decision 10).
     reportOptions: (settings && settings.reportOptions) || {},
+    // Resolved exactly as buildReportModel resolves it for each sub-model below.
+    projectTracker: projectTrackerFor(tracker, settings, edits),
   };
   for (const h of BOTH_KEYS) {
     const rows = Array.isArray(rowsOf[h]) ? rowsOf[h] : [];
