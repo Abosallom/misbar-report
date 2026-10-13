@@ -34,7 +34,7 @@
 //   · a cell longer than MAX_BODY_LINES (a group label longer than MAX_LABEL_LINES) is cut
 //     at a word and ends in «…». That bound is what keeps ANY row inside a page, however
 //     long the text typed on the website; the full text stays in the tracker.
-import { COLORS as C } from '../theme.js?v=v2026-10-13.1';
+import { COLORS as C } from '../theme.js?v=v2026-10-13.2';
 
 // ---- labels (registry keys; build-spec.js DEFAULT_LABELS spreads this object so the
 // labels editor reaches them and an override reaches all three decks) ------------------

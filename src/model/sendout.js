@@ -52,8 +52,8 @@
 // variants, invisible characters): a looser key re-decides aliased orders too and
 // moves the full report, so it needs its own sign-off.
 //
-import { inferBlankFacilities } from '../engine/infer-facility.js?v=v2026-10-13.1';
-import { hasTestMenu } from './hospital.js?v=v2026-10-13.1';
+import { inferBlankFacilities } from '../engine/infer-facility.js?v=v2026-10-13.2';
+import { hasTestMenu } from './hospital.js?v=v2026-10-13.2';
 
 // PURE module: no DOM, no clock, no network, no vendor imports — the browser and
 // `node --test` share one deterministic path. The catalogue is INJECTED, never
@@ -128,6 +128,11 @@ export const FACILITY_TO_VENDOR = {
   // catalogue and is deliberately not written down in this public repo.
   'advanced cell laboratory sulaimanih br': 'advanced cell labratory',
   'fal specialized medical lab': 'fal specialized medical est.',
+  // The same lab under the spelling the feed switched to on 2026-10-13 (every Fal row,
+  // history included, was renamed at the source). Without it the 771 Fal orders were
+  // still placed in Bahrain, but only through the test-name fallback, captioned with the
+  // raw spelling, and one non-unique test away from turning «غير منسوب».
+  'fal specialized medical laboratory': 'fal specialized medical est.',
   'king abdullaziz medical city in riyadh': 'business center ngha',
   'noor diagnostics and innovation': 'noor diagnostics and discovery',
   'eurofins clinical': 'eurofins clinical',
@@ -156,6 +161,7 @@ export const FACILITY_DISPLAY = {
   // The branch suffix is an address, not an identity — the slide names the lab.
   'advanced cell laboratory sulaimanih br': 'Advanced Cell Laboratory',
   'fal specialized medical lab': 'Fal Specialized Medical Lab',
+  'fal specialized medical laboratory': 'Fal Specialized Medical Lab', // 2026-10-13 spelling
   'king abdullaziz medical city in riyadh': 'King Abdulaziz Medical City - MNGHA',
   'noor diagnostics and innovation': 'Noor Diagnostics',
   'eurofins clinical': 'Eurofins Clinical',

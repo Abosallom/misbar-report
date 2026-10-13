@@ -2,17 +2,17 @@
 // The file-producing core now lives in automation/pipeline.js (produceReportFiles) so
 // an unattended run makes byte-identical files; this screen drives it and paints the
 // very same progress bar, file rows and live slide thumbnails it always has.
-import { STR, todayISO, formatDateAr, formatRangeAr } from '../i18n/ar.js?v=v2026-10-13.1';
-import { el, progressBar, toast } from './components.js?v=v2026-10-13.1';
-import { resetRunData } from '../state.js?v=v2026-10-13.1';
-import { buildMockEngineOutput } from './screen-upload.js?v=v2026-10-13.1';
-import { resolveProjectTracker } from '../model/report-model.js?v=v2026-10-13.1';
-import { buildLateLabsSection, triggerDownload } from './late-labs-section.js?v=v2026-10-13.1';
+import { STR, todayISO, formatDateAr, formatRangeAr } from '../i18n/ar.js?v=v2026-10-13.2';
+import { el, progressBar, toast } from './components.js?v=v2026-10-13.2';
+import { resetRunData } from '../state.js?v=v2026-10-13.2';
+import { buildMockEngineOutput } from './screen-upload.js?v=v2026-10-13.2';
+import { resolveProjectTracker } from '../model/report-model.js?v=v2026-10-13.2';
+import { buildLateLabsSection, triggerDownload } from './late-labs-section.js?v=v2026-10-13.2';
 import {
   applyWindowDeltas, buildFileDefs, produceReportFiles, recordRunSnapshot,
   shouldAutoDownloadFiles,
-} from '../automation/pipeline.js?v=v2026-10-13.1';
-import { isScoped, hasRange, normalizeScope } from '../model/scope.js?v=v2026-10-13.1';
+} from '../automation/pipeline.js?v=v2026-10-13.2';
+import { isScoped, hasRange, normalizeScope } from '../model/scope.js?v=v2026-10-13.2';
 
 /** The report type a model is (model.hospital; absent ⇒ 'kamc': a legacy KAMC-only model —
  *  every model that predates the report types, and the fallback below, whose numbers are
@@ -268,10 +268,10 @@ export async function render(container, ctx) {
   // Both modules are guarded → engine deltas if either is absent.
   // An SGH / KAMC + SGH model is re-stamped by model/hospital-report.js (each hospital
   // with its own policy — applyWindowDeltas routes it); guarded like the other two.
-  const dwMod = await tryImport('../model/delta-window.js?v=v2026-10-13.1');
-  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-10-13.1');
+  const dwMod = await tryImport('../model/delta-window.js?v=v2026-10-13.2');
+  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-10-13.2');
   const hrMod = hospitalOf(model) !== 'kamc'
-    ? await tryImport('../model/hospital-report.js?v=v2026-10-13.1')
+    ? await tryImport('../model/hospital-report.js?v=v2026-10-13.2')
     : null;
   const recordSnapshot = dbMod && dbMod.recordSnapshot;
   applyWindowDeltas(model, state, store, dwMod && dwMod.stampWindowDeltas, hrMod);

@@ -7,8 +7,8 @@
 // text runs + margin, table spans / per-row heights / per-cell margin, valign, border —
 // only ever ADD inline styles when their field is present, so a legacy spec renders to the
 // very same HTML string as before.
-import { GEOM } from '../theme.js?v=v2026-10-13.1';
-import { renderChartSVG } from './charts-svg.js?v=v2026-10-13.1';
+import { GEOM } from '../theme.js?v=v2026-10-13.2';
+import { renderChartSVG } from './charts-svg.js?v=v2026-10-13.2';
 
 const PX = GEOM.pxPerIn;          // 96
 const PT2PX = 96 / 72;            // points -> px

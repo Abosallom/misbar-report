@@ -842,3 +842,13 @@ test('the two "advanced …" labs stay DISTINCT vendors', () => {
   assert.notEqual(FACILITY_DISPLAY['advanced cell laboratory sulaimanih br'],
     FACILITY_DISPLAY['advanced laboratory services .co']);
 });
+
+// 2026-10-13: the feed renamed Fal at the source ('Fal Specialized Medical Lab' →
+// 'Fal Specialized medical laboratory', history included). Both spellings must reach the
+// same catalogue vendor and print the same caption, so the slides keep one Fal row.
+test('Fal: the 2026-10-13 feed spelling is the same lab as the old one', () => {
+  const oldKey = norm('Fal Specialized Medical Lab');
+  const newKey = norm('Fal Specialized medical laboratory');
+  assert.equal(FACILITY_TO_VENDOR[newKey], FACILITY_TO_VENDOR[oldKey]);
+  assert.equal(FACILITY_DISPLAY[newKey], FACILITY_DISPLAY[oldKey]);
+});
