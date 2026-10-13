@@ -532,6 +532,75 @@ test('resolveTracker: the cached (persisted) document only — tagged ProjectTra
   }
 });
 
+// AUTOMATIC ARABIC (CONTRACT-AUTO §5): the unattended deck's tracker carries the same
+// translations the review applies — the built-in memory (decrypted with the data key, once
+// per session; a session copy on the state is reused), the user's corrections and the
+// machine cache from settings. A translated COPY: the cache itself is never rewritten. With
+// nothing to translate the cached document passes through untouched (the test above).
+test('the automation deck\'s tracker is translated: built-in memory (data key) + user corrections, cache untouched', async () => {
+  const cached = projectTracker(3);
+  const before = JSON.stringify(cached);
+  const KEY = 'a'.repeat(64);
+  const keys = [];
+  const store = makeStore({
+    grafana: { enabled: true, baseUrl: 'https://grafana.test', accessToken: 'tok', panelId: 1, dataKey: KEY },
+    cachedTracker: { model: cached, updatedAt: '2026-07-19T06:00:00.000Z' },
+    trackerTranslations: {
+      tasks: { 'synthetic task 2': 'تصحيح المستخدم للمهمة 2' },
+      original: { 'synthetic task 3': true },
+      machine: { tasks: { 'synthetic task 3': 'ترجمة آلية للمهمة 3' } },
+    },
+  });
+  const state = makeState();
+  const builtin = {
+    generatedAt: '2026-10-13T00:00:00.000Z',
+    entries: {
+      tasks: { 'synthetic task 1': 'المهمة التجريبية 1', 'synthetic task 2': 'نص معتمد يُغلب' },
+      tracks: { 'track z': 'المسار ز' },
+      milestones: {},
+    },
+  };
+  const { deps, seen } = withTasksDeps({
+    loadTrackerTranslations: async () => ({ loadTrackerTranslations: async (k) => { keys.push(k); return builtin; } }),
+  });
+  const res = await run({ store, state, deps });
+  assert.equal(statusOf(res, 'engine'), 'done');
+  assert.deepEqual(keys, [KEY], 'the built-in memory is decrypted with the data key');
+  assert.equal(state.trackerBuiltinTM, builtin, 'left on the state for the screens (once per session)');
+  const t = state.reportModel.projectTracker;
+  assert.equal(seen.trackers[0], t, 'buildReportModel got the translated tracker');
+  assert.equal(seen.bothTrackers[0], t);
+  assert.notEqual(t, cached, 'a copy');
+  assert.equal(JSON.stringify(cached), before, 'the cached document is not rewritten by a run');
+  assert.deepEqual(t.tasks.map((x) => [x.taskAr, x.taskArSource]), [
+    ['المهمة التجريبية 1', 'builtin'],
+    ['تصحيح المستخدم للمهمة 2', 'user'],
+    ['ترجمة آلية للمهمة 3', 'machine'],
+  ]);
+  assert.deepEqual(t.tasks.map((x) => x.trackAr), ['المسار ز', 'المسار ز', 'المسار ز']);
+  assert.deepEqual(t.tasks.map((x) => x.showOriginal), [false, false, true], '«النص الأصلي» honoured');
+  assert.deepEqual(t.tasks.map((x) => x.task), ['Synthetic task 1', 'Synthetic task 2', 'Synthetic task 3'], 'English untouched');
+
+  // A second run in the same session reuses the state's copy — no second decrypt.
+  await run({ store, state, deps });
+  assert.equal(keys.length, 1);
+});
+
+test('the automation deck without a data key: no built-in load, the other layers still apply', async () => {
+  const cached = projectTracker(2);
+  let loads = 0;
+  const store = makeStore({
+    cachedTracker: { model: cached, updatedAt: '2026-07-19T06:00:00.000Z' },
+    trackerTranslations: { tasks: { 'synthetic task 1': 'تصحيح' } },
+  });
+  const state = makeState();
+  const { deps } = withTasksDeps({ loadTrackerTranslations: async () => { loads += 1; return null; } });
+  await run({ store, state, deps });
+  assert.equal(loads, 0, 'nothing to decrypt with');
+  assert.equal(state.reportModel.projectTracker.tasks[0].taskAr, 'تصحيح');
+  assert.equal(state.reportModel.projectTracker.tasks[1].taskAr, '');
+});
+
 test('the minimal model fake (no task arrays) triggers NO taskLog write', async () => {
   // Regression guard for the store stub the rest of this suite uses: a model without
   // tasksCurrent/tasksInternal must not persist an empty log (that would look like a

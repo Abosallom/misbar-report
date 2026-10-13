@@ -67,17 +67,17 @@
 //   the «<0.1%» input), multi-country labs, compliance rows (continuous numbering) and
 //   totals (late KAMC only).
 
-import { compute, round1 } from '../engine/engine.js?v=v2026-10-13.6';
-import { buildReportModel, projectTrackerFor } from './report-model.js?v=v2026-10-13.6';
-import { stampWindowDeltas, windowFor } from './delta-window.js?v=v2026-10-13.6';
+import { compute, round1 } from '../engine/engine.js?v=v2026-10-13.7';
+import { buildReportModel, projectTrackerFor } from './report-model.js?v=v2026-10-13.7';
+import { stampWindowDeltas, windowFor } from './delta-window.js?v=v2026-10-13.7';
 import {
   FACILITY_DISPLAY, norm, share, analyseSendout, hasMaster,
-} from './sendout.js?v=v2026-10-13.6';
+} from './sendout.js?v=v2026-10-13.7';
 import {
   EMPTY_SCOPE, normalizeScope, isScoped, hasRange, applyScope, shipmentDetails,
-} from './scope.js?v=v2026-10-13.6';
-import { HOSPITALS } from './hospital.js?v=v2026-10-13.6';
-import { normFacility } from '../contracts.js?v=v2026-10-13.6';
+} from './scope.js?v=v2026-10-13.7';
+import { HOSPITALS } from './hospital.js?v=v2026-10-13.7';
+import { normFacility } from '../contracts.js?v=v2026-10-13.7';
 
 /** The hospitals a BOTH report combines, in the registry's (display) order. */
 const BOTH_KEYS = Object.freeze(Object.keys(HOSPITALS));

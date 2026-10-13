@@ -116,6 +116,19 @@ export const state = {
   reportDate: null,
   settings: null,
   screen: 'upload',
+  // AUTOMATIC ARABIC (2026-10-13, CONTRACT-AUTO §2/§4/§5) — SESSION-level, like the send-out
+  // catalogue (state.sendoutMaster): never persisted, kept by «تقرير جديد» (resetRunData),
+  // gone on a reload.
+  //   trackerBuiltinTM        the decrypted built-in translation memory ({generatedAt,
+  //                           entries}) or null when it could not be loaded; undefined =
+  //                           not tried yet (components.js loadBuiltinTrackerTM loads it
+  //                           ONCE with the data key; trackerBuiltinTMLoading = that load).
+  //   trackerMT               the review card's on-device machine-pass state (busy, the
+  //                           translator's last answer, the texts an automatic pass tried).
+  // Project content (task texts), never patient data.
+  trackerBuiltinTM: undefined,
+  trackerBuiltinTMLoading: null,
+  trackerMT: null,
 };
 
 /** Clear everything derived from an upload run, keeping settings + screen routing. */

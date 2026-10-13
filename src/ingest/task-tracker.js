@@ -53,6 +53,16 @@ export const TASK_FIELDS = Object.freeze([
 ]);
 
 /**
+ * Where a task's Arabic text came from (model/tracker-translate.js AR_SOURCES — repeated
+ * here, not imported, so this parser stays a leaf module; a test pins the two equal):
+ * the workbook's own column, the user's correction, the built-in reviewed memory, or the
+ * on-device machine translation. Stored per text as taskArSource / trackArSource /
+ * milestoneArSource, optional (absent = '' = no recorded source).
+ */
+export const TASK_AR_SOURCES = Object.freeze(['file', 'user', 'builtin', 'machine']);
+const AR_SOURCE_OF = [['taskAr', 'taskArSource'], ['trackAr', 'trackArSource'], ['milestoneAr', 'milestoneArSource']];
+
+/**
  * The tracker slides' text language (settings.reportOptions.trackerLang): 'ar' = the
  * Arabic translation, falling back to the English per cell where a row has none;
  * 'en' = the English exactly as before translations existed; 'both' = Arabic with the
@@ -556,7 +566,10 @@ const str = (v) => (typeof v === 'string' ? v : typeof v === 'number' && Number.
  * field a string, ids non-empty and unique (repaired in place of a blank / repeated id).
  * Unknown keys — at the top level and on tasks — are DROPPED: the store's "only known
  * config persists" invariant applies to this document too, so nothing a page or a
- * hand-edited backup attaches rides into localStorage. Returns null for anything that
+ * hand-edited backup attaches rides into localStorage. The only task keys beyond
+ * TASK_FIELDS are the optional translation bookkeeping: taskArSource / trackArSource /
+ * milestoneArSource (one of TASK_AR_SOURCES, beside a non-empty Arabic text) and
+ * showOriginal (true only). Returns null for anything that
  * is not a tagged ProjectTracker (the old untagged shape included).
  * @param {*} v
  * @returns {import('../contracts.js').ProjectTracker|null}
@@ -568,6 +581,17 @@ export function normalizeProjectTracker(v) {
     .map((t) => {
       const o = {};
       for (const f of TASK_FIELDS) o[f] = str(t[f]);
+      // The automatic-translation bookkeeping (model/tracker-translate.js, 2026-10-13):
+      // where each Arabic text came from, and the user's per-task «النص الأصلي». OPTIONAL
+      // keys, kept only when they carry something — a source beside a non-empty Arabic
+      // text, showOriginal only when true — so a document without them (every tracker
+      // parsed or cached before) normalizes to exactly TASK_FIELDS, as before. The source
+      // is what lets a re-apply tell the workbook's own Arabic ('file', or absent) from a
+      // translation-memory fill it may replace.
+      for (const [ar, src] of AR_SOURCE_OF) {
+        if (o[ar] && TASK_AR_SOURCES.includes(t[src])) o[src] = t[src];
+      }
+      if (t.showOriginal === true) o.showOriginal = true;
       return o;
     });
   const used = new Set();

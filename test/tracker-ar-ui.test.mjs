@@ -250,7 +250,10 @@ test('translation count: «N من M مهمة مترجمة» (whitespace is not a
   assert.deepEqual(trackerTranslationCount(null), { translated: 0, total: 0 });
   assert.deepEqual(trackerTranslationCount({ tasks: [null, { task: 'x' }] }), { translated: 0, total: 1 });
   assert.equal(STR.tracker.translated(2, 4), '2 من 4 مهمة مترجمة');
-  assert.ok(STR.upload.trackerNoArabic);
+  // The upload card's line is the AUTOMATIC one (CONTRACT-AUTO §6); its old «no Arabic
+  // columns» note is gone — the user never prepares an Arabic workbook.
+  assert.equal(STR.tracker.autoTranslated(2, 4), '2 من 4 مهمة مترجمة تلقائيًا');
+  assert.equal(STR.upload.trackerNoArabic, undefined);
 });
 
 test('meta line: shows the translation coverage once any task has Arabic; a file without it reads as before', () => {

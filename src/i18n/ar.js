@@ -5,11 +5,11 @@
 // build-spec reads from the very same predicate. A local re-derivation here is exactly
 // how a filename would one day say «مخصص» while the cover says nothing (or the reverse).
 // scope.js is pure (no DOM, no vendor, no ar.js back-edge), so this adds no cycle.
-import { isScoped, normalizeScope } from '../model/scope.js?v=v2026-10-13.6';
+import { isScoped, normalizeScope } from '../model/scope.js?v=v2026-10-13.7';
 // The hospital registry's short codes (KAMC / SGH) are what the file-name tag, the report
 // type pills and the share text print — read from the ONE registry, never re-typed here.
 // hospital.js is pure (no imports at all), so this adds no cycle either.
-import { HOSPITALS } from '../model/hospital.js?v=v2026-10-13.6';
+import { HOSPITALS } from '../model/hospital.js?v=v2026-10-13.7';
 
 /** Join ids for a sentence: Arabic comma, tolerant of a bare string or a missing list. */
 const joinIds = (ids) => [].concat(ids == null ? [] : ids).map(String).join('، ');
@@ -87,11 +87,9 @@ export const STR = {
     trackerModuleMissing: 'وحدة قراءة ملف متابعة المشروع غير متوفرة — لم يُحمَّل الملف.',
     // No tracker loaded: the report goes ahead without the tracker slides.
     trackerOptional: 'ملف متابعة المشروع اختياري: بدونه لا تظهر شرائح «متابعة المشروع» في التقرير.',
-    // The Arabic translation of the tasks (2026-10-13, Arabic CONTRACT §4): the card's
-    // «N من M مهمة مترجمة» line is STR.tracker.translated. An untranslated task falls back
-    // to its English text on the slide, so a file with no Arabic columns is not an error,
-    // only this note that the slide will read in English.
-    trackerNoArabic: 'لا توجد أعمدة ترجمة عربية في هذا الملف — تظهر المهام في الشريحة بنصها الإنجليزي.',
+    // The tasks' Arabic is AUTOMATIC (2026-10-13, CONTRACT-AUTO): the card's line is
+    // STR.tracker.autoTranslated — the user never prepares an Arabic workbook, so nothing
+    // here tells them to.
     errorsTitle: 'أخطاء أثناء التحليل',
     unmatchedTitle: 'فحوصات بدون مدة معيارية (TAT)',
     unmatchedHint: 'هذه الفحوصات غير موجودة في جدول المدد المعيارية. أضف المدة (بالأيام) لكل منها:',
@@ -470,13 +468,34 @@ export const STR = {
       both: 'تظهر الترجمة العربية وتحتها النص الإنجليزي الأصلي بخط أصغر.',
     },
     translated: (n, m) => `${n} من ${m} مهمة مترجمة`,
-    // Shown on the review card while the slide language asks for Arabic that the loaded
-    // tracker does not have (components.js trackerArabicNotice).
-    noArabicTitle: 'المهام ستظهر بالإنجليزية في التقرير',
-    noArabicBody: 'ملف المتابعة المحمّل حاليًا لا يحتوي على ترجمة عربية للمهام. لعرضها بالعربية: ارفع النسخة العربية من ملف المتابعة (التي تحتوي على أعمدة Arabic) في «ملف متابعة المشروع» بشاشة الرفع، أو اكتب الترجمة في الحقل العربي لكل مهمة أدناه.',
-    partialArabic: (n, m) => `${n} من ${m} مهمة مترجمة — المهام غير المترجمة ستظهر بنصها الإنجليزي.`,
+    // AUTOMATIC ARABIC (2026-10-13, CONTRACT-AUTO §4/§6): the English tasks are translated
+    // for the user — by the reviewed built-in memory, the user's own corrections, and the
+    // browser's ON-DEVICE translator for anything new. The card's status line + the hint
+    // shown only while some tasks still have no Arabic (components.js
+    // trackerTranslationStatus). Nothing asks the user to prepare an Arabic file.
+    autoTranslated: (n, m) => `${n} من ${m} مهمة مترجمة تلقائيًا`,
+    untranslatedHint: (n) => `${n} مهمة بدون ترجمة — تظهر بالإنجليزية؛ يمكنك كتابة الترجمة في المحرر`,
+    translateBtn: 'ترجمة المهام غير المترجمة',
+    translateBtnHint: 'تتم الترجمة على هذا الجهاز فقط — لا يُرسَل أي نص إلى أي خادم.',
+    translating: 'جارٍ ترجمة المهام على هذا الجهاز…',
+    translatingProgress: (done, total) => `جارٍ ترجمة المهام على هذا الجهاز… ${done} من ${total}`,
+    downloadingModel: 'جارٍ تجهيز الترجمة على هذا الجهاز (أول مرة فقط)…',
+    machineReview: (n) => `${n} منها ترجمة آلية — راجعها في المحرر`,
+    // Where an Arabic text came from (the editor's badge beside each Arabic field).
+    source: {
+      file: 'من الملف',
+      user: 'تعديلك',
+      builtin: 'من الترجمة المعتمدة',
+      machine: 'ترجمة آلية — راجعها',
+      none: 'بدون ترجمة',
+    },
+    // «النص الأصلي»: show THIS task's English original on the slide (a bad translation).
+    original: 'النص الأصلي',
+    originalHint: 'عرض نص هذه المهمة الإنجليزي الأصلي في الشريحة بدل الترجمة — اضغط مرة أخرى للعودة إلى العربية',
+    originalTag: 'النص الأصلي',
+    machineTag: 'ترجمة آلية',
     untranslated: 'بلا ترجمة',
-    arHint: 'اتركه فارغًا لعرض النص الإنجليزي في الشريحة',
+    arHint: 'اتركه فارغًا للعودة إلى الترجمة التلقائية',
     dueHint: 'تاريخ (يوم/شهر/سنة أو YYYY-MM-DD)، أو نص مثل daily',
     suggestHint: 'اختر من القائمة أو اكتب قيمة جديدة',
     saveFailed: 'تعذّر حفظ تعديلات متابعة المشروع في هذا المتصفح',

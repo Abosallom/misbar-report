@@ -49,12 +49,15 @@
 //     same way inside its merged block (Arabic part bottom-aligned above the boundary nearest
 //     the block's middle, English part top-aligned below it). A cell without a translation
 //     (or whose translation equals the English) prints its text once, as in 'en'.
+// A task flagged showOriginal (the user's per-task «النص الأصلي» — the machine / built-in
+// translation of that one task was wrong) prints its English in every mode, like a row
+// without a translation; its group labels follow the mode as usual.
 // Owner, organization, priority, status and dates never change with the language.
 // An untranslated tracker therefore renders identically in all three modes.
 // Arabic TRANSLATIONS are measured with real Cairo metrics (contextual forms, lam-alef, the
 // font's one positive Arabic kern — shapedTextWidth below); every other cell keeps the
 // legacy estimate, so the English / fallback layout never moves.
-import { COLORS as C } from '../theme.js?v=v2026-10-13.6';
+import { COLORS as C } from '../theme.js?v=v2026-10-13.7';
 
 // ---- labels (registry keys; build-spec.js DEFAULT_LABELS spreads this object so the
 // labels editor reaches them and an override reaches all three decks) ------------------
@@ -443,7 +446,11 @@ function prepareRow(t, reportDate, lang) {
   const W = TR.colW;
   const track = groupLabel(t.track, t.trackAr, W[COL.track], lang);
   const milestone = groupLabel(t.milestone, t.milestoneAr, W[COL.milestone], lang);
-  const taskAr = lang === 'en' ? '' : clean(t.taskAr);
+  // showOriginal (the user's per-task «النص الأصلي», model/tracker-translate.js): this
+  // row's task prints its ENGLISH original even in 'ar' / 'both' — exactly as an
+  // untranslated row does. Only the task cell: the track / milestone labels are shared by
+  // the rows of a block, so one row cannot opt its group out. 'en' never reads it.
+  const taskAr = lang === 'en' || t.showOriginal === true ? '' : clean(t.taskAr);
   const taskEn = clean(t.task);
   const task = taskAr ? fitCell(taskAr, W[COL.task], { shaped: true }) : fitCell(t.task || DASH, W[COL.task]);
   // 'both': the English original on a second table row under the Arabic (see the header).

@@ -1,22 +1,26 @@
 // ui/screen-upload.js — file upload + parse + engine kickoff (Track E).
-import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-10-13.6';
+import { STR, todayISO, formatDateAr } from '../i18n/ar.js?v=v2026-10-13.7';
 import {
   el, dropZone, fileSummaryCard, toast, trackerSaver, trackerStatusCounts, trackerStamp,
-  trackerTranslationCount, trackerHasAnyArabic,
-} from './components.js?v=v2026-10-13.6';
+  // AUTOMATIC ARABIC (2026-10-13, CONTRACT-AUTO §5): the uploaded / restored tracker gets the
+  // translation layers the moment it enters (in place), and again when the built-in memory
+  // — loaded once per session — arrives.
+  translateTrackerInPlace, loadBuiltinTrackerTM, trackerTranslationStatus, writePendingTrackerTranslations,
+  detachTrackerFromTM,
+} from './components.js?v=v2026-10-13.7';
 // The project tracker («ملف متابعة المشروع», tracker CONTRACT §1.7). resolveProjectTracker
 // is the model layer's ONE rule for "which tracker does this run have" (tagged only —
 // an install's OLD-shape cache is no tracker); static, report-model.js is pure.
-import { resolveProjectTracker } from '../model/report-model.js?v=v2026-10-13.6';
-import { normTest } from '../contracts.js?v=v2026-10-13.6';
-import { getPapa, getXLSX } from '../vendor-loader.js?v=v2026-10-13.6';
-import { TAT_LOINC } from '../seeds/tat-lookup.js?v=v2026-10-13.6';
-import { buildLateLabsSection } from './late-labs-section.js?v=v2026-10-13.6';
-import { buildAutomationPanel } from './automation-panel.js?v=v2026-10-13.6';
+import { resolveProjectTracker } from '../model/report-model.js?v=v2026-10-13.7';
+import { normTest } from '../contracts.js?v=v2026-10-13.7';
+import { getPapa, getXLSX } from '../vendor-loader.js?v=v2026-10-13.7';
+import { TAT_LOINC } from '../seeds/tat-lookup.js?v=v2026-10-13.7';
+import { buildLateLabsSection } from './late-labs-section.js?v=v2026-10-13.7';
+import { buildAutomationPanel } from './automation-panel.js?v=v2026-10-13.7';
 // Optional filtered-CSV download (labs × order stages → the uploaded file's own rows).
 // It reads state.parsed.raw — PATIENT DATA, memory-only; see state.js for the pairing
 // rule this screen upholds at every site that writes state.parsed.orders.
-import { buildCsvExportSection } from './csv-export-section.js?v=v2026-10-13.6';
+import { buildCsvExportSection } from './csv-export-section.js?v=v2026-10-13.7';
 // THE HOSPITAL DOOR (2026-10-07; report types 2026-10-11): the feed carries KAMC's and
 // SGH's orders. Every site below that writes state.parsed.orders goes through
 // takeOrders(): parsed.orders = the KAMC rows — what EVERY surface of this screen reads
@@ -27,14 +31,14 @@ import { buildCsvExportSection } from './csv-export-section.js?v=v2026-10-13.6';
 // silently skipped the split would put another hospital's orders into every number (and
 // SGH test names into the global TAT table). hospital.js is pure (no DOM, no vendor
 // bundle), so this adds no failure mode.
-import { takeOrders } from '../model/hospital.js?v=v2026-10-13.6';
+import { takeOrders } from '../model/hospital.js?v=v2026-10-13.7';
 // «متابعة» assembles the report afresh, so a temporary slide order (the review's «ترتيب
 // الشرائح» card) goes with the old model — state.js owns that rule.
-import { clearTempSlideOrder } from '../state.js?v=v2026-10-13.6';
+import { clearTempSlideOrder } from '../state.js?v=v2026-10-13.7';
 
 /** The SAME specifier main.js and ui/automation-panel.js import — resolving to
  *  the identical URL means the probe below hits the already-cached module. */
-const AUTOMATION_PIPELINE_URL = '../automation/pipeline.js?v=v2026-10-13.6';
+const AUTOMATION_PIPELINE_URL = '../automation/pipeline.js?v=v2026-10-13.7';
 
 /** Format an ISO timestamp as local 'HH:MM' for snapshot-freshness labels. */
 function fmtHHMM(iso) {
@@ -113,6 +117,8 @@ export function buildMockTracker() {
     ],
   };
   MOCK_TRACKERS.add(doc);
+  // Its translation passes never read or write the user's memory (components.js — see there).
+  detachTrackerFromTM(doc);
   return doc;
 }
 
@@ -249,7 +255,7 @@ function normalizeOrders(res) {
 
 async function ingestCsv(file) {
   const Papa = await getPapa();
-  const mod = await tryImport('../ingest/csv.js?v=v2026-10-13.6');
+  const mod = await tryImport('../ingest/csv.js?v=v2026-10-13.7');
   const fn = pickFn(mod, ['parseKamcCsv', 'parseCsv', 'ingestCsv', 'parseOrders', 'parse']);
   if (fn) {
     const text = await file.text();
@@ -269,7 +275,7 @@ async function ingestCsv(file) {
  * FAILS with a message (it used to fall back to mock tasks — never again). */
 async function ingestTracker(file) {
   const XLSX = await getXLSX();
-  const mod = await tryImport('../ingest/task-tracker.js?v=v2026-10-13.6');
+  const mod = await tryImport('../ingest/task-tracker.js?v=v2026-10-13.7');
   if (!mod || typeof mod.parseTaskTracker !== 'function') throw new Error(STR.upload.trackerModuleMissing);
   const buf = await file.arrayBuffer();
   let tracker = mod.parseTaskTracker(buf, XLSX, { fileName: file.name });
@@ -476,14 +482,30 @@ export async function render(container, ctx) {
   // live Grafana source generate needs no files. TAGGED documents only: an install still
   // holding the OLD tracker's untagged cache restores nothing (no tracker, no slides).
   if (!resolveProjectTracker(state.parsed.tracker, null)) {
-    const cached = resolveProjectTracker(null, store.settings);
+    const settingsNow = store.settings;
+    const cached = resolveProjectTracker(null, settingsNow);
     state.parsed.tracker = cached;
+    // The restored document gets its Arabic too (a cache from before translations, or one
+    // the user's corrections / the built-in memory have grown since) — CONTRACT-AUTO §5.
+    if (cached) translateTrackerInPlace(cached, settingsNow, state.trackerBuiltinTM);
     if (cached) {
       const when = trackerStamp(cached.editedAt || cached.loadedAt).slice(0, 10);
       state.files.tracker = { name: `${STR.upload.cachedTrackerName}${cached.fileName ? ` — ${cached.fileName}` : ''}${when ? ` (${when})` : ''}` };
     } else {
       state.files.tracker = null; // no document (an old-shape cache restores nothing)
     }
+  }
+
+  // The built-in translation memory (encrypted, decrypted with the data key) — loaded ONCE
+  // per session and never awaited: the tracker shows what it has now, and when the memory
+  // arrives the document (restored or just uploaded) is re-applied in place and the card
+  // repainted with the new «N من M» (CONTRACT-AUTO §5).
+  if (state.trackerBuiltinTM === undefined) {
+    loadBuiltinTrackerTM(state, store, tryImport).then(() => {
+      const t = resolveProjectTracker(state.parsed.tracker, null);
+      if (!t || !summaryHost.isConnected) return;
+      if (translateTrackerInPlace(t, store.settings, state.trackerBuiltinTM)) paint();
+    });
   }
 
   // Restore visual state if returning to this screen with data already parsed.
@@ -500,7 +522,7 @@ export async function render(container, ctx) {
     const gcfg = (store.settings && store.settings.grafana) || {};
     const dataKey = (gcfg.dataKey || '').trim();
     try {
-      const mod = await import('../ingest/grafana.js?v=v2026-10-13.6');
+      const mod = await import('../ingest/grafana.js?v=v2026-10-13.7');
       const asOf = state.reportDate || todayISO();
       const directConfigured = !!(gcfg.baseUrl && gcfg.accessToken);
       try {
@@ -598,6 +620,16 @@ export async function render(container, ctx) {
         // Arabic message → the catch below lists it and marks the zone; the previous
         // tracker and the cache stay untouched.
         const tracker = await ingestTracker(file);
+        // The user's Arabic corrections still waiting in the editor's save debounce are
+        // written NOW (the document's own pending save is dropped below): they are keyed
+        // by the English text, so they belong to the new upload just as much.
+        try { writePendingTrackerTranslations(store); } catch (err) { console.warn('[upload] translation memory save failed', err); }
+        // AUTOMATIC ARABIC (CONTRACT-AUTO §5): the user's normal English workbook gets its
+        // Arabic HERE, before anything reads or caches it — the built-in reviewed memory (if
+        // loaded; else re-applied when it arrives), the user's earlier corrections (keyed by
+        // the English text, so they survive this re-upload) and the on-device machine cache.
+        // An Arabic column the workbook happens to carry still wins.
+        translateTrackerInPlace(tracker, store.settings, state.trackerBuiltinTM);
         // The document this upload REPLACES: had it been edited on the website, say so.
         // A save still pending for it is dropped, not flushed — it would land on top of
         // the new file in the cache.
@@ -736,15 +768,13 @@ export async function render(container, ctx) {
           ...trackerStatusCounts(tracker).map((c) => ({ label: c.label, value: c.count })),
         ],
       });
-      // «N من M مهمة مترجمة» — the Arabic translation coverage (Arabic CONTRACT §4); with no
-      // Arabic at all (no task, track or milestone translation — trackerHasAnyArabic), one
-      // line saying the slide will read in English (not an error). A file with only the
-      // Arabic track / milestone columns shows «0 من M» without that note: its group cells
-      // DO print in Arabic.
-      const tc = trackerTranslationCount(tracker);
-      if (tc.total) {
-        card.appendChild(el('p', { class: 'small', style: 'font-weight:700;margin:10px 0 0', text: STR.tracker.translated(tc.translated, tc.total) }));
-        if (!trackerHasAnyArabic(tracker)) card.appendChild(el('p', { class: 'small muted', style: 'margin:2px 0 0', text: STR.upload.trackerNoArabic }));
+      // «N من M مهمة مترجمة تلقائيًا» — the AUTOMATIC translation's coverage (CONTRACT-AUTO
+      // §6). No «upload an Arabic file» note any more: the user never prepares one. Tasks
+      // still without Arabic are dealt with on the review card (on-device translation, or
+      // the editor), which says so itself.
+      const tc = trackerTranslationStatus(tracker, 'ar');
+      if (tc) {
+        card.appendChild(el('p', { class: 'small', style: 'font-weight:700;margin:10px 0 0', text: STR.tracker.autoTranslated(tc.translated, tc.total) }));
       }
       const notes = [];
       if (trackerEditsReplacedAt) {
@@ -953,7 +983,7 @@ export async function render(container, ctx) {
     const seq = ++unmatchedSeq;
     let mod;
     try {
-      mod = await import('../ingest/tat-suggest.js?v=v2026-10-13.6');
+      mod = await import('../ingest/tat-suggest.js?v=v2026-10-13.7');
     } catch { return; } // module not present yet — keep the plain panel behavior
     if (seq !== unmatchedSeq) return; // a newer paint superseded this run
     const fn = pickFn(mod, ['suggestTats']);
@@ -1101,7 +1131,7 @@ export async function render(container, ctx) {
     if (!orders || !orders.length) { heroHost.innerHTML = ''; return; }
     let out;
     try {
-      const mod = await import('../engine/engine.js?v=v2026-10-13.6');
+      const mod = await import('../engine/engine.js?v=v2026-10-13.7');
       if (seq !== heroSeq) return; // a newer run superseded this one
       const compute = pickFn(mod, ['compute', 'runEngine', 'run']);
       if (typeof compute !== 'function') { heroHost.innerHTML = ''; return; }
@@ -1126,7 +1156,7 @@ export async function render(container, ctx) {
       let out = (state.engineOutput && state.engineOutput.totals) ? state.engineOutput : null;
       if (!out) {
         try {
-          const mod = await tryImport('../engine/engine.js?v=v2026-10-13.6');
+          const mod = await tryImport('../engine/engine.js?v=v2026-10-13.7');
           const compute = pickFn(mod, ['compute', 'runEngine', 'run']);
           if (compute) {
             out = compute(state.parsed.orders, (store.settings || {}).tatLookup, engineOpts());

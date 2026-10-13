@@ -16,21 +16,26 @@
 //     normalized TASK TEXT → {openOn, closedOn}. NO NEW DATA CLASS: it is the same
 //     project-management content cachedTracker already stores, kept in plaintext so
 //     an exported backup is auditable by the user who owns it.
+//   • trackerTranslations (2026-10-13) — the user's translation memory for the tracker's
+//     automatic Arabic (model/tracker-translate.js): their own corrections, their
+//     «النص الأصلي» choices and the cached on-device machine translations, keyed by the
+//     tasks' English text. Same data class as cachedTracker (project-management text).
+//     OPTIONAL and NEVER SEEDED: absent means "nothing corrected yet".
 // All localStorage access is wrapped in try/catch because Safari private mode
 // throws on write; on failure we fall back to an in-memory doc and expose
 // isEphemeral() so the UI can warn the user their edits will not persist.
 
-import { SETTINGS_KEY } from './contracts.js?v=v2026-10-13.6';
-import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-10-13.6';
-import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-10-13.6';
+import { SETTINGS_KEY } from './contracts.js?v=v2026-10-13.7';
+import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-10-13.7';
+import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-10-13.7';
 import {
   HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED, GRAFANA_SEED, REPORT_OPTIONS_SEED,
   SNAPSHOT_HISTORY_SEED, AUTOMATION_SEED, TASK_LOG_SEED,
-} from './seeds/defaults.js?v=v2026-10-13.6';
-import { DELTA_MODES, canonicalDeltaMode } from './model/delta-baseline.js?v=v2026-10-13.6';
+} from './seeds/defaults.js?v=v2026-10-13.7';
+import { DELTA_MODES, canonicalDeltaMode } from './model/delta-baseline.js?v=v2026-10-13.7';
 import {
   sanitizeTaskLog, recordShownTasks, TASK_LOG_LIMIT, TASK_KEY_MAX,
-} from './model/task-lifecycle.js?v=v2026-10-13.6';
+} from './model/task-lifecycle.js?v=v2026-10-13.7';
 // The ProjectTracker shape has ONE owner — the module that produces it. The store only
 // asks "is this the tagged document?" and "give me its clean copy", exactly as it
 // defers the taskLog entry shape to task-lifecycle.js above. The same module owns the
@@ -39,10 +44,16 @@ import {
 import {
   TRACKER_FORMAT, isProjectTracker, normalizeProjectTracker, normalizeTrackerLang, TRACKER_LANGS,
   backfillTaskFields,
-} from './ingest/task-tracker.js?v=v2026-10-13.6';
+} from './ingest/task-tracker.js?v=v2026-10-13.7';
+// The tracker translation memory's shape and bounds have one owner too — the module that
+// applies it. The store only decides when it is cleaned, capped and merged.
+import {
+  sanitizeTranslationMemory, mergeTranslationMemory, emptyTranslationMemory,
+  TM_ENTRY_LIMIT, TM_MAX_CHARS,
+} from './model/tracker-translate.js?v=v2026-10-13.7';
 // The slide-order vocabulary (reportOptions.slideOrder) has one owner too: the leaf module
 // the deck builders sort by. The store only cleans, caps and normalises with it.
-import { normalizeSlideOrder, SLIDE_ORDER_MAX } from './model/slide-order.js?v=v2026-10-13.6';
+import { normalizeSlideOrder, SLIDE_ORDER_MAX } from './model/slide-order.js?v=v2026-10-13.7';
 
 export const SCHEMA_VERSION = 9;
 
@@ -305,6 +316,13 @@ function migrateSnapshotShape(doc) {
   // an empty log means "nothing was ever shown open", which is exactly what makes
   // the tracker's pre-existing مغلق rows stay off the deck.
   if (!isPlainObject(doc.taskLog)) doc.taskLog = clone(TASK_LOG_SEED);
+  // Tracker translation memory: never seeded, so an ABSENT key stays absent. A present one
+  // is cleaned in memory (unknown keys dropped, keys re-normalised, entry caps) — a junk
+  // value (not an object) is removed rather than reset, since absent IS the empty memory.
+  if ('trackerTranslations' in doc) {
+    if (isPlainObject(doc.trackerTranslations)) doc.trackerTranslations = sanitizeTranslationMemory(doc.trackerTranslations);
+    else delete doc.trackerTranslations;
+  }
   return doc;
 }
 
@@ -799,6 +817,45 @@ export function updateCachedTracker(model) {
 }
 
 /**
+ * The user's tracker translation memory (settings.trackerTranslations), cleaned — or the
+ * EMPTY memory when none was ever written. Always the full shape
+ * {tasks, tracks, milestones, original, machine:{tasks, tracks, milestones}}, ready to pass
+ * as applyTrackerTranslations' `user` (whose `machine` it also supplies).
+ * @returns {ReturnType<typeof emptyTranslationMemory>}
+ */
+export function getTrackerTranslations() {
+  const doc = loadSettings();
+  return isPlainObject(doc.trackerTranslations)
+    ? sanitizeTranslationMemory(doc.trackerTranslations) : emptyTranslationMemory();
+}
+
+/**
+ * Stores (or clears, with null) the tracker translation memory — written by the review
+ * editor on every Arabic edit / «النص الأصلي» toggle (model/tracker-translate.js
+ * setUserTranslation / setOriginal) and after an on-device machine pass
+ * (addMachineTranslations). The stored copy is sanitizeTranslationMemory's. Throws, and
+ * stores nothing, when the serialized memory reaches TM_MAX_CHARS — the same bound an
+ * import is validated against, so export → import stays closed.
+ * @param {*} tm
+ */
+export function updateTrackerTranslations(tm) {
+  const doc = loadSettings();
+  if (tm == null) {
+    delete doc.trackerTranslations;
+    return saveSettings(doc);
+  }
+  const clean = sanitizeTranslationMemory(tm);
+  const size = JSON.stringify(clean).length;
+  if (size >= TM_MAX_CHARS) {
+    throw new Error(
+      `ذاكرة ترجمة المهام كبيرة جداً للتخزين (${size} حرفاً، الحد ${TM_MAX_CHARS}). لم تُحفظ.`,
+    );
+  }
+  doc.trackerTranslations = clean;
+  return saveSettings(doc);
+}
+
+/**
  * Serialize the config doc for download — MINUS the two access secrets.
  * SECURITY: the backup file lives in cleartext on disk/email/USB, so the
  * secrets the sign-in gate injects (grafana.accessToken → live source,
@@ -952,6 +1009,40 @@ function validateImport(doc) {
     // enabled is coerce-tolerant: any truthy/falsy value is accepted and
     // normalized to a boolean in pickImportKeys — no validation error here.
   }
+  if ('trackerTranslations' in doc && doc.trackerTranslations !== null) {
+    // The tracker translation memory. Containers and bounds are enforced (entry count per
+    // map, total size) so a hand-edited or hostile backup cannot bloat localStorage
+    // through this key; an individual malformed entry (non-string Arabic, empty key) is
+    // NOT an error — pickImportKeys' sanitizeTranslationMemory drops it, like taskLog's
+    // extra fields. null is accepted and ignored (this device's memory is kept).
+    const tt = doc.trackerTranslations;
+    if (!isPlainObject(tt)) {
+      throw new Error('حقل trackerTranslations غير صالح: يجب أن يكون كائناً.');
+    }
+    const maps = [
+      ['tasks', tt.tasks], ['tracks', tt.tracks], ['milestones', tt.milestones], ['original', tt.original],
+    ];
+    if ('machine' in tt) {
+      if (!isPlainObject(tt.machine)) {
+        throw new Error('حقل trackerTranslations.machine غير صالح: يجب أن يكون كائناً.');
+      }
+      for (const k of ['tasks', 'tracks', 'milestones']) maps.push([`machine.${k}`, tt.machine[k]]);
+    }
+    for (const [name, m] of maps) {
+      if (m === undefined) continue;
+      if (!isPlainObject(m)) {
+        throw new Error(`حقل trackerTranslations.${name} غير صالح: يجب أن يكون كائناً.`);
+      }
+      const n = Object.keys(m).length;
+      if (n > TM_ENTRY_LIMIT) {
+        throw new Error(`حقل trackerTranslations.${name} كبير جداً: ${n} عنصراً (الحد ${TM_ENTRY_LIMIT}).`);
+      }
+    }
+    const size = JSON.stringify(sanitizeTranslationMemory(tt)).length;
+    if (size >= TM_MAX_CHARS) {
+      throw new Error(`حقل trackerTranslations كبير جداً (${size} حرفاً، الحد ${TM_MAX_CHARS}).`);
+    }
+  }
   if ('cachedTracker' in doc) {
     const ct = doc.cachedTracker;
     if (ct !== null) {
@@ -1099,7 +1190,7 @@ function validateImport(doc) {
 
 // Only these top-level keys may ever be persisted — the "no PHI in storage"
 // invariant depends on unknown keys being discarded before the merge.
-const IMPORT_KEYS = ['schemaVersion', 'tatLookup', 'displayNames', 'scorecard', 'historicalConstants', 'snapshot', 'snapshotHistory', 'grafana', 'reportOptions', 'automation', 'cachedTracker', 'taskLog'];
+const IMPORT_KEYS = ['schemaVersion', 'tatLookup', 'displayNames', 'scorecard', 'historicalConstants', 'snapshot', 'snapshotHistory', 'grafana', 'reportOptions', 'automation', 'cachedTracker', 'taskLog', 'trackerTranslations'];
 
 // The exact reportOptions subkeys that may be imported. Unknown slide/card keys
 // are dropped; label values must be strings. Keys mirror REPORT_OPTIONS_SEED.
@@ -1259,6 +1350,13 @@ function pickImportKeys(doc) {
       picked.labRecipients = r;
     }
     out.automation = picked;
+  }
+  if (isPlainObject(out.trackerTranslations)) {
+    // tracker-translate.js owns the shape: known maps only, keys re-normalised, Arabic
+    // values non-empty strings, original values true, entry caps.
+    out.trackerTranslations = sanitizeTranslationMemory(out.trackerTranslations);
+  } else if ('trackerTranslations' in out) {
+    delete out.trackerTranslations; // null / not an object → keep this device's memory
   }
   if ('cachedTracker' in out) {
     const ct = out.cachedTracker;
@@ -1450,6 +1548,16 @@ export function importSettings(jsonText) {
   // editedAt or fileName beside someone else's tasks, or the old tracker's
   // challenges/risks beside the new document).
   if ('cachedTracker' in incoming) merged.cachedTracker = clone(incoming.cachedTracker);
+  // The translation memory is a per-key UNION (both devices' corrections are worth
+  // keeping), the backup winning on a shared key — but bounded: mergeTranslationMemory
+  // trims THIS device's extra keys first when a map would pass TM_ENTRY_LIMIT, and if the
+  // union still serializes past TM_MAX_CHARS the backup's memory alone is kept, so the
+  // stored doc always re-validates on its next export → import.
+  if ('trackerTranslations' in incoming) {
+    const union = mergeTranslationMemory(current.trackerTranslations, incoming.trackerTranslations);
+    merged.trackerTranslations = JSON.stringify(union).length < TM_MAX_CHARS
+      ? union : sanitizeTranslationMemory(incoming.trackerTranslations);
+  }
   // The saved slide order REPLACES too, and ABSENCE is a value here: the default order is
   // stored ABSENT (see backfillReportOptions), so a backup from a device on the default order
   // has reportOptions without slideOrder. Unlike every other reportOptions key — always

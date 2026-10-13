@@ -42,15 +42,15 @@
 // TAT table), the per-lab Late & Due workbooks and their drafts all read parsed.orders —
 // the KAMC rows only (model/hospital.js takeOrders). The operator's state.reportHospital
 // is never read.
-import { STR, todayISO, buildFileName } from '../i18n/ar.js?v=v2026-10-13.6';
-import { VARIANTS, normTest } from '../contracts.js?v=v2026-10-13.6';
-import { getGenLibs } from '../vendor-loader.js?v=v2026-10-13.6';
+import { STR, todayISO, buildFileName } from '../i18n/ar.js?v=v2026-10-13.7';
+import { VARIANTS, normTest } from '../contracts.js?v=v2026-10-13.7';
+import { getGenLibs } from '../vendor-loader.js?v=v2026-10-13.7';
 // STATIC on purpose, unlike the injected model modules below: isScoped gates the
 // published-history write, and neither guarded fallback is safe — "absent ⇒ unscoped"
 // would let a side report overwrite the history, "absent ⇒ scoped" would silently stop
 // recording full reports. scope.js is pure (no DOM, no vendor bundle), and ar.js above
 // already depends on it for the «(مخصص)» file-name suffix, so this adds no new failure mode.
-import { isScoped } from '../model/scope.js?v=v2026-10-13.6';
+import { isScoped } from '../model/scope.js?v=v2026-10-13.7';
 // THE HOSPITAL DOOR (2026-10-07, report types 2026-10-11): the feed carries KAMC's and
 // SGH's orders (and possibly a third hospital's). takeOrders puts the KAMC rows in
 // parsed.orders — they feed every KAMC-side step of this unattended run (TAT suggestions,
@@ -61,12 +61,12 @@ import { isScoped } from '../model/scope.js?v=v2026-10-13.6';
 // put another hospital's orders into an UNATTENDED morning report nobody reviews. A load failure abandons the run (main.js
 // catches the import) — no report, never a wrong one. hospital.js is pure (no DOM, no
 // vendor bundle).
-import { takeOrders } from '../model/hospital.js?v=v2026-10-13.6';
+import { takeOrders } from '../model/hospital.js?v=v2026-10-13.7';
 // THE TRACKER SHAPE CHECK (2026-10-13): resolveTracker below hands the unattended deck
 // only a TAGGED ProjectTracker. STATIC for isScoped's reason — "absent ⇒ accept anything"
 // would publish an old-format cache under the new slide design. task-tracker.js is a
 // leaf (no imports, no DOM; SheetJS is injected into its parser, never imported).
-import { isProjectTracker } from '../ingest/task-tracker.js?v=v2026-10-13.6';
+import { isProjectTracker } from '../ingest/task-tracker.js?v=v2026-10-13.7';
 
 /* ------------------------------------------------------------------ *
  * Shared micro-helpers (same idioms the screens use)
@@ -367,7 +367,7 @@ function installFastTimers() {
 // Build the SlideSpec per VARIANT — the variant changes slide-5 content
 // (task rows), so one shared spec would leak internal tasks into NUPCO files.
 async function buildVariantSpec(model, variant) {
-  const mod = await tryImport('../slidespec/build-spec.js?v=v2026-10-13.6');
+  const mod = await tryImport('../slidespec/build-spec.js?v=v2026-10-13.7');
   const fn = pickFn(mod, ['buildSpec', 'build', 'makeSpec', 'toSpec']);
   if (!fn) return null;
   let spec = fn(model, { variant });
@@ -393,7 +393,7 @@ async function toBlob(result, kind) {
 // renderPptx(spec, {variant, PptxGenJS}) -> Promise<Blob>
 async function makePptx(spec, variant, libs) {
   if (!spec) return null;
-  const mod = await tryImport('../render/pptx-renderer.js?v=v2026-10-13.6');
+  const mod = await tryImport('../render/pptx-renderer.js?v=v2026-10-13.7');
   const fn = pickFn(mod, ['renderPptx', 'buildPptx', 'toPptx', 'makePptx', 'render']);
   if (!fn) return null;
   const r = await fn(spec, { variant, PptxGenJS: libs.PptxGenJS });
@@ -405,9 +405,9 @@ async function makePptx(spec, variant, libs) {
 // the host and before capture starts — screen-generate clones them into live thumbnails.
 async function makePdf(spec, variant, libs, host, onProgress, onSlides) {
   if (!spec) return null;
-  const rMod = await tryImport('../render/html-renderer.js?v=v2026-10-13.6');
+  const rMod = await tryImport('../render/html-renderer.js?v=v2026-10-13.7');
   const renderSlides = pickFn(rMod, ['renderSlides', 'renderSpec', 'renderHtml', 'render']);
-  const pMod = await tryImport('../render/pdf-export.js?v=v2026-10-13.6');
+  const pMod = await tryImport('../render/pdf-export.js?v=v2026-10-13.7');
   const exportPdf = pickFn(pMod, ['exportPdf', 'renderPdf', 'toPdf', 'buildPdf', 'render']);
   if (!renderSlides || !exportPdf) return null;
   host.innerHTML = '';
@@ -605,29 +605,34 @@ const PULL_REUSE_MS = 15000;
 
 /** Default heavy dependencies — every one overridable through `deps` (tests inject fakes). */
 const DEFAULT_DEPS = Object.freeze({
-  loadGrafana: () => import('../ingest/grafana.js?v=v2026-10-13.6'),
-  loadEngine: () => tryImport('../engine/engine.js?v=v2026-10-13.6'),
-  loadReportModel: () => import('../model/report-model.js?v=v2026-10-13.6'),
+  loadGrafana: () => import('../ingest/grafana.js?v=v2026-10-13.7'),
+  loadEngine: () => tryImport('../engine/engine.js?v=v2026-10-13.7'),
+  loadReportModel: () => import('../model/report-model.js?v=v2026-10-13.7'),
   // The main report's builder (buildBothModel). NOT guarded, like the report model above:
   // without it there is no main report to publish, and the engine step fails loudly
   // (generate then skips) rather than publishing some other report as the weekly one.
-  loadHospitalReport: () => import('../model/hospital-report.js?v=v2026-10-13.6'),
-  loadDeltaBaseline: () => tryImport('../model/delta-baseline.js?v=v2026-10-13.6'),
+  loadHospitalReport: () => import('../model/hospital-report.js?v=v2026-10-13.7'),
+  loadDeltaBaseline: () => tryImport('../model/delta-baseline.js?v=v2026-10-13.7'),
   // The delta-chip stamper. Guarded like the rest: a build without it degrades to the
   // engine's own clamped deltas instead of failing this module at load time.
-  loadDeltaWindow: () => tryImport('../model/delta-window.js?v=v2026-10-13.6'),
-  loadLateLabs: () => import('../export/late-labs.js?v=v2026-10-13.6'),
-  loadTatSuggest: () => tryImport('../ingest/tat-suggest.js?v=v2026-10-13.6'),
-  loadTatLoinc: () => tryImport('../seeds/tat-lookup.js?v=v2026-10-13.6'),
+  loadDeltaWindow: () => tryImport('../model/delta-window.js?v=v2026-10-13.7'),
+  loadLateLabs: () => import('../export/late-labs.js?v=v2026-10-13.7'),
+  loadTatSuggest: () => tryImport('../ingest/tat-suggest.js?v=v2026-10-13.7'),
+  loadTatLoinc: () => tryImport('../seeds/tat-lookup.js?v=v2026-10-13.7'),
   // Track 5's module; absent until it ships → the emails step reports 'skip'.
-  loadEmlDraft: () => tryImport('../export/eml-draft.js?v=v2026-10-13.6'),
+  loadEmlDraft: () => tryImport('../export/eml-draft.js?v=v2026-10-13.7'),
   // The encrypted send-out catalogue. Guarded: absent module or a failed decrypt
   // means the deck simply omits the two send-out slides.
-  loadSendoutMaster: () => tryImport('../ingest/sendout-master.js?v=v2026-10-13.6'),
+  loadSendoutMaster: () => tryImport('../ingest/sendout-master.js?v=v2026-10-13.7'),
+  // AUTOMATIC ARABIC (2026-10-13, CONTRACT-AUTO §5): the tracker's translation layers (pure)
+  // and the encrypted built-in memory. Guarded: without them the unattended deck prints the
+  // tracker exactly as cached (English where it has no Arabic) — never no deck.
+  loadTrackerTranslate: () => tryImport('../model/tracker-translate.js?v=v2026-10-13.7'),
+  loadTrackerTranslations: () => tryImport('../ingest/tracker-translations.js?v=v2026-10-13.7'),
   // The vendor contact book (To: per lab + the standard CC block). Guarded: a
   // build without it just means drafts fall back to the Settings map alone.
-  loadLabContacts: () => tryImport('../seeds/lab-contacts.js?v=v2026-10-13.6'),
-  loadDownload: () => tryImport('../ui/late-labs-section.js?v=v2026-10-13.6'),
+  loadLabContacts: () => tryImport('../seeds/lab-contacts.js?v=v2026-10-13.7'),
+  loadDownload: () => tryImport('../ui/late-labs-section.js?v=v2026-10-13.7'),
   produceReportFiles,
   now: () => Date.now(),
 });
@@ -643,6 +648,18 @@ function engineOpts(state, settings) {
     snapshot: settings.snapshot,
     excludeNoTat: !!(settings.reportOptions && settings.reportOptions.excludeNoTat),
   };
+}
+
+/* A translation pass's result vs the cached document, BY MEANING (absent ≡ '' / false) —
+ * the same rule as components.js translationsDiffer, kept here so this module stays free of
+ * the DOM helpers. */
+const TR_FIELDS = ['taskAr', 'trackAr', 'milestoneAr', 'taskArSource', 'trackArSource', 'milestoneArSource', 'showOriginal'];
+const trField = (k, v) => (k === 'showOriginal' ? v === true : (typeof v === 'string' ? v : ''));
+function translationsDiffer(prev, next) {
+  const a = (prev && Array.isArray(prev.tasks)) ? prev.tasks : [];
+  const b = (next && Array.isArray(next.tasks)) ? next.tasks : [];
+  if (a.length !== b.length) return true;
+  return a.some((t, i) => TR_FIELDS.some((k) => trField(k, t && t[k]) !== trField(k, b[i] && b[i][k])));
 }
 
 /** The run's ProjectTracker: the PERSISTED document only (settings.cachedTracker — the
@@ -920,7 +937,9 @@ export async function runAutomation({
       errors.push(`sendout: ${(e && e.message) || String(e)}`);
     }
 
-    const tracker = resolveTracker(settings);
+    // The cached document with its Arabic applied (a translated COPY — the cache is not
+    // rewritten by a run): the unattended deck is in Arabic exactly like the review's.
+    const tracker = await translateRunTracker(resolveTracker(settings), settings);
     const base = buildReportModel({
       engineOutput: out,
       tracker,
@@ -987,6 +1006,44 @@ export async function runAutomation({
 
     const total = (out.totals && out.totals.total) != null ? out.totals.total : 0;
     return { message: `${total} طلب` };
+  }
+
+  /* AUTOMATIC ARABIC for the unattended deck (CONTRACT-AUTO §5): the same layers the review
+   * applies — the user's corrections + the on-device machine cache (settings
+   * .trackerTranslations) and the built-in reviewed memory (decrypted with the data key,
+   * ONCE per session: the state's copy when the screens already loaded it, else loaded here
+   * and left on the state for them). No machine translation here: a run has no click to
+   * start a language-model download, and it must never wait on one. Never throws. */
+  async function translateRunTracker(tracker, settings) {
+    if (!tracker) return tracker;
+    try {
+      const tmMod = typeof D.loadTrackerTranslate === 'function' ? await D.loadTrackerTranslate() : null;
+      const apply = pickFn(tmMod, ['applyTrackerTranslations']);
+      if (typeof apply !== 'function') return tracker;
+      let builtin = null;
+      if (theState.trackerBuiltinTM !== undefined) builtin = theState.trackerBuiltinTM;
+      else if (theState.trackerBuiltinTMLoading) builtin = await theState.trackerBuiltinTMLoading;
+      else {
+        const key = ((settings.grafana || {}).dataKey) || '';
+        if (key && typeof D.loadTrackerTranslations === 'function') {
+          const mod = await D.loadTrackerTranslations();
+          const load = pickFn(mod, ['loadTrackerTranslations', 'fetchTrackerTranslations']);
+          if (typeof load === 'function') {
+            try { builtin = await load(key); } catch { builtin = null; }
+          }
+          theState.trackerBuiltinTM = builtin && typeof builtin === 'object' ? builtin : null;
+        }
+      }
+      const user = settings.trackerTranslations && typeof settings.trackerTranslations === 'object'
+        ? settings.trackerTranslations : null;
+      const out = apply(tracker, { user, builtin: builtin && typeof builtin === 'object' ? builtin : null });
+      // Nothing translated (no memory covers it) → the cached document itself, untouched:
+      // the deck is exactly today's, not a copy carrying empty bookkeeping fields.
+      return isProjectTracker(out) && translationsDiffer(tracker, out) ? out : tracker;
+    } catch (e) {
+      errors.push(`tracker-ar: ${(e && e.message) || String(e)}`);
+      return tracker;
+    }
   }
 
   // The 4 report files + the snapshot/history write a successful run owes the

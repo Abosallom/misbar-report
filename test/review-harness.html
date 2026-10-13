@@ -34,7 +34,15 @@
          ?ambiguous=1 (adds two SYNTHETIC lines — see withAmbiguousBlank below),
          ?sgh=1 (adds 30 SYNTHETIC second-hospital lines — see withSgh below),
          ?tracker=0 (no project tracker), ?hospital=both|kamc|sgh (report type; default kamc),
-         ?lang=ar|en|both (the stored reportOptions.trackerLang; absent = none stored → 'ar').
+         ?lang=ar|en|both (the stored reportOptions.trackerLang; absent = none stored → 'ar'),
+         ?tracker=en (AUTOMATIC ARABIC, CONTRACT-AUTO: the synthetic tracker with its Arabic
+         STRIPPED — the user's normal English workbook — translated by a SYNTHETIC built-in
+         memory that covers all but two tasks; the card shows «N من M مهمة مترجمة تلقائيًا»,
+         the source badges and «النص الأصلي»), ?builtin=0 (no built-in memory: state
+         .trackerBuiltinTM = null — the real encrypted file is NEVER loaded here),
+         ?mt=available|downloadable|unavailable|none (a FAKE on-device globalThis.Translator
+         that «translates» to made-up Arabic — «آلي: …»; none = no API; absent = whatever this
+         browser has — only synthetic text ever reaches it).
 
   THE ENGINE is the real one, handed to the screen through ctx.compute (the screen's
   dev-harness seam; main.js never sets it) wrapped so the live line can COUNT the runs and
@@ -142,6 +150,26 @@
   const WITH_AMBIGUOUS = params.get('ambiguous') === '1';
   const WITH_SGH = params.get('sgh') === '1';
   const WITH_TRACKER = params.get('tracker') !== '0';
+  const ENGLISH_TRACKER = params.get('tracker') === 'en';
+  const WITH_BUILTIN = params.get('builtin') !== '0';
+  const MT = ['available', 'downloadable', 'unavailable', 'none'].includes(params.get('mt')) ? params.get('mt') : null;
+  // ?mt= — a FAKE on-device translator (Chrome's Translator API shape). Made-up output only.
+  if (MT === 'none') { try { delete globalThis.Translator; } catch { globalThis.Translator = undefined; } }
+  else if (MT) {
+    let ready = MT === 'available';
+    globalThis.Translator = {
+      async availability() { return ready ? 'available' : MT; },
+      async create() {
+        if (MT === 'unavailable') throw new Error('unavailable');
+        if (!ready && !(navigator.userActivation && navigator.userActivation.isActive)) {
+          throw Object.assign(new Error('needs a click'), { name: 'NotAllowedError' });
+        }
+        ready = true;
+        await new Promise((r) => setTimeout(r, 300));
+        return { async translate(text) { await new Promise((r) => setTimeout(r, 60)); return `آلي: ${text}`; }, destroy() {} };
+      },
+    };
+  }
   const HOSPITAL = ['both', 'kamc', 'sgh'].includes(params.get('hospital')) ? params.get('hospital') : 'kamc';
   const TRACKER_LANG = ['ar', 'en', 'both'].includes(params.get('lang')) ? params.get('lang') : null;
   // ?order=tracker — a SAVED slide order with the tracker unit first (synthetic choice).
@@ -301,7 +329,26 @@
   let ctx;
 
   /* The SYNTHETIC tracker, cloned out of buildMockTracker's demo identity (see header). */
-  const syntheticTracker = () => ({ ...clone(buildMockTracker()), fileName: 'synthetic-task-tracker.xlsx' });
+  const syntheticTracker = () => {
+    const t = { ...clone(buildMockTracker()), fileName: 'synthetic-task-tracker.xlsx' };
+    // ?tracker=en — the normal English workbook: no Arabic anywhere (the user prepares none).
+    if (ENGLISH_TRACKER) for (const x of t.tasks) { x.taskAr = ''; x.trackAr = ''; x.milestoneAr = ''; }
+    return t;
+  };
+  /* A SYNTHETIC built-in memory ({generatedAt, entries} — the decrypted file's shape), made
+   * from the mock's own made-up Arabic, leaving its last two tasks uncovered so the machine
+   * pass / the «write it in the editor» hint have something to do. Keys = the lookup rule. */
+  const lookupKey = (x) => String(x || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  function syntheticBuiltin() {
+    const entries = { tasks: {}, tracks: {}, milestones: {} };
+    const mock = buildMockTracker().tasks;
+    mock.forEach((x, i) => {
+      if (x.taskAr && i < mock.length - 2) entries.tasks[lookupKey(x.task)] = x.taskAr;
+      if (x.trackAr) entries.tracks[lookupKey(x.track)] = x.trackAr;
+      if (x.milestoneAr) entries.milestones[lookupKey(x.milestone)] = x.milestoneAr;
+    });
+    return { generatedAt: '2026-10-13T00:00:00.000Z', entries };
+  }
 
   function freshState() {
     store = memStore();
@@ -322,6 +369,8 @@
       settings: s,
       screen: 'review',
       sendoutMaster: WITH_MASTER ? fakeMaster(rows) : null, // set ⇒ the real loader never runs
+      // Set ⇒ the real (encrypted) built-in translation memory is never loaded here.
+      trackerBuiltinTM: WITH_BUILTIN ? syntheticBuiltin() : null,
     };
     takeOrders(state.parsed, rows); // the app's one door: KAMC → orders, SGH → ordersByHospital.sgh
     state.engineOutput = uploadEngineOutput(state.parsed.orders, s);
@@ -362,6 +411,17 @@
     bits.push(`متابعة: ${live ? `${live.tasks.length} مهمة` : 'لا يوجد'} · المحفوظ: ${ct ? `${ct.tasks.length} مهمة، آخر تعديل ${ct.editedAt || '—'}` : 'لا يوجد'} · في النموذج ${m && m.projectTracker === live ? 'الوثيقة نفسها' : 'نسخة أخرى!'}`);
     const translated = live ? live.tasks.filter((x) => String(x.taskAr || '').trim()).length : 0;
     bits.push(`لغة الشريحة: النموذج ${(m && m.reportOptions && m.reportOptions.trackerLang) || '—'} · المحفوظ ${(s.reportOptions && s.reportOptions.trackerLang) || '—'} · مترجمة ${translated} من ${live ? live.tasks.length : 0}`);
+    // AUTOMATIC ARABIC: where each task's Arabic came from, and the SAVED translation memory.
+    const srcCount = {};
+    for (const x of (live ? live.tasks : [])) {
+      const k = String(x.taskAr || '').trim() ? (x.taskArSource || 'file') : 'بلا';
+      srcCount[k] = (srcCount[k] || 0) + 1;
+    }
+    const tm = s.trackerTranslations || {};
+    const size = (o) => (o && typeof o === 'object' ? Object.keys(o).length : 0);
+    bits.push(`مصادر الترجمة: ${Object.entries(srcCount).map(([k, v]) => `${k} ${v}`).join('، ') || '—'} · الأصلي ${live ? live.tasks.filter((x) => x.showOriginal === true).length : 0}`
+      + ` · الذاكرة المحفوظة: تعديلات ${size(tm.tasks)} / أصلي ${size(tm.original)} / آلية ${size(tm.machine && tm.machine.tasks)}`
+      + ` · المعتمدة ${state.trackerBuiltinTM ? 'محمّلة' : 'لا'}`);
     const orderText = (o) => normalizeSlideOrder(o).map(slideOrderLabel).join(' › ');
     const temp = state.slideOrder && state.slideOrder.order;
     bits.push(`ترتيب مؤقت: ${temp ? orderText(temp) : 'لا يوجد'} (حمولة ${state.slideOrder ? state.slideOrder.epoch : '—'} / الحالية ${state.scopeEpoch || 0})`);

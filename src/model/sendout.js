@@ -52,8 +52,8 @@
 // variants, invisible characters): a looser key re-decides aliased orders too and
 // moves the full report, so it needs its own sign-off.
 //
-import { inferBlankFacilities } from '../engine/infer-facility.js?v=v2026-10-13.6';
-import { hasTestMenu } from './hospital.js?v=v2026-10-13.6';
+import { inferBlankFacilities } from '../engine/infer-facility.js?v=v2026-10-13.7';
+import { hasTestMenu } from './hospital.js?v=v2026-10-13.7';
 
 // PURE module: no DOM, no clock, no network, no vendor imports — the browser and
 // `node --test` share one deterministic path. The catalogue is INJECTED, never

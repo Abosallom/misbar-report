@@ -95,6 +95,17 @@
  * @property {string} notes
  * Every field is a string ('' when empty); task order = slide order (Portfolio order,
  * then Hierarchical-only rows).
+ * AUTOMATIC TRANSLATION (2026-10-13, model/tracker-translate.js applyTrackerTranslations):
+ * the *Ar fields are filled from translation memories keyed by the English text —
+ * workbook column > the user's corrections > the built-in reviewed memory
+ * (data/tracker-ar.enc) > the on-device machine cache — and three OPTIONAL bookkeeping
+ * keys ride along (persisted only when they carry something):
+ * @property {('file'|'user'|'builtin'|'machine')} [taskArSource]      - where taskAr came from
+ * @property {('file'|'user'|'builtin'|'machine')} [trackArSource]     - where trackAr came from
+ * @property {('file'|'user'|'builtin'|'machine')} [milestoneArSource] - where milestoneAr came
+ *                                   from (absent / '' beside a non-empty *Ar = 'file')
+ * @property {boolean} [showOriginal] - the user's per-task «النص الأصلي»: the slide prints this
+ *                                   task's ENGLISH even in 'ar' / 'both' (true only; absent = false)
  */
 /**
  * @typedef {Object} ProjectTracker
@@ -376,6 +387,19 @@
  *     24-hour 'HH:MM'. labRecipients maps a lab name -> a comma-separated
  *     recipient list for the per-lab email drafts; a missing/empty entry means
  *     the draft carries no To: line.
+ * @property {{tasks:Object<string,string>, tracks:Object<string,string>,
+ *   milestones:Object<string,string>, original:Object<string,true>,
+ *   machine:{tasks:Object<string,string>, tracks:Object<string,string>,
+ *   milestones:Object<string,string>}}} [trackerTranslations]
+ *   - (2026-10-13) the user's TRANSLATION MEMORY for the tracker's automatic Arabic
+ *     (model/tracker-translate.js owns the shape + bounds; store.js
+ *     getTrackerTranslations / updateTrackerTranslations). Keys are normEn(english text).
+ *     tasks / tracks / milestones = the user's own corrections (typed in the review
+ *     editor; clearing one removes it); original = tasks set to show their English
+ *     («النص الأصلي»); machine = cached ON-DEVICE machine translations (browser Translator
+ *     API — nothing is sent to any server). OPTIONAL, NEVER SEEDED (absent = empty);
+ *     cleaned on load; an import UNIONS it with this device's memory (the backup winning
+ *     per key), bounded by TM_ENTRY_LIMIT per map and TM_MAX_CHARS overall.
  * @property {{model:ProjectTracker, updatedAt:string}|null} cachedTracker
  *   - the project task tracker DOCUMENT: the last uploaded MISBAR Task Tracker plus
  *     every website edit (model.editedAt), reused when no fresh file is dropped and

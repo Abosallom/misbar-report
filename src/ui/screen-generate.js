@@ -2,17 +2,18 @@
 // The file-producing core now lives in automation/pipeline.js (produceReportFiles) so
 // an unattended run makes byte-identical files; this screen drives it and paints the
 // very same progress bar, file rows and live slide thumbnails it always has.
-import { STR, todayISO, formatDateAr, formatRangeAr } from '../i18n/ar.js?v=v2026-10-13.6';
-import { el, progressBar, toast } from './components.js?v=v2026-10-13.6';
-import { resetRunData, overlayTempSlideOrder } from '../state.js?v=v2026-10-13.6';
-import { buildMockEngineOutput } from './screen-upload.js?v=v2026-10-13.6';
-import { resolveProjectTracker } from '../model/report-model.js?v=v2026-10-13.6';
-import { buildLateLabsSection, triggerDownload } from './late-labs-section.js?v=v2026-10-13.6';
+import { STR, todayISO, formatDateAr, formatRangeAr } from '../i18n/ar.js?v=v2026-10-13.7';
+// translateTrackerInPlace: the automatic-Arabic pass (CONTRACT-AUTO §5) for the fallback below.
+import { el, progressBar, toast, translateTrackerInPlace } from './components.js?v=v2026-10-13.7';
+import { resetRunData, overlayTempSlideOrder } from '../state.js?v=v2026-10-13.7';
+import { buildMockEngineOutput } from './screen-upload.js?v=v2026-10-13.7';
+import { resolveProjectTracker } from '../model/report-model.js?v=v2026-10-13.7';
+import { buildLateLabsSection, triggerDownload } from './late-labs-section.js?v=v2026-10-13.7';
 import {
   applyWindowDeltas, buildFileDefs, produceReportFiles, recordRunSnapshot,
   shouldAutoDownloadFiles,
-} from '../automation/pipeline.js?v=v2026-10-13.6';
-import { isScoped, hasRange, normalizeScope } from '../model/scope.js?v=v2026-10-13.6';
+} from '../automation/pipeline.js?v=v2026-10-13.7';
+import { isScoped, hasRange, normalizeScope } from '../model/scope.js?v=v2026-10-13.7';
 
 /** The report type a model is (model.hospital; absent ⇒ 'kamc': a legacy KAMC-only model —
  *  every model that predates the report types, and the fallback below, whose numbers are
@@ -31,15 +32,24 @@ const isMobile = () => /iP(hone|ad|od)|Android/i.test(navigator.userAgent);
 // (resolveProjectTracker — tagged ProjectTrackers only), else null ⇒ no tracker slides.
 // Never buildMockTracker: a mock here once printed fake tasks into a real deck.
 // Challenges / risks / support lines are manual review content — none without a review.
-// Exported for test/tracker-model.test.mjs (pure: reads state + store.settings only).
+// AUTOMATIC ARABIC (CONTRACT-AUTO §5): the tracker carries its translations here too — the
+// layers applied IN PLACE (the session's own document stays one object; a cached one is the
+// fresh settings copy this call read), with the user's corrections + machine cache from
+// settings and the built-in memory when this session has loaded it, so a direct jump to
+// generate still prints Arabic tasks.
+// Exported for test/tracker-model.test.mjs (reads state + store.settings; writes only the
+// translation fields of the tracker it returns).
 export function fallbackModel(state, store) {
   const kpi = state.engineOutput || buildMockEngineOutput(store.settings);
   const reportDate = state.reportDate || todayISO();
+  const settings = store.settings;
+  const projectTracker = resolveProjectTracker(state.parsed && state.parsed.tracker, settings);
+  if (projectTracker) translateTrackerInPlace(projectTracker, settings, state.trackerBuiltinTM);
   return {
     reportDate,
     kpi,
     panels: { supportRequired: [] },
-    projectTracker: resolveProjectTracker(state.parsed && state.parsed.tracker, store.settings),
+    projectTracker,
     challenges: [],
     risks: [],
     scorecard: (store.settings && store.settings.scorecard) || [],
@@ -275,10 +285,10 @@ export async function render(container, ctx) {
   // Both modules are guarded → engine deltas if either is absent.
   // An SGH / KAMC + SGH model is re-stamped by model/hospital-report.js (each hospital
   // with its own policy — applyWindowDeltas routes it); guarded like the other two.
-  const dwMod = await tryImport('../model/delta-window.js?v=v2026-10-13.6');
-  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-10-13.6');
+  const dwMod = await tryImport('../model/delta-window.js?v=v2026-10-13.7');
+  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-10-13.7');
   const hrMod = hospitalOf(model) !== 'kamc'
-    ? await tryImport('../model/hospital-report.js?v=v2026-10-13.6')
+    ? await tryImport('../model/hospital-report.js?v=v2026-10-13.7')
     : null;
   const recordSnapshot = dbMod && dbMod.recordSnapshot;
   applyWindowDeltas(model, state, store, dwMod && dwMod.stampWindowDeltas, hrMod);

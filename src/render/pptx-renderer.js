@@ -8,8 +8,8 @@
 // defaults) sit next to the code that reads them, here and in html-renderer / charts-svg. Every new
 // field is optional: a spec that uses none of them goes through EXACTLY the old code path and
 // gets pptxgenjs' own blob back untouched (the KAMC deck must stay byte-identical).
-import { COLORS as C } from '../theme.js?v=v2026-10-13.6';
-import { fmtCode, stackTotals, DEFAULT_LAYOUT } from './charts-svg.js?v=v2026-10-13.6';
+import { COLORS as C } from '../theme.js?v=v2026-10-13.7';
+import { fmtCode, stackTotals, DEFAULT_LAYOUT } from './charts-svg.js?v=v2026-10-13.7';
 
 const hex = (c) => (c ? String(c).replace('#', '') : c);
 // Arabic + Arabic Supplement/Extended + presentation forms (same range html-renderer uses),
