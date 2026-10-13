@@ -852,3 +852,11 @@ test('Fal: the 2026-10-13 feed spelling is the same lab as the old one', () => {
   assert.equal(FACILITY_TO_VENDOR[newKey], FACILITY_TO_VENDOR[oldKey]);
   assert.equal(FACILITY_DISPLAY[newKey], FACILITY_DISPLAY[oldKey]);
 });
+
+// 2026-10-13 master file v2: Genomics Innovations is listed under its own (word-swapped)
+// vendor name, and India appears as a country. The alias must reach the v2 vendor key,
+// and every catalogue country needs an Arabic slide label.
+test('master v2: Genomics alias reaches its own vendor name; India has an Arabic label', () => {
+  assert.equal(FACILITY_TO_VENDOR[norm('Genomics Innovations Limited Company')], norm('Genomics Innovations Company Limited'));
+  assert.equal(AR_COUNTRY.India, 'الهند');
+});

@@ -5,11 +5,11 @@
 // build-spec reads from the very same predicate. A local re-derivation here is exactly
 // how a filename would one day say «مخصص» while the cover says nothing (or the reverse).
 // scope.js is pure (no DOM, no vendor, no ar.js back-edge), so this adds no cycle.
-import { isScoped, normalizeScope } from '../model/scope.js?v=v2026-10-13.2';
+import { isScoped, normalizeScope } from '../model/scope.js?v=v2026-10-13.3';
 // The hospital registry's short codes (KAMC / SGH) are what the file-name tag, the report
 // type pills and the share text print — read from the ONE registry, never re-typed here.
 // hospital.js is pure (no imports at all), so this adds no cycle either.
-import { HOSPITALS } from '../model/hospital.js?v=v2026-10-13.2';
+import { HOSPITALS } from '../model/hospital.js?v=v2026-10-13.3';
 
 /** Join ids for a sentence: Arabic comma, tolerant of a bare string or a missing list. */
 const joinIds = (ids) => [].concat(ids == null ? [] : ids).map(String).join('، ');

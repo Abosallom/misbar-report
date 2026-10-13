@@ -52,8 +52,8 @@
 // variants, invisible characters): a looser key re-decides aliased orders too and
 // moves the full report, so it needs its own sign-off.
 //
-import { inferBlankFacilities } from '../engine/infer-facility.js?v=v2026-10-13.2';
-import { hasTestMenu } from './hospital.js?v=v2026-10-13.2';
+import { inferBlankFacilities } from '../engine/infer-facility.js?v=v2026-10-13.3';
+import { hasTestMenu } from './hospital.js?v=v2026-10-13.3';
 
 // PURE module: no DOM, no clock, no network, no vendor imports — the browser and
 // `node --test` share one deterministic path. The catalogue is INJECTED, never
@@ -76,6 +76,7 @@ export const AR_COUNTRY = {
   Finland: 'فنلندا',
   Romania: 'رومانيا',
   'South Korea': 'كوريا الجنوبية',
+  India: 'الهند', // first appears in the 2026-10-13 master file (v2)
 };
 
 /** Short forms used only in the footnote under the lab table. */
@@ -138,12 +139,13 @@ export const FACILITY_TO_VENDOR = {
   'eurofins clinical': 'eurofins clinical',
   'anwa medical company': 'anwaa medical company',
   'anwaa medical company': 'anwaa medical company',
-  // Confirmed by KAMC: this lab is contracted under a different vendor name in
-  // the master file. That vendor name is used ONLY to look up the country and
+  // Confirmed by KAMC: until the 2026-10-13 master file (v2) this lab was contracted
+  // under a different vendor name; v2 lists it under its own name, word order swapped
+  // ('… Company Limited'). The vendor name is used ONLY to look up the country and
   // reference lab and is never displayed — the slide keeps the name below.
   // (Which reference lab, and where, comes from the ENCRYPTED catalogue: naming
   //  it here would put catalogue content into a public repo.)
-  'genomics innovations limited company': 'pharmaceutical investments company',
+  'genomics innovations limited company': 'genomics innovations company limited',
   'saudi diagnostics limited company': 'saudi diagnostic limited co.',
   'saudi diagnostic limited co.': 'saudi diagnostic limited co.',
   // The orders carry the lab's trading name, the catalogue its company name.

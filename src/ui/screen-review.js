@@ -1,17 +1,17 @@
 // ui/screen-review.js — review/edit report content with a live slide preview (Track E).
-import { STR, todayISO, formatDateAr, formatRangeAr } from '../i18n/ar.js?v=v2026-10-13.2';
+import { STR, todayISO, formatDateAr, formatRangeAr } from '../i18n/ar.js?v=v2026-10-13.3';
 import {
   el, editableTable, toast, trackerEditor, trackerSaver, saveTrackerToStore, createProjectTracker,
-} from './components.js?v=v2026-10-13.2';
-import { buildMockEngineOutput, isMockTracker } from './screen-upload.js?v=v2026-10-13.2';
+} from './components.js?v=v2026-10-13.3';
+import { buildMockEngineOutput, isMockTracker } from './screen-upload.js?v=v2026-10-13.3';
 // THE PROJECT TRACKER (2026-10-13, tracker CONTRACT §1.3/§1.6): the report carries the
 // «ملف متابعة المشروع» document as model.projectTracker, resolved by the model layer's
 // ONE rule (the run's tagged tracker, else the tagged cache, else null — never the old
 // untagged shape, never a mock). Static: report-model.js is pure, and sendout.js — its
 // only import — is already imported below.
-import { resolveProjectTracker } from '../model/report-model.js?v=v2026-10-13.2';
-import { analyseSendout, hasMaster, AR_COUNTRY } from '../model/sendout.js?v=v2026-10-13.2';
-import { buildHistoryPanel } from './history-table.js?v=v2026-10-13.2';
+import { resolveProjectTracker } from '../model/report-model.js?v=v2026-10-13.3';
+import { analyseSendout, hasMaster, AR_COUNTRY } from '../model/sendout.js?v=v2026-10-13.3';
+import { buildHistoryPanel } from './history-table.js?v=v2026-10-13.3';
 // REPORT SCOPE (2026-09-29). STATIC, not guarded like delta-window below: scope decides
 // WHICH ROWS every number is computed from, and there is no safe degraded answer — a
 // build that silently ignored a chosen scope would publish the full programme's numbers
@@ -20,16 +20,16 @@ import { buildHistoryPanel } from './history-table.js?v=v2026-10-13.2';
 import {
   EMPTY_SCOPE, normalizeScope, isScoped, hasRange, parseShipmentIds, labOptions,
   findShipments, applyScope, shipmentDetails,
-} from '../model/scope.js?v=v2026-10-13.2';
+} from '../model/scope.js?v=v2026-10-13.3';
 import {
   normalizeDeltaMode, isWeekDeltaMode, DEFAULT_DELTA_MODE,
-} from '../model/delta-baseline.js?v=v2026-10-13.2';
+} from '../model/delta-baseline.js?v=v2026-10-13.3';
 // REPORT TYPES (2026-10-11): KAMC + SGH (the main weekly report, default) / KAMC / SGH.
 // STATIC for scope.js's reason: WHICH hospital's rows a report reads has no safe degraded
 // answer, and hospital.js is pure (no imports at all). The per-hospital MODEL builders
 // (model/hospital-report.js) are a guarded import inside render(), like the engine they
 // depend on — absent, an SGH / KAMC + SGH build throws and modelFor says so.
-import { HOSPITALS, HOSPITAL_MODES, rowsForMode } from '../model/hospital.js?v=v2026-10-13.2';
+import { HOSPITALS, HOSPITAL_MODES, rowsForMode } from '../model/hospital.js?v=v2026-10-13.3';
 
 /* small local module helpers (kept local to avoid cross-screen coupling) */
 async function tryImport(path) { try { return await import(path); } catch { return null; } }
@@ -1017,7 +1017,7 @@ export async function render(container, ctx) {
   // any failure, which simply omits the two slides.
   if (state.sendoutMaster === undefined) {
     const dataKey = ((store.settings || {}).grafana || {}).dataKey || '';
-    const mod = await tryImport('../ingest/sendout-master.js?v=v2026-10-13.2');
+    const mod = await tryImport('../ingest/sendout-master.js?v=v2026-10-13.3');
     state.sendoutMaster = (mod && mod.loadSendoutMaster)
       ? await mod.loadSendoutMaster(dataKey)
       : null;
@@ -1033,11 +1033,11 @@ export async function render(container, ctx) {
   // so the app always takes the guarded import.
   const compute = typeof ctx.compute === 'function'
     ? ctx.compute
-    : pickFn(await tryImport('../engine/engine.js?v=v2026-10-13.2'), ['compute', 'runEngine', 'run']);
+    : pickFn(await tryImport('../engine/engine.js?v=v2026-10-13.3'), ['compute', 'runEngine', 'run']);
   // The SGH / KAMC + SGH model builders — guarded like the engine they depend on. Loaded
   // even in KAMC mode: the generate click and a report-type switch go through modelFor
   // with it, and a missing module must surface as modelFor's loud fallback, not a crash.
-  const hrMod = await tryImport('../model/hospital-report.js?v=v2026-10-13.2');
+  const hrMod = await tryImport('../model/hospital-report.js?v=v2026-10-13.3');
   const model = modelFor(state, store, compute, { hospitalReport: hrMod });
   // The report type ON SCREEN — the model's, which is the state's choice unless that
   // build failed and modelFor fell back to KAMC (it said so).
@@ -1075,7 +1075,7 @@ export async function render(container, ctx) {
   // Guarded import, exactly as the retired picker was: a build without the module
   // degrades to the engine's own deltas instead of throwing. Re-run below on a
   // report-date change and on a mode switch; being PURE, every re-run agrees.
-  const dwMod = await tryImport('../model/delta-window.js?v=v2026-10-13.2');
+  const dwMod = await tryImport('../model/delta-window.js?v=v2026-10-13.3');
   const stampWindow = dwMod && dwMod.stampWindowDeltas;
   // The chips need the parsed CSV rows: with no upload in this session (mock preview)
   // stampWindowDeltas leaves the engine's deltas alone and stamps no window, and the
@@ -1186,9 +1186,9 @@ export async function render(container, ctx) {
     // A range's END when one is active (the deck is dated 'to'), else the chosen date.
     model.reportDate = effectiveReportDate(state, model.scope);
     stampDeltas(); // re-window the chips for the current report date (pure → idempotent)
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-10-13.2');
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-10-13.3');
     const buildSpec = pickFn(specMod, ['buildSpec', 'build', 'makeSpec', 'toSpec']);
-    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-10-13.2');
+    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-10-13.3');
     const renderFn = pickFn(rendMod, ['renderSpec', 'renderSlides', 'renderHtml', 'render']);
 
     if (!buildSpec || !renderFn) {
@@ -1578,7 +1578,7 @@ export async function render(container, ctx) {
     el('summary', { class: 'card__title', style: 'cursor:pointer', text: STR.review.labelsCardTitle }),
   ]);
   (async () => {
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-10-13.2');
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-10-13.3');
     const LABEL_NAMES = specMod && specMod.LABEL_NAMES;
     const DEFAULT_LABELS = (specMod && specMod.DEFAULT_LABELS) || {};
     if (!LABEL_NAMES || typeof LABEL_NAMES !== 'object') {

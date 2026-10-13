@@ -21,7 +21,7 @@
 //    browser solely as the file the user explicitly downloads. ingest/grafana.js has NO
 //    `raw` and must never gain one — its rows are encrypted into the snapshot committed
 //    to a public repo, and the live pull carries no patient columns anyway.
-import { normFacility } from '../contracts.js?v=v2026-10-13.2';
+import { normFacility } from '../contracts.js?v=v2026-10-13.3';
 
 // Columns we actually map. Missing ones are reported in errors[] (fail soft).
 export const MAPPED_COLUMNS = [

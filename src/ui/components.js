@@ -1,5 +1,5 @@
 // ui/components.js — shared DOM helpers used by Track E screens.
-import { STR, formatDateAr } from '../i18n/ar.js?v=v2026-10-13.2';
+import { STR, formatDateAr } from '../i18n/ar.js?v=v2026-10-13.3';
 // The project tracker document's OWNER (shape, tag, due-date rule, new-row factory). STATIC,
 // like scope.js / hospital.js elsewhere: the module is pure (SheetJS is injected, never
 // imported), and the editor below must apply the parser's own rules — a website-typed
@@ -7,11 +7,11 @@ import { STR, formatDateAr } from '../i18n/ar.js?v=v2026-10-13.2';
 // test would treat the two differently.
 import {
   isProjectTracker, newTask as blankTrackerTask, normalizeDueText, TRACKER_FORMAT,
-} from '../ingest/task-tracker.js?v=v2026-10-13.2';
+} from '../ingest/task-tracker.js?v=v2026-10-13.3';
 // ONE status rule for the editor pill, the upload card's counts and the slide (its pill and
 // its overdue test): the slide builder's statusKey owns the alias table (English as the
 // workbook writes it, 'Deleyed' included, plus the Arabic words). Pure; imports theme only.
-import { statusKey as slideStatusKey } from '../slidespec/build-tracker.js?v=v2026-10-13.2';
+import { statusKey as slideStatusKey } from '../slidespec/build-tracker.js?v=v2026-10-13.3';
 
 /** Tiny hyperscript helper. */
 export function el(tag, props = {}, children = []) {
