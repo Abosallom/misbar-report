@@ -265,11 +265,12 @@ test('sanitizeTranslationMemory: full shape, keys re-normalised, junk dropped', 
     machine: { tasks: { A: 'أ' }, junk: { b: 'ب' } }, extra: { x: 1 },
   });
   assert.deepEqual(tm, {
-    tasks: { 'raw key': 'عربي' }, tracks: {}, milestones: {}, original: { 'some task': true },
+    tasks: { 'raw key': 'عربي' }, tracks: {}, milestones: {}, owners: {}, entities: {}, original: { 'some task': true },
     machine: { tasks: { a: 'أ' }, tracks: {}, milestones: {} },
   });
   assert.equal(translationMemorySize(tm), 3);
-  assert.deepEqual(sanitizeEntries({ entries: { tasks: { A: 'أ' } } }), { tasks: { a: 'أ' }, tracks: {}, milestones: {} });
+  assert.deepEqual(sanitizeEntries({ entries: { tasks: { A: 'أ' } } }),
+    { tasks: { a: 'أ' }, tracks: {}, milestones: {}, owners: {}, entities: {} });
 });
 
 test('bounds: oversized keys / values dropped, entry cap enforced on every write path', () => {
@@ -304,7 +305,8 @@ test('mergeTranslationMemory: union, the incoming side wins per key, base trimme
 
 test('TASK_AR_SOURCES (task-tracker.js) equals AR_SOURCES; source fields follow TRANSLATED_KINDS', () => {
   assert.deepEqual([...TASK_AR_SOURCES], [...AR_SOURCES]);
-  assert.deepEqual([...AR_SOURCE_FIELDS], ['taskArSource', 'trackArSource', 'milestoneArSource']);
+  assert.deepEqual([...AR_SOURCE_FIELDS],
+    ['taskArSource', 'trackArSource', 'milestoneArSource', 'ownerArSource', 'organizationArSource']);
   for (const k of TRANSLATED_KINDS) assert.ok(TASK_FIELDS.includes(k.en) && TASK_FIELDS.includes(k.ar));
 });
 

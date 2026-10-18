@@ -1,13 +1,13 @@
 // main.js — boot, settings store, top app bar, and screen router (Track E).
-import { state } from './state.js?v=v2026-10-13.7';
-import { STR } from './i18n/ar.js?v=v2026-10-13.7';
-import { APP_VERSION } from './version.js?v=v2026-10-13.7';
-import { el, toast } from './ui/components.js?v=v2026-10-13.7';
-import { startUpdateWatch, reloadUrlFor } from './update-check.js?v=v2026-10-13.7';
-import { SETTINGS_KEY } from './contracts.js?v=v2026-10-13.7';
-import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-10-13.7';
-import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-10-13.7';
-import { HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED, GRAFANA_SEED } from './seeds/defaults.js?v=v2026-10-13.7';
+import { state } from './state.js?v=v2026-10-18.1';
+import { STR } from './i18n/ar.js?v=v2026-10-18.1';
+import { APP_VERSION } from './version.js?v=v2026-10-18.1';
+import { el, toast } from './ui/components.js?v=v2026-10-18.1';
+import { startUpdateWatch, reloadUrlFor } from './update-check.js?v=v2026-10-18.1';
+import { SETTINGS_KEY } from './contracts.js?v=v2026-10-18.1';
+import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-10-18.1';
+import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-10-18.1';
+import { HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED, GRAFANA_SEED } from './seeds/defaults.js?v=v2026-10-18.1';
 
 /* ------------------------------------------------------------------ *
  * Settings store — prefers Track C's src/store.js, falls back to a
@@ -172,7 +172,7 @@ async function resolveStore() {
   const local = createLocalStore(persistent);
   let backend = null;
   try {
-    const mod = await import('./store.js?v=v2026-10-13.7');
+    const mod = await import('./store.js?v=v2026-10-18.1');
     if (mod && typeof mod.loadSettings === 'function' && typeof mod.saveSettings === 'function') {
       const s = mod.loadSettings();
       if (s && s.tatLookup) backend = mod;
@@ -186,10 +186,10 @@ async function resolveStore() {
  * ------------------------------------------------------------------ */
 
 const SCREEN_MODULES = {
-  upload: './ui/screen-upload.js?v=v2026-10-13.7',
-  review: './ui/screen-review.js?v=v2026-10-13.7',
-  generate: './ui/screen-generate.js?v=v2026-10-13.7',
-  settings: './ui/screen-settings.js?v=v2026-10-13.7', // Track C
+  upload: './ui/screen-upload.js?v=v2026-10-18.1',
+  review: './ui/screen-review.js?v=v2026-10-18.1',
+  generate: './ui/screen-generate.js?v=v2026-10-18.1',
+  settings: './ui/screen-settings.js?v=v2026-10-18.1', // Track C
 };
 
 let appEl = null;
@@ -462,6 +462,16 @@ function readAutoMode(params) {
   return (raw === 'full' || raw === 'all') ? 'full' : 'auto';
 }
 
+/** The run's cadence off ?mode= ('weekly' | 'daily'), else null = the saved one.
+ *  scripts/misbar-daily.sh adds &mode=weekly to the Thursday job's URL: that run IS the
+ *  weekly report, whatever cadence the review screen last saved (a saved «يومي» must not
+ *  silently turn the weekly deck daily). The plain daily trigger (?auto=1) carries no mode
+ *  and keeps the saved cadence. Per run only — never saved. */
+function readRunCadence(params) {
+  const raw = String(params.get('mode') || '').trim().toLowerCase();
+  return raw === 'weekly' || raw === 'daily' ? raw : null;
+}
+
 function fireWindowEvent(name, detail) {
   try { window.dispatchEvent(new CustomEvent(name, { detail })); } catch { /* older engines — bus still works */ }
 }
@@ -487,7 +497,7 @@ async function downloadAutoExtras(result) {
   if (!items.length) return 0;
   let mod = null;
   try {
-    mod = await import('./ui/late-labs-section.js?v=v2026-10-13.7');
+    mod = await import('./ui/late-labs-section.js?v=v2026-10-18.1');
   } catch (e) {
     console.warn('[auto] download helper unavailable — lab files/drafts not saved', e);
     return 0;
@@ -605,7 +615,7 @@ function confirmFullRun() {
   }
 }
 
-async function startAutomationRun(mode, store) {
+async function startAutomationRun(mode, store, cadence = null) {
   const existing = window[AUTO_BUS_KEY];
   if (existing && existing.running) return existing; // concurrent-run guard
 
@@ -626,7 +636,7 @@ async function startAutomationRun(mode, store) {
 
   let mod = null;
   try {
-    mod = await import('./automation/pipeline.js?v=v2026-10-13.7');
+    mod = await import('./automation/pipeline.js?v=v2026-10-18.1');
   } catch (e) {
     console.warn('[auto] pipeline module unavailable — trigger ignored', e);
     release();
@@ -669,7 +679,7 @@ async function startAutomationRun(mode, store) {
   } catch { /* no pagehide here — the bus dies with the document anyway */ }
   fireWindowEvent(AUTO_ANNOUNCE_EVENT, bus);
 
-  console.info('[auto] starting automation run (mode=' + mode + ')');
+  console.info('[auto] starting automation run (mode=' + mode + (cadence ? ', cadence=' + cadence : '') + ')');
   toast(mode === 'full' ? 'بدء التشغيل الآلي الكامل…' : 'بدء التشغيل الآلي…', '', 3000);
 
   bus.promise = (async () => {
@@ -688,6 +698,8 @@ async function startAutomationRun(mode, store) {
           bus.emit(e);
         },
         signal: controller ? controller.signal : undefined,
+        // The trigger's ?mode= cadence (null → the saved «دورية التقرير»).
+        cadence,
       });
     } catch (e) {
       bus.error = e;
@@ -761,7 +773,7 @@ async function boot() {
   // ephemeral case then reaches buildShell/startApp's storage warning, which
   // tells the user the sign-in cannot be remembered on this browser.
   try {
-    lockMod = await import('./ui/lock.js?v=v2026-10-13.7');
+    lockMod = await import('./ui/lock.js?v=v2026-10-18.1');
   } catch { lockMod = null; /* lock module absent — open boot (dev) */ }
   if (lockMod && typeof lockMod.isUnlocked === 'function' && !lockMod.isUnlocked(store)) {
     const root = document.getElementById('app-shell') || document.body;
@@ -817,8 +829,8 @@ function startApp(store) {
   // TAT-lookup Excel merge hook consumed by the settings screen (Track C).
   state.onTatFileMerge = async (file) => {
     const [{ getXLSX }, { parseTatLookupXlsx }] = await Promise.all([
-      import('./vendor-loader.js?v=v2026-10-13.7'),
-      import('./ingest/xlsx.js?v=v2026-10-13.7'),
+      import('./vendor-loader.js?v=v2026-10-18.1'),
+      import('./ingest/xlsx.js?v=v2026-10-18.1'),
     ]);
     const XLSX = await getXLSX();
     const { tests } = parseTatLookupXlsx(await file.arrayBuffer(), XLSX);
@@ -838,7 +850,7 @@ function startApp(store) {
   // Connection test consumed by the settings screen's اختبار الاتصال button.
   state.onGrafanaTest = async () => {
     try {
-      const mod = await import('./ingest/grafana.js?v=v2026-10-13.7');
+      const mod = await import('./ingest/grafana.js?v=v2026-10-18.1');
       const g = store.loadSettings().grafana || {};
       const now = Date.now();
       const res = await mod.fetchKamcOrders(g, { fromMs: now - 7 * 86400000, toMs: now });
@@ -850,7 +862,7 @@ function startApp(store) {
       // the split, never the test result.
       let byHospital = null;
       try {
-        const hmod = await import('./model/hospital.js?v=v2026-10-13.7');
+        const hmod = await import('./model/hospital.js?v=v2026-10-18.1');
         const p = hmod.partitionHospitals(res.rows);
         byHospital = {
           kamc: p.kamc.length,
@@ -881,7 +893,7 @@ function startApp(store) {
   // is imported, `window.__misbarAutoRun` already shows this run owns the
   // pipeline and nothing can start a competing one.
   if (autoMode) {
-    startAutomationRun(autoMode, store).catch((e) => console.warn('[auto] trigger failed', e));
+    startAutomationRun(autoMode, store, readRunCadence(params)).catch((e) => console.warn('[auto] trigger failed', e));
   }
 
   renderScreen();

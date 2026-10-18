@@ -647,13 +647,15 @@ test('shareText: KAMC / SGH (single-hospital) name their type; SGH prints «–�
 // UPDATED 2026-10-13 (tracker CONTRACT §1.5): the «متابعة المشروع» chip ('tracker')
 // replaced «المهام» ('action', retired with the old tracker) and is offered in ALL three
 // report types — the tracker slides sit in the main KAMC + SGH deck too.
-test('slide chips: KAMC / SGH offer all six; KAMC + SGH the four its deck honours (tracker included)', () => {
+// UPDATED 2026-10-18: + 'trackerCompleted' (the weekly «المهام المكتملة خلال الأسبوع» slide),
+// right after the task slides, in every deck type.
+test('slide chips: KAMC / SGH offer all seven; KAMC + SGH the five its deck honours (tracker included)', () => {
   const keys = (h) => slideTogglesFor(h).map((t) => t.key);
-  const all = ['execFunnel', 'monthly', 'sendout', 'compliance', 'tracker', 'challenges'];
+  const all = ['execFunnel', 'monthly', 'sendout', 'compliance', 'tracker', 'trackerCompleted', 'challenges'];
   assert.deepEqual(keys('kamc'), all);
   assert.deepEqual(keys('sgh'), all);
-  // build-spec-both.js reads on('monthly' | 'sendout' | 'compliance' | 'tracker').
-  assert.deepEqual(keys('both'), ['monthly', 'sendout', 'compliance', 'tracker']);
+  // build-spec-both.js reads on('monthly' | 'sendout' | 'compliance' | 'tracker' | 'trackerCompleted').
+  assert.deepEqual(keys('both'), ['monthly', 'sendout', 'compliance', 'tracker', 'trackerCompleted']);
   for (const h of ['kamc', 'sgh', 'both']) assert.ok(!keys(h).includes('action'), `${h}: the retired «المهام» chip`);
 });
 

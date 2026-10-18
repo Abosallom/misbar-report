@@ -6,11 +6,15 @@
 //   cover · execFunnel · monthly · compliance · action (المهام) · challenges (التحديات
 //   والمخاطر) · thanks.
 // SINCE 2026-10-13 THE «المهام» SLIDE IS GONE with the old tracker file: its slot holds the
-// project-tracker slides («متابعة المشروع», build-tracker.js, key 'tracker' — one or more
+// project-tracker slides («متابعة المهام», build-tracker.js, key 'tracker' — one or more
 // pages, the SAME for both variants, none when no tracker is loaded), and challenges is
 // manual content, rendered only when the operator entered a challenge or a risk. So the
 // default deck is cover · execFunnel · monthly · compliance · tracker… · thanks. The notes
 // below about the action slide and the variant's task rows are history.
+// SINCE 2026-10-18 a report has a CADENCE (reportOptions.cadence, model/slide-order.js):
+// 'weekly' (default) adds «المهام المكتملة خلال الأسبوع» (key 'trackerCompleted') after the
+// task slides when the model carries a status log; 'daily' prints «تقرير مسبار اليومي» on
+// the cover and leaves every Completed task (and that slide) out. Nothing else differs.
 // The action slide used to carry the tasks table AND the support band AND the challenges +
 // risks tables; the user's 2026-08-04 review split the last three onto their own slide so
 // every block has room (tasks 15 → 18 rows, challenges/risks 3 → 10 rows each).
@@ -66,19 +70,19 @@
 // standing rule, unchanged for it). The SGH and BOTH decks print exactly the names the
 // reference deck prints («SGH», «مستشفى الألماني السعودي») — the reference supersedes the
 // old rule for those two report types only.
-import { COLORS as C, GEOM } from '../theme.js?v=v2026-10-13.7';
-import { AR_COUNTRY, AR_COUNTRY_SHORT, reflabShort } from '../model/sendout.js?v=v2026-10-13.7';
-import { isScoped, hasRange } from '../model/scope.js?v=v2026-10-13.7';
+import { COLORS as C, GEOM } from '../theme.js?v=v2026-10-18.1';
+import { AR_COUNTRY, AR_COUNTRY_SHORT, reflabShort } from '../model/sendout.js?v=v2026-10-18.1';
+import { isScoped, hasRange } from '../model/scope.js?v=v2026-10-18.1';
 // The project-tracker slides (shared with build-spec-both.js; a leaf module, no cycle).
-import { buildTrackerSlides, TRACKER_LABELS } from './build-tracker.js?v=v2026-10-13.7';
+import { buildTrackerSlides, buildTrackerCompletedSlides, TRACKER_LABELS } from './build-tracker.js?v=v2026-10-18.1';
 // Slide ORDER (a leaf module, no cycle): the unit order the operator saved or chose for
 // this one report — see buildSpec's middleDefs.
-import { orderUnits, slideOrderOf } from '../model/slide-order.js?v=v2026-10-13.7';
+import { orderUnits, slideOrderOf, cadenceOf, unitInCadence } from '../model/slide-order.js?v=v2026-10-18.1';
 // NAMESPACE import on purpose: build-spec-both.js may import helpers back from this file
 // (an ESM cycle). A namespace binding is only read inside buildSpec, at CALL time, when
 // both modules have finished evaluating — and it tolerates either a named
 // `buildBothSpec` export (the contract's name) or a default export.
-import * as bothSpecModule from './build-spec-both.js?v=v2026-10-13.7';
+import * as bothSpecModule from './build-spec-both.js?v=v2026-10-18.1';
 
 // EXPLICIT-TRUE kpiCards KEYS. reportOptions.kpiCards normally reads "on unless === false"
 // (see buildExec's cardDefs filter). The keys in this set INVERT that: they render only
@@ -128,17 +132,19 @@ export const DEFAULT_LABELS = {
   subheadTasks: 'المهام الحالية',
   subheadChallenges: 'تحديات',
   subheadRisks: 'المخاطر',
-  // Project tracker slides («متابعة المشروع», build-tracker.js): titles, the eight column
+  // Project tracker slides («متابعة المهام», build-tracker.js): titles, the eight column
   // headers and the two summary-strip words. Defined once in build-tracker.js (which cannot
   // import this file — see there) and spread here so the labels editor lists them and an
   // override reaches all three decks.
   ...TRACKER_LABELS,
   // Cover + thanks
-  // ALWAYS 'الأسبوعي' — for BOTH variants (user decision 2026-08-10). The deck's chips
-  // now report a WEEK's activity window (see execDeltaLegendWeekWindow), so a cover that
-  // said 'اليومي' contradicted the legend two slides later. The daily/weekly distinction
-  // survives only in the chip window itself, never in the cover's name.
+  // 'الأسبوعي' for BOTH variants (user decision 2026-08-10). SINCE 2026-10-18 the report has
+  // a CADENCE option (reportOptions.cadence, user request): a DAILY report prints
+  // coverTitleDaily instead — in every deck (main / KAMC / SGH, internal + NUPCO). The
+  // weekly title stays the default, so every existing deck is unchanged. Two keys, not
+  // one with a placeholder, so an override of either reaches only its own cadence.
   coverTitle: 'تقرير مسبار الأسبوعي',
+  coverTitleDaily: 'تقرير مسبار اليومي',
   coverSubtitle: 'متابعة تقدم الطلبات وقياس جاهزية المختبرات',
   coverPreparedBy: 'إعداد: لين لخدمات الأعمال',
   thanks: 'شكرا لكم',
@@ -464,8 +470,13 @@ export const LABEL_NAMES = {
   subheadTasks: 'عنوان فرعي: المهام الحالية (غير مستخدم حالياً)',
   subheadChallenges: 'عنوان فرعي: تحديات',
   subheadRisks: 'عنوان فرعي: المخاطر',
-  titleTracker: 'عنوان شريحة متابعة المشروع',
-  titleTrackerCont: 'عنوان شريحة تتمة متابعة المشروع',
+  titleTracker: 'عنوان شريحة متابعة المهام',
+  titleTrackerCont: 'عنوان شريحة تتمة متابعة المهام',
+  titleTrackerCompleted: 'عنوان شريحة المهام المكتملة خلال الأسبوع',
+  titleTrackerCompletedCont: 'عنوان شريحة تتمة المهام المكتملة خلال الأسبوع',
+  trkPrevStatus: 'عمود المكتملة: الحالة السابقة',
+  trkWeekRange: 'المكتملة: سطر الأسبوع ({from} و{to})',
+  trkCompletedNone: 'المكتملة: نص عدم وجود مهام مكتملة',
   trkTrack: 'عمود المتابعة: المسار',
   trkMilestone: 'عمود المتابعة: المرحلة',
   trkTask: 'عمود المتابعة: المهمة',
@@ -477,6 +488,7 @@ export const LABEL_NAMES = {
   trkTotal: 'ملخص المتابعة: إجمالي المهام',
   trkOverdue: 'ملخص المتابعة: متجاوزة الموعد',
   coverTitle: 'عنوان الغلاف',
+  coverTitleDaily: 'عنوان الغلاف (التقرير اليومي)',
   coverSubtitle: 'العنوان الفرعي للغلاف',
   coverPreparedBy: 'سطر جهة الإعداد في الغلاف',
   thanks: 'نص شريحة الشكر',
@@ -953,7 +965,7 @@ function buildCover(m) {
     rect(0, 0, 0.15, 7.5, C.purple),
     rect(13.15, 0, 0.15, 7.5, C.orange),
     text(8.7, 0.5, 4.0, 0.5, 'NUPCO  |  Lean', 18, { bold: true, color: C.white, align: 'right', valign: 'middle' }),
-    text(0.6, 2.6, 11.9, 1.3, L('coverTitle'), 60, { bold: true, color: C.white, align: 'right', valign: 'middle', rtl: true }),
+    text(0.6, 2.6, 11.9, 1.3, L(cadenceOf(m) === 'daily' ? 'coverTitleDaily' : 'coverTitle'), 60, { bold: true, color: C.white, align: 'right', valign: 'middle', rtl: true }),
     text(0.6, 4.0, 11.9, 0.6, L('coverSubtitle'), 22, { color: CARD_TITLE, align: 'right', valign: 'middle', rtl: true }),
     text(0.6, 6.15, 11.9, 0.4, dateLine, 12, { color: CARD_TITLE, align: 'right', valign: 'middle', rtl: true }),
     text(0.6, 6.55, 11.9, 0.4, L('coverPreparedBy'), 12, { color: CARD_TITLE, align: 'right', valign: 'middle', rtl: true }),
@@ -2109,7 +2121,7 @@ function buildCompliance(m) {
 // ============================================================================
 // Its source, the old «ملف متابعة المشروع» (Arabic sheets سجل المهام / التحديات / المخاطر)
 // and the tasksCurrent / tasksInternal lists drafted from it, is gone: the NEW project task
-// tracker renders through build-tracker.js («متابعة المشروع», key 'tracker') in the same
+// tracker renders through build-tracker.js («متابعة المهام», key 'tracker') in the same
 // position of the deck, identically for both variants. The 'action' key may still sit in
 // saved reportOptions; nothing reads it any more. Its labels stay in the registry as parity
 // orphans (marked غير مستخدم حالياً in LABEL_NAMES), like the retired legend keys.
@@ -2627,11 +2639,18 @@ export function buildSpec(reportModel, { variant = 'internal' } = {}) {
     { key: 'sendout', build: () => (m.sendout && m.sendout.total
       ? [buildSendoutCountries(m), buildSendoutLabs(m)] : []) },
     { key: 'compliance', build: () => [buildCompliance(m)] },
-    // Project tracker ('متابعة المشروع', build-tracker.js) — in the slot the retired 'action'
+    // Project tracker ('متابعة المهام', build-tracker.js) — in the slot the retired 'action'
     // (المهام) slide held, default ON ('tracker' is not in OPT_IN_SLIDES). The same slides
     // for both variants; no tracker / no task → [] (no slide, no page number used). The text
-    // language is reportOptions.trackerLang ('ar' default | 'en' | 'both'; build-tracker.js).
-    { key: 'tracker', build: () => buildTrackerSlides(m.projectTracker, { reportDate: m.reportDate, variant, labels: labelOf(m), lang: m.reportOptions?.trackerLang }) },
+    // language is reportOptions.trackerLang ('ar' default | 'en' | 'both'; build-tracker.js);
+    // a DAILY cadence leaves every Completed task out.
+    { key: 'tracker', build: () => buildTrackerSlides(m.projectTracker, { reportDate: m.reportDate, variant, labels: labelOf(m), lang: m.reportOptions?.trackerLang, cadence: cadenceOf(m) }) },
+    // «المهام المكتملة خلال الأسبوع» (2026-10-18) — its OWN unit + toggle right after the
+    // task slides, default ON; WEEKLY decks only (unitInCadence). Tasks that became
+    // Completed this week per m.trackerStatusLog; no log / no tracker → [].
+    { key: 'trackerCompleted', build: () => (unitInCadence('trackerCompleted', cadenceOf(m))
+      ? buildTrackerCompletedSlides(m.projectTracker, m.trackerStatusLog, { reportDate: m.reportDate, labels: labelOf(m), lang: m.reportOptions?.trackerLang })
+      : []) },
     // Challenges & risks — SPLIT OFF the action slide 2026-08-04. It is a NORMAL (default
     // ON) middle slide: 'challenges' is not in OPT_IN_SLIDES, so on() reads an absent
     // reportOptions.slides.challenges as ON. That matters for saved report options written

@@ -28,6 +28,8 @@ const ENTRIES = {
   tasks: { [normEn('Synthetic build task')]: 'مهمة بناء تجريبية' },
   tracks: { [normEn('Synthetic Track')]: 'مسار تجريبي' },
   milestones: {},
+  owners: {},
+  entities: {},
 };
 
 /** Encrypt a payload exactly as the build script does. */
@@ -120,7 +122,7 @@ test('build script: JSON {tasks, tracks, milestones} → encrypted envelope the 
   assert.equal(r.status, 0, r.stderr);
   const out = join(dir, 'data', 'tracker-ar.enc');
   assert.ok(existsSync(out), 'writes data/tracker-ar.enc relative to the working directory');
-  assert.match(r.stdout, /1 tasks · 1 tracks · 0 milestones · 1 empty\/oversized skipped · 1 conflicting duplicates/);
+  assert.match(r.stdout, /1 tasks · 1 tracks · 0 milestones · 0 owners · 0 entities · 1 empty\/oversized skipped · 1 conflicting duplicates/);
   // Counts only: no entry, English or Arabic, ever reaches the console.
   for (const s of ['Synthetic', 'synthetic', 'مهمة', 'مسار']) {
     assert.ok(!r.stdout.includes(s) && !r.stderr.includes(s), `console leaks "${s}"`);

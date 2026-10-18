@@ -511,5 +511,9 @@ test('the source badges and the row tags have their Arabic wording', () => {
     file: 'من الملف', user: 'تعديلك', builtin: 'من الترجمة المعتمدة', machine: 'ترجمة آلية — راجعها', none: 'بدون ترجمة',
   });
   assert.equal(STR.tracker.original, 'النص الأصلي');
-  assert.deepEqual([...TRACKER_TRANSLATION_FIELDS].sort(), ['milestoneAr', 'milestoneArSource', 'showOriginal', 'taskAr', 'taskArSource', 'trackAr', 'trackArSource']);
+  // + the owner / entity names (2026-10-18, rule 5) — copied in place like the texts.
+  assert.deepEqual([...TRACKER_TRANSLATION_FIELDS].sort(), [
+    'milestoneAr', 'milestoneArSource', 'organizationAr', 'organizationArSource', 'ownerAr', 'ownerArSource',
+    'showOriginal', 'taskAr', 'taskArSource', 'trackAr', 'trackArSource',
+  ]);
 });

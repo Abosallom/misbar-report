@@ -21,21 +21,28 @@
 //     «النص الأصلي» choices and the cached on-device machine translations, keyed by the
 //     tasks' English text. Same data class as cachedTracker (project-management text).
 //     OPTIONAL and NEVER SEEDED: absent means "nothing corrected yet".
+//   • trackerStatusLog (2026-10-18) — WHEN each tracker task's status changed (WBS / id →
+//     dated effective-status entries; model/tracker-status.js recordStatusLog), so the
+//     weekly «المهام المكتملة خلال الأسبوع» slide can tell which tasks BECAME Completed this
+//     week. Same data class as cachedTracker (it holds no task text at all). Recorded on
+//     every updateCachedTracker; seeded once from an existing cache (see seedStatusLog).
 // All localStorage access is wrapped in try/catch because Safari private mode
 // throws on write; on failure we fall back to an in-memory doc and expose
 // isEphemeral() so the UI can warn the user their edits will not persist.
 
-import { SETTINGS_KEY } from './contracts.js?v=v2026-10-13.7';
-import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-10-13.7';
-import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-10-13.7';
+import {
+  SETTINGS_KEY, CADENCES, DEFAULT_CADENCE, canonicalCadence,
+} from './contracts.js?v=v2026-10-18.1';
+import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-10-18.1';
+import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-10-18.1';
 import {
   HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED, GRAFANA_SEED, REPORT_OPTIONS_SEED,
   SNAPSHOT_HISTORY_SEED, AUTOMATION_SEED, TASK_LOG_SEED,
-} from './seeds/defaults.js?v=v2026-10-13.7';
-import { DELTA_MODES, canonicalDeltaMode } from './model/delta-baseline.js?v=v2026-10-13.7';
+} from './seeds/defaults.js?v=v2026-10-18.1';
+import { DELTA_MODES, canonicalDeltaMode } from './model/delta-baseline.js?v=v2026-10-18.1';
 import {
   sanitizeTaskLog, recordShownTasks, TASK_LOG_LIMIT, TASK_KEY_MAX,
-} from './model/task-lifecycle.js?v=v2026-10-13.7';
+} from './model/task-lifecycle.js?v=v2026-10-18.1';
 // The ProjectTracker shape has ONE owner — the module that produces it. The store only
 // asks "is this the tagged document?" and "give me its clean copy", exactly as it
 // defers the taskLog entry shape to task-lifecycle.js above. The same module owns the
@@ -44,16 +51,23 @@ import {
 import {
   TRACKER_FORMAT, isProjectTracker, normalizeProjectTracker, normalizeTrackerLang, TRACKER_LANGS,
   backfillTaskFields,
-} from './ingest/task-tracker.js?v=v2026-10-13.7';
+} from './ingest/task-tracker.js?v=v2026-10-18.1';
 // The tracker translation memory's shape and bounds have one owner too — the module that
 // applies it. The store only decides when it is cleaned, capped and merged.
 import {
   sanitizeTranslationMemory, mergeTranslationMemory, emptyTranslationMemory,
   TM_ENTRY_LIMIT, TM_MAX_CHARS,
-} from './model/tracker-translate.js?v=v2026-10-13.7';
+} from './model/tracker-translate.js?v=v2026-10-18.1';
 // The slide-order vocabulary (reportOptions.slideOrder) has one owner too: the leaf module
 // the deck builders sort by. The store only cleans, caps and normalises with it.
-import { normalizeSlideOrder, SLIDE_ORDER_MAX } from './model/slide-order.js?v=v2026-10-13.7';
+import { normalizeSlideOrder, SLIDE_ORDER_MAX } from './model/slide-order.js?v=v2026-10-18.1';
+// The tracker status history's RECORDING rule (what an entry is, when one is appended) has
+// one owner too — the status module the weekly completed-tasks slide reads it with. The
+// store decides WHEN it runs (every cached-tracker write, the one-time seed) and bounds what
+// it keeps (sanitizeStatusLog below), exactly as it does for the translation memory.
+import {
+  recordStatusLog, normalizeStatusLog, STATUS_LOG_TASK_LIMIT,
+} from './model/tracker-status.js?v=v2026-10-18.1';
 
 export const SCHEMA_VERSION = 9;
 
@@ -156,6 +170,10 @@ function backfillReportOptions(doc) {
   // the English per cell, so a tracker without Arabic columns renders as it did. No
   // schema bump — like every key above, only a MISSING / invalid value is filled.
   ro.trackerLang = normalizeTrackerLang(ro.trackerLang) || seed.trackerLang;
+  // cadence (2026-10-18, «دورية التقرير» — contracts.js CADENCES): weekly (today's deck) or
+  // daily. A missing / unrecognized value takes the seed, else 'weekly' — the deck every
+  // existing install already produces, so filling it changes nothing on any slide.
+  ro.cadence = canonicalCadence(ro.cadence) || canonicalCadence(seed.cadence) || DEFAULT_CADENCE;
   // slideOrder (2026-10-13, the operator's SAVED slide order — model/slide-order.js). The
   // one key here that is NEVER filled: ABSENT means "the default order", so a slide unit
   // added in a later version lands in its default place instead of being frozen out by a
@@ -236,6 +254,89 @@ function trackerCacheIsStale(doc) {
   const ct = doc.cachedTracker;
   if (ct == null) return false;
   return !(isPlainObject(ct) && isProjectTracker(ct.model) && typeof ct.updatedAt === 'string');
+}
+
+// ---- the tracker status history (settings.trackerStatusLog) ------------------------------
+// The log's SHAPE (entry validity, ordering, same-day collapse, per-task / task caps) is the
+// status module's (normalizeStatusLog) — one rule for the recorder, the store and an import.
+// The store adds only what localStorage needs: an overall size bound and the import guards.
+// The user's tracker is ~35 tasks and a status changes a handful of times a month, so these
+// only guard pathologies (a hand-edited backup, a runaway loop). The SAME bounds validate an
+// import, so export → import is closed under them.
+const STATUS_LOG_TASKS_MAX = STATUS_LOG_TASK_LIMIT; // tasks with a history
+const STATUS_LOG_IMPORT_ENTRIES_MAX = 500; // a backup's raw per-task list (cleaned to 60)
+const STATUS_LOG_MAX_CHARS = 200_000;
+
+/**
+ * settings.trackerStatusLog → its clean shape {v:1, tasks:{key:[{at, status}]}}
+ * (tracker-status.js normalizeStatusLog); should it still serialize past
+ * STATUS_LOG_MAX_CHARS, each history is cut to its last 5 entries (the most recent ones are
+ * what the weekly slide reads). Pure; never throws.
+ * @returns {import('./contracts.js').TrackerStatusLog}
+ */
+export function sanitizeStatusLog(log) {
+  const out = normalizeStatusLog(log);
+  if (JSON.stringify(out).length >= STATUS_LOG_MAX_CHARS) {
+    for (const k of Object.keys(out.tasks)) out.tasks[k] = out.tasks[k].slice(-5);
+  }
+  return out;
+}
+
+/** Local calendar date 'YYYY-MM-DD' of a Date / timestamp, or null when it is not one. The
+ *  log is dated by the OPERATOR'S day (the report date the screens default to is local too). */
+function localDateISO(v) {
+  const d = v instanceof Date ? v : new Date(v);
+  if (v == null || v === '' || Number.isNaN(d.getTime())) return null;
+  const p = (x) => String(x).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+/**
+ * Record `tracker`'s statuses into doc.trackerStatusLog as of `atISO` (in place): an entry
+ * per task whose effective status differs from its last one (recordStatusLog's rule), then
+ * the store's bounds. NEVER throws — a failure keeps the previous log and the caller's write
+ * (the tracker document itself) goes ahead: losing one history entry is recoverable, losing
+ * the user's tracker edit is not.
+ * @returns {boolean} true when the log was (re)written
+ */
+function recordStatusInto(doc, tracker, atISO) {
+  if (!isProjectTracker(tracker) || !ISO_DATE_RE.test(String(atISO))) return false;
+  try {
+    const prev = isPlainObject(doc.trackerStatusLog) ? doc.trackerStatusLog : { v: 1, tasks: {} };
+    const next = recordStatusLog(prev, tracker, atISO);
+    if (!isPlainObject(next)) return false;
+    doc.trackerStatusLog = sanitizeStatusLog(next);
+    return true;
+  } catch (e) {
+    console.warn('[misbar/store] tracker status log not recorded', e);
+    return false;
+  }
+}
+
+/**
+ * The ONE-TIME seed: a doc with a cached tracker and NO log (every install from before this
+ * feature) gets the cached document's statuses recorded, dated by the day that document
+ * was last right — its editedAt (a website edit), else its loadedAt (the upload), else the
+ * cache's updatedAt. WHY: the first upload after this ships must already be able to tell
+ * that a task shown «متأخر» last week is «مكتمل» now; without the seed every task would be
+ * "first seen" in that upload and completedDuring rightly reports nothing for those.
+ * Idempotent (absent-only), so it runs on the load path like the other backfills.
+ * KNOWN LIMIT (the status module's same-day rule): when the cached document is dated TODAY
+ * and is replaced by an upload today, that upload's entry replaces the seed's — a same-day
+ * change is a correction, not a transition. Any earlier-dated document is unaffected.
+ * @returns {boolean} true when it seeded
+ */
+function seedStatusLog(doc) {
+  if ('trackerStatusLog' in doc) return false;
+  const ct = doc.cachedTracker;
+  const model = ct && ct.model;
+  if (!isProjectTracker(model)) return false;
+  // Deterministic on purpose (no "now" unless the cache carries no usable date at all —
+  // a valid cache always has updatedAt): the load path re-derives the same seed until a
+  // write persists it, so loading never has to write.
+  const at = localDateISO(model.editedAt) || localDateISO(model.loadedAt)
+    || localDateISO(ct.updatedAt) || localDateISO(new Date());
+  return recordStatusInto(doc, model, at);
 }
 
 function tryGet(key) {
@@ -323,6 +424,13 @@ function migrateSnapshotShape(doc) {
     if (isPlainObject(doc.trackerTranslations)) doc.trackerTranslations = sanitizeTranslationMemory(doc.trackerTranslations);
     else delete doc.trackerTranslations;
   }
+  // Tracker status history: a present one is cleaned (a junk value is removed — absent is
+  // "no history yet"); an absent one is SEEDED once from the cached tracker (seedStatusLog).
+  if ('trackerStatusLog' in doc) {
+    if (isPlainObject(doc.trackerStatusLog)) doc.trackerStatusLog = sanitizeStatusLog(doc.trackerStatusLog);
+    else delete doc.trackerStatusLog;
+  }
+  seedStatusLog(doc);
   return doc;
 }
 
@@ -679,6 +787,10 @@ function migrate(doc) {
     // carrying the dead tasks/challenges/risks instead of re-dropping them every load.
     const staleTracker = trackerCacheIsStale(doc);
     migrateSnapshotShape(doc);
+    // A SEEDED tracker status history (seedStatusLog) is NOT a reason to write: the seed is
+    // a pure function of the stored cache (its own dates), so every load derives the very
+    // same one, and the first real write (an upload, an edit, any save of the loaded doc)
+    // persists it. A clean same-version load keeps writing nothing.
     return staleTracker ? persist(doc) : doc;
   }
   if (doc.schemaVersion === 8) return persist(migrateV8toV9(doc));
@@ -813,7 +925,23 @@ export function updateCachedTracker(model) {
     );
   }
   doc.cachedTracker = { model: clean, updatedAt: nowIso() };
+  // The status history follows every write of the document — a fresh upload AND each
+  // website edit (both land here) — dated by today's LOCAL day. loadSettings above already
+  // seeded it from the document this write replaces, so an upload is compared with the
+  // previous one. An entry is appended only for a task whose status actually changed.
+  recordStatusInto(doc, clean, localDateISO(new Date()));
   return saveSettings(doc);
+}
+
+/**
+ * The tracker status history (settings.trackerStatusLog), cleaned — or null when there is
+ * none yet (no tracker was ever cached). What every report model carries as
+ * `trackerStatusLog` (the weekly «المهام المكتملة خلال الأسبوع» slide).
+ * @returns {import('./contracts.js').TrackerStatusLog|null}
+ */
+export function getTrackerStatusLog() {
+  const doc = loadSettings();
+  return isPlainObject(doc.trackerStatusLog) ? sanitizeStatusLog(doc.trackerStatusLog) : null;
 }
 
 /**
@@ -1021,6 +1149,8 @@ function validateImport(doc) {
     }
     const maps = [
       ['tasks', tt.tasks], ['tracks', tt.tracks], ['milestones', tt.milestones], ['original', tt.original],
+      // The owner / entity name lists (2026-10-18, «ترجمة الأسماء») — same container rule.
+      ['owners', tt.owners], ['entities', tt.entities],
     ];
     if ('machine' in tt) {
       if (!isPlainObject(tt.machine)) {
@@ -1041,6 +1171,29 @@ function validateImport(doc) {
     const size = JSON.stringify(sanitizeTranslationMemory(tt)).length;
     if (size >= TM_MAX_CHARS) {
       throw new Error(`حقل trackerTranslations كبير جداً (${size} حرفاً، الحد ${TM_MAX_CHARS}).`);
+    }
+  }
+  if ('trackerStatusLog' in doc && doc.trackerStatusLog !== null) {
+    // The tracker status history. Containers and bounds are enforced (task count, raw list
+    // length, total size) so a hostile backup cannot bloat localStorage through this key;
+    // a malformed ENTRY is not an error — pickImportKeys' sanitizeStatusLog drops it. null
+    // is accepted and ignored (this device's history is kept).
+    const sl = doc.trackerStatusLog;
+    if (!isPlainObject(sl) || ('tasks' in sl && !isPlainObject(sl.tasks))) {
+      throw new Error('حقل trackerStatusLog غير صالح: يجب أن يكون كائناً.');
+    }
+    const entries = Object.entries(sl.tasks || {});
+    if (entries.length > STATUS_LOG_TASKS_MAX) {
+      throw new Error(`حقل trackerStatusLog كبير جداً: ${entries.length} مهمة (الحد ${STATUS_LOG_TASKS_MAX}).`);
+    }
+    for (const [key, list] of entries) {
+      if (!Array.isArray(list) || list.length > STATUS_LOG_IMPORT_ENTRIES_MAX) {
+        throw new Error(`حقل trackerStatusLog["${key.slice(0, 40)}"] غير صالح: يجب أن يكون قائمة (الحد ${STATUS_LOG_IMPORT_ENTRIES_MAX}).`);
+      }
+    }
+    const size = JSON.stringify(sanitizeStatusLog(sl)).length;
+    if (size >= STATUS_LOG_MAX_CHARS) {
+      throw new Error(`حقل trackerStatusLog كبير جداً (${size} حرفاً، الحد ${STATUS_LOG_MAX_CHARS}).`);
     }
   }
   if ('cachedTracker' in doc) {
@@ -1101,6 +1254,12 @@ function validateImport(doc) {
     if ('trackerLang' in ro && normalizeTrackerLang(ro.trackerLang) == null) {
       throw new Error(
         `حقل reportOptions.trackerLang غير صالح: يجب أن يكون ${TRACKER_LANGS.map((m) => `'${m}'`).join(' أو ')}.`,
+      );
+    }
+    // cadence («دورية التقرير», 2026-10-18): an enum like deltaMode, enforced the same way.
+    if ('cadence' in ro && canonicalCadence(ro.cadence) == null) {
+      throw new Error(
+        `حقل reportOptions.cadence غير صالح: يجب أن يكون ${CADENCES.map((m) => `'${m}'`).join(' أو ')}.`,
       );
     }
     // slideOrder: a list of slide-unit NAMES. Only the container shape (and a length cap,
@@ -1190,7 +1349,7 @@ function validateImport(doc) {
 
 // Only these top-level keys may ever be persisted — the "no PHI in storage"
 // invariant depends on unknown keys being discarded before the merge.
-const IMPORT_KEYS = ['schemaVersion', 'tatLookup', 'displayNames', 'scorecard', 'historicalConstants', 'snapshot', 'snapshotHistory', 'grafana', 'reportOptions', 'automation', 'cachedTracker', 'taskLog', 'trackerTranslations'];
+const IMPORT_KEYS = ['schemaVersion', 'tatLookup', 'displayNames', 'scorecard', 'historicalConstants', 'snapshot', 'snapshotHistory', 'grafana', 'reportOptions', 'automation', 'cachedTracker', 'taskLog', 'trackerTranslations', 'trackerStatusLog'];
 
 // The exact reportOptions subkeys that may be imported. Unknown slide/card keys
 // are dropped; label values must be strings. Keys mirror REPORT_OPTIONS_SEED.
@@ -1210,7 +1369,9 @@ const IMPORT_KEYS = ['schemaVersion', 'tatLookup', 'displayNames', 'scorecard', 
 // 'tracker' (2026-10-13) is the «متابعة المشروع» slide(s) built from the task tracker,
 // offered in every report type. 'action' — the retired task-list slide it replaced —
 // stays importable for compatibility (old backups carry it); nothing reads it any more.
-const REPORT_OPTION_SLIDE_KEYS = ['execFunnel', 'monthly', 'compliance', 'action', 'challenges', 'sendout', 'definitions', 'tracker'];
+// 'trackerCompleted' (2026-10-18) is the weekly «المهام المكتملة خلال الأسبوع» slide — its own
+// unit, separate from 'tracker' so it can be switched off / moved on its own.
+const REPORT_OPTION_SLIDE_KEYS = ['execFunnel', 'monthly', 'compliance', 'action', 'challenges', 'sendout', 'definitions', 'tracker', 'trackerCompleted'];
 const REPORT_OPTION_CARD_KEYS = [
   'total', 'awaitingDispatch', 'awaitingResults', 'completed', 'rejected', 'lateNoResult', 'shippedNotReceived',
   // 'turnaround' (v9): the monthly slide's line chart + overall-average card. It was
@@ -1310,6 +1471,9 @@ function pickImportKeys(doc) {
     // Same for the tracker slides' language: canonical value or dropped.
     const tl = normalizeTrackerLang(ro.trackerLang);
     if (tl != null) picked.trackerLang = tl;
+    // …and the cadence (an old backup has none → this device's stays).
+    const cad = canonicalCadence(ro.cadence);
+    if (cad != null) picked.cadence = cad;
     // The saved slide order, normalised (unknown / duplicate / 'action' names dropped,
     // missing units back at their default place). deepMergeImportWins CLONES arrays, so a
     // backup that carries an order REPLACES this device's one — never a union of the two.
@@ -1357,6 +1521,11 @@ function pickImportKeys(doc) {
     out.trackerTranslations = sanitizeTranslationMemory(out.trackerTranslations);
   } else if ('trackerTranslations' in out) {
     delete out.trackerTranslations; // null / not an object → keep this device's memory
+  }
+  if (isPlainObject(out.trackerStatusLog)) {
+    out.trackerStatusLog = sanitizeStatusLog(out.trackerStatusLog);
+  } else if ('trackerStatusLog' in out) {
+    delete out.trackerStatusLog; // null / not an object → keep this device's history
   }
   if ('cachedTracker' in out) {
     const ct = out.cachedTracker;
@@ -1548,6 +1717,13 @@ export function importSettings(jsonText) {
   // editedAt or fileName beside someone else's tasks, or the old tracker's
   // challenges/risks beside the new document).
   if ('cachedTracker' in incoming) merged.cachedTracker = clone(incoming.cachedTracker);
+  // The status history REPLACES too: it is the history OF that document, and a per-task
+  // union would splice this device's entries into another document's timeline. A backup
+  // that brings a tracker but NO history (one from before the history existed) drops this
+  // device's: the next load then seeds it from the imported document (seedStatusLog), which
+  // is the history that matches it.
+  if ('trackerStatusLog' in incoming) merged.trackerStatusLog = clone(incoming.trackerStatusLog);
+  else if ('cachedTracker' in incoming) delete merged.trackerStatusLog;
   // The translation memory is a per-key UNION (both devices' corrections are worth
   // keeping), the backup winning on a shared key — but bounded: mergeTranslationMemory
   // trims THIS device's extra keys first when a map would pass TM_ENTRY_LIMIT, and if the

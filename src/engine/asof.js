@@ -130,9 +130,9 @@
 // the ungated function — which is what leaves the CROWN identity above, buildWeekNumbers
 // and every existing caller exactly as they were.
 
-import { parseDateTime, toEpochDay, workday, MS_PER_DAY } from './workday.js?v=v2026-10-13.7';
-import { buildTatIndex, resolveTat } from './tat.js?v=v2026-10-13.7';
-import { hasTestMenu } from '../model/hospital.js?v=v2026-10-13.7';
+import { parseDateTime, toEpochDay, workday, MS_PER_DAY } from './workday.js?v=v2026-10-18.1';
+import { buildTatIndex, resolveTat } from './tat.js?v=v2026-10-18.1';
+import { hasTestMenu } from '../model/hospital.js?v=v2026-10-18.1';
 
 // engine.js's cascade keys off these exact rawStatus literals (not exported).
 const RAW_CANCELLED = 'Order Cancelled';

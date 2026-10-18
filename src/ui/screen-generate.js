@@ -2,18 +2,19 @@
 // The file-producing core now lives in automation/pipeline.js (produceReportFiles) so
 // an unattended run makes byte-identical files; this screen drives it and paints the
 // very same progress bar, file rows and live slide thumbnails it always has.
-import { STR, todayISO, formatDateAr, formatRangeAr } from '../i18n/ar.js?v=v2026-10-13.7';
+import { STR, todayISO, formatDateAr, formatRangeAr } from '../i18n/ar.js?v=v2026-10-18.1';
 // translateTrackerInPlace: the automatic-Arabic pass (CONTRACT-AUTO §5) for the fallback below.
-import { el, progressBar, toast, translateTrackerInPlace } from './components.js?v=v2026-10-13.7';
-import { resetRunData, overlayTempSlideOrder } from '../state.js?v=v2026-10-13.7';
-import { buildMockEngineOutput } from './screen-upload.js?v=v2026-10-13.7';
-import { resolveProjectTracker } from '../model/report-model.js?v=v2026-10-13.7';
-import { buildLateLabsSection, triggerDownload } from './late-labs-section.js?v=v2026-10-13.7';
+import { el, progressBar, toast, translateTrackerInPlace } from './components.js?v=v2026-10-18.1';
+import { resetRunData, overlayTempSlideOrder } from '../state.js?v=v2026-10-18.1';
+import { buildMockEngineOutput } from './screen-upload.js?v=v2026-10-18.1';
+import { resolveProjectTracker, trackerStatusLogOf } from '../model/report-model.js?v=v2026-10-18.1';
+import { normalizeCadence } from '../contracts.js?v=v2026-10-18.1';
+import { buildLateLabsSection, triggerDownload } from './late-labs-section.js?v=v2026-10-18.1';
 import {
   applyWindowDeltas, buildFileDefs, produceReportFiles, recordRunSnapshot,
   shouldAutoDownloadFiles,
-} from '../automation/pipeline.js?v=v2026-10-13.7';
-import { isScoped, hasRange, normalizeScope } from '../model/scope.js?v=v2026-10-13.7';
+} from '../automation/pipeline.js?v=v2026-10-18.1';
+import { isScoped, hasRange, normalizeScope } from '../model/scope.js?v=v2026-10-18.1';
 
 /** The report type a model is (model.hospital; absent ⇒ 'kamc': a legacy KAMC-only model —
  *  every model that predates the report types, and the fallback below, whose numbers are
@@ -50,6 +51,8 @@ export function fallbackModel(state, store) {
     kpi,
     panels: { supportRequired: [] },
     projectTracker,
+    // The tracker status history beside it (the weekly completed-tasks slide), as stored.
+    trackerStatusLog: trackerStatusLogOf(settings),
     challenges: [],
     risks: [],
     scorecard: (store.settings && store.settings.scorecard) || [],
@@ -202,7 +205,10 @@ export function shareText(model, date, fileCount) {
   const pct = total ? Math.round((completed / total) * 100) : 0;
   const scope = normalizeScope(model.scope); // same view isScoped/hasRange judge by
   const when = (hasRange(scope) && formatRangeAr(scope.from, scope.to)) || formatDateAr(date) || date;
-  return `تقرير مسبار الأسبوعي — ${when}\n` +
+  // The heading names the CADENCE the deck's cover names (reportOptions.cadence — «دورية
+  // التقرير»): «تقرير مسبار الأسبوعي» (weekly, the default) or «تقرير مسبار اليومي» (daily).
+  const cadence = normalizeCadence(model.reportOptions && model.reportOptions.cadence);
+  return `${STR.generate.shareTitle(cadence)} — ${when}\n` +
     // The type line follows the file-name rule (ar.js buildFileName): the MAIN report
     // (KAMC + SGH) keeps the historic heading alone; a single-hospital report — KAMC-only
     // (a legacy model with no hospital field included) or SGH — names itself, so its
@@ -285,10 +291,10 @@ export async function render(container, ctx) {
   // Both modules are guarded → engine deltas if either is absent.
   // An SGH / KAMC + SGH model is re-stamped by model/hospital-report.js (each hospital
   // with its own policy — applyWindowDeltas routes it); guarded like the other two.
-  const dwMod = await tryImport('../model/delta-window.js?v=v2026-10-13.7');
-  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-10-13.7');
+  const dwMod = await tryImport('../model/delta-window.js?v=v2026-10-18.1');
+  const dbMod = await tryImport('../model/delta-baseline.js?v=v2026-10-18.1');
   const hrMod = hospitalOf(model) !== 'kamc'
-    ? await tryImport('../model/hospital-report.js?v=v2026-10-13.7')
+    ? await tryImport('../model/hospital-report.js?v=v2026-10-18.1')
     : null;
   const recordSnapshot = dbMod && dbMod.recordSnapshot;
   applyWindowDeltas(model, state, store, dwMod && dwMod.stampWindowDeltas, hrMod);

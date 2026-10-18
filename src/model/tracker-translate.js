@@ -22,6 +22,13 @@
 // the only identity that survives (ids are repaired, WBS can repeat, rows get re-ordered).
 // normEn() makes that key tolerant of the workbook's stray / doubled spaces and of case.
 //
+// NAMES (2026-10-18, the user's rule 5): the owner («المسؤول») and entity («الجهة») columns
+// get Arabic too, from two more TM maps — owners / entities — in the user and built-in
+// layers ONLY. A name is never machine-translated (an on-device translator would
+// transliterate a first name into anything); an unmapped name stays exactly as written. A
+// cell with several names ('Alpha/Beta') is split on '/' and each part looked up on its own, so
+// the user's list of single people covers every combination the workbook makes of them.
+//
 // PURE: no DOM, no storage, no imports — the store, the screens, the automation and the
 // build script (node) all share it. Every function returns NEW objects; nothing passed in
 // is mutated.
@@ -36,10 +43,38 @@ export const TRANSLATED_KINDS = Object.freeze([
   Object.freeze({ kind: 'milestones', en: 'milestone', ar: 'milestoneAr', src: 'milestoneArSource' }),
 ]);
 
+/**
+ * The two NAME fields (owner / entity): TM map name, English field, Arabic field, source
+ * field. Looked up per '/'-separated part (applyTrackerTranslations), user + builtin only —
+ * never machine-translated, never collected for the machine pass.
+ */
+export const NAME_KINDS = Object.freeze([
+  Object.freeze({ kind: 'owners', en: 'owner', ar: 'ownerAr', src: 'ownerArSource', basis: 'ownerArBasis' }),
+  Object.freeze({ kind: 'entities', en: 'organization', ar: 'organizationAr', src: 'organizationArSource',
+    basis: 'organizationArBasis' }),
+]);
+
+/**
+ * The per-task "basis" fields beside ownerAr / organizationAr: WHAT each Arabic part was
+ * computed from — one `<layer>:<normEn(part)>` per name part ('u' user, 'b' built-in, '-'
+ * unmapped), joined with '/' (a key never holds '/': the parts are split on it), e.g.
+ * 'b:alpha/u:beta/-:gamma'. WHY: while a layer is unavailable (the built-in still loading,
+ * or never — no data key, a failed fetch) a name it filled earlier is kept only when it
+ * provably belongs to the CURRENT English part and came from THAT layer. Without it an
+ * edited / re-ordered owner cell would print the previous person's Arabic, and a name the
+ * user cleared would survive relabelled as built-in. '' when the cell has no Arabic.
+ */
+export const NAME_BASIS_FIELDS = Object.freeze(NAME_KINDS.map((k) => k.basis));
+/** A well-formed basis value (normalizeProjectTracker validates against the same shape). */
+export const NAME_BASIS_RE = /^[ub-]:[^/]*(?:\/[ub-]:[^/]*)*$/;
+
 /** The per-task source fields applyTrackerTranslations writes (persisted when non-empty). */
-export const AR_SOURCE_FIELDS = Object.freeze(TRANSLATED_KINDS.map((k) => k.src));
+export const AR_SOURCE_FIELDS = Object.freeze([...TRANSLATED_KINDS, ...NAME_KINDS].map((k) => k.src));
 
 const KIND_NAMES = TRANSLATED_KINDS.map((k) => k.kind);
+const NAME_KIND_NAMES = NAME_KINDS.map((k) => k.kind);
+// The maps a reviewed layer (user / builtin) carries; the machine layer has only KIND_NAMES.
+const LAYER_KIND_NAMES = [...KIND_NAMES, ...NAME_KIND_NAMES];
 
 // ---- bounds (settings.trackerTranslations lives in localStorage) ---------------------------
 // The user's tracker is ~34 tasks; these caps leave room for years of re-uploads and only
@@ -75,9 +110,13 @@ const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArr
 // the truly empty marks (zero-width space, word joiner, BOM) go.
 const cleanAr = (v) => (typeof v === 'string' ? v.replace(/[\u200b\u2060\ufeff]/g, '').trim() : '');
 
-/** 'task' | 'taskAr' | 'tasks' (and the track / milestone equivalents) → the TM map name. */
+/**
+ * 'task' | 'taskAr' | 'tasks' (and the track / milestone / owner / organization
+ * equivalents; 'entity' too) → the TM map name.
+ */
 function kindOf(k) {
-  for (const d of TRANSLATED_KINDS) if (k === d.kind || k === d.en || k === d.ar) return d.kind;
+  for (const d of [...TRANSLATED_KINDS, ...NAME_KINDS]) if (k === d.kind || k === d.en || k === d.ar) return d.kind;
+  if (k === 'entity') return 'entities';
   return null;
 }
 
@@ -107,8 +146,20 @@ const arValue = (v) => {
 };
 const trueValue = (v) => (v === true ? true : undefined);
 
-/** A {tasks, tracks, milestones} map set (the built-in / machine layer shape), cleaned. */
+/**
+ * The BUILT-IN layer's map set, cleaned: {tasks, tracks, milestones, owners, entities}.
+ * (A file built before names existed simply has empty owners / entities.)
+ */
 export function sanitizeEntries(e) {
+  const src = isPlainObject(e) && isPlainObject(e.entries) ? e.entries : e;
+  const out = {};
+  for (const k of LAYER_KIND_NAMES) out[k] = cleanMap(isPlainObject(src) ? src[k] : null, arValue);
+  return out;
+}
+
+// The MACHINE layer's map set: texts only. WHY no owners / entities: names are never
+// machine-translated, so a hand-edited backup cannot smuggle a «machine» name in either.
+function sanitizeMachine(e) {
   const src = isPlainObject(e) && isPlainObject(e.entries) ? e.entries : e;
   const out = {};
   for (const k of KIND_NAMES) out[k] = cleanMap(isPlainObject(src) ? src[k] : null, arValue);
@@ -117,12 +168,13 @@ export function sanitizeEntries(e) {
 
 /** An empty user TM (the shape settings.trackerTranslations always has once written). */
 export function emptyTranslationMemory() {
-  return { tasks: {}, tracks: {}, milestones: {}, original: {}, machine: { tasks: {}, tracks: {}, milestones: {} } };
+  return { tasks: {}, tracks: {}, milestones: {}, owners: {}, entities: {}, original: {},
+    machine: { tasks: {}, tracks: {}, milestones: {} } };
 }
 
 /**
  * settings.trackerTranslations → its clean shape:
- *   {tasks, tracks, milestones: {normEn: ar}, original: {normEn: true},
+ *   {tasks, tracks, milestones, owners, entities: {normEn: ar}, original: {normEn: true},
  *    machine: {tasks, tracks, milestones: {normEn: ar}}}
  * Unknown keys dropped, keys re-normalised, entry caps applied. Anything not an object →
  * the empty TM. (The store owns WHEN this runs; this module owns the shape, the way
@@ -132,9 +184,9 @@ export function emptyTranslationMemory() {
 export function sanitizeTranslationMemory(tm) {
   const t = isPlainObject(tm) ? tm : {};
   const out = emptyTranslationMemory();
-  for (const k of KIND_NAMES) out[k] = cleanMap(t[k], arValue);
+  for (const k of LAYER_KIND_NAMES) out[k] = cleanMap(t[k], arValue);
   out.original = cleanMap(t.original, trueValue);
-  out.machine = sanitizeEntries(t.machine);
+  out.machine = sanitizeMachine(t.machine);
   return out;
 }
 
@@ -143,6 +195,7 @@ export function translationMemorySize(tm) {
   const t = sanitizeTranslationMemory(tm);
   let n = Object.keys(t.original).length;
   for (const k of KIND_NAMES) n += Object.keys(t[k]).length + Object.keys(t.machine[k]).length;
+  for (const k of NAME_KIND_NAMES) n += Object.keys(t[k]).length;
   return n;
 }
 
@@ -168,6 +221,7 @@ export function mergeTranslationMemory(base, over) {
     out[k] = mergeMap(b[k], o[k]);
     out.machine[k] = mergeMap(b.machine[k], o.machine[k]);
   }
+  for (const k of NAME_KIND_NAMES) out[k] = mergeMap(b[k], o[k]);
   out.original = mergeMap(b.original, o.original);
   return out;
 }
@@ -179,7 +233,9 @@ export function mergeTranslationMemory(base, over) {
  * under normEn(en) in the user layer; an empty `ar` REMOVES the user entry, so the task falls
  * back to the built-in / machine translation (or English) on the next apply.
  * @param {*} tm settings.trackerTranslations (any shape; sanitized)
- * @param {'tasks'|'tracks'|'milestones'|'task'|'track'|'milestone'|'taskAr'|'trackAr'|'milestoneAr'} kind
+ * For a NAME (kind 'owners' / 'owner' / 'entities' / 'organization' / 'entity') `en` is
+ * ONE name part as splitNameParts returns it ('Alpha', not 'Alpha / Beta').
+ * @param {'tasks'|'tracks'|'milestones'|'owners'|'entities'|'task'|'track'|'milestone'|'owner'|'organization'|'taskAr'|'trackAr'|'milestoneAr'|'ownerAr'|'organizationAr'} kind
  * @param {string} en the task's ENGLISH text (the key)
  * @param {string} ar the Arabic ('' clears)
  */
@@ -219,7 +275,8 @@ export function addMachineTranslations(tm, results) {
   if (!isPlainObject(results)) return out;
   for (const [rawKind, map] of Object.entries(results)) {
     const k = kindOf(rawKind);
-    if (!k || !isPlainObject(map)) continue;
+    // Names are never machine-translated (see the header): an owners / entities result is ignored.
+    if (!k || !KIND_NAMES.includes(k) || !isPlainObject(map)) continue;
     const target = out.machine[k];
     for (const [en, ar] of Object.entries(map)) {
       const key = normEn(en);
@@ -292,6 +349,138 @@ function lookup(map, key) {
   return typeof v === 'string' ? v.trim() : '';
 }
 
+// ---- names (owner / entity) ----------------------------------------------------------------
+
+/** What joins several names in one cell: a space each side (the user's rule 6: «أ / ب / ج»). */
+export const NAME_SEPARATOR = ' / ';
+
+/**
+ * The names in one owner / entity cell: split on '/', each part with its invisible marks
+ * removed and its whitespace collapsed, empty parts ('A//B', a trailing '/') dropped.
+ * Case is KEPT (this is display text; the lookup key is normEn(part)).
+ * @param {*} text
+ * @returns {string[]}
+ */
+export function splitNameParts(text) {
+  if (text == null || (typeof text !== 'string' && typeof text !== 'number')) return [];
+  return String(text).normalize('NFC').split('/')
+    .map((p) => p.replace(INVISIBLE, '').replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+}
+
+/**
+ * A cell's names in the slide's form: the parts joined with NAME_SEPARATOR
+ * ('Alpha/Beta' → 'Alpha / Beta'). For the slide builder's English ('en') and fallback cells,
+ * so every names cell follows the same join rule whatever its language.
+ * @param {*} text
+ * @returns {string}
+ */
+export function formatNameParts(text) {
+  return splitNameParts(text).join(NAME_SEPARATOR);
+}
+
+/**
+ * The Arabic a cell's earlier pass gave each English part, by that part's key:
+ * Map<normEn(part), {ar, from:'user'|'builtin'}>, read from the cell's basis (see
+ * NAME_BASIS_FIELDS) and its Arabic, which must line up part for part. Empty when there is
+ * no / a malformed / a mis-aligned basis — nothing is then kept.
+ */
+function previousNameParts(t, { ar, basis }) {
+  const out = new Map();
+  const b = typeof t[basis] === 'string' ? t[basis] : '';
+  if (!b || !NAME_BASIS_RE.test(b)) return out;
+  const entries = b.split('/');
+  const arParts = typeof t[ar] === 'string' ? splitNameParts(t[ar]) : [];
+  if (arParts.length !== entries.length) return out;
+  entries.forEach((e, i) => {
+    const from = e[0] === 'u' ? 'user' : e[0] === 'b' ? 'builtin' : '';
+    const key = e.slice(2);
+    if (from && key && !out.has(key)) out.set(key, { ar: arParts[i], from });
+  });
+  return out;
+}
+
+/**
+ * One names cell (owner or organization) through the user + built-in layers, PER PART:
+ * a mapped part becomes its Arabic, an unmapped part stays as written (Latin), and the
+ * parts are re-joined with NAME_SEPARATOR. → [text, source, basis]: ['', '', ''] when NO
+ * part is mapped (the slide prints the English, formatted), else source 'user' when any
+ * part came from the user's own list, otherwise 'builtin'; basis per NAME_BASIS_FIELDS.
+ *
+ * An UNAVAILABLE layer (null — the built-in loading, or failed for good) keeps only what
+ * IT filled for the SAME English part: the earlier basis says, per part key, which layer
+ * gave the Arabic, so the keep is matched by key (an edited or re-ordered cell can never
+ * borrow another person's Arabic) and by layer (a user name the user has since cleared
+ * from an AVAILABLE user layer is not resurrected as 'builtin' — it falls back to the
+ * English until the built-in can answer for that part itself).
+ */
+function translateNames(t, d, userTm, builtinTm) {
+  const parts = splitNameParts(t[d.en]);
+  if (!parts.length) return ['', '', ''];
+  const prev = previousNameParts(t, d);
+  const userMap = userTm ? layerMap(userTm, d.kind) : null;
+  const builtinMap = builtinTm ? layerMap(builtinTm, d.kind) : null;
+  let anyUser = false;
+  let anyHit = false;
+  const basis = [];
+  const out = parts.map((part) => {
+    const key = normEn(part);
+    const p = prev.get(key);
+    let hit = '';
+    let from = '';
+    if (userMap) {
+      hit = lookup(userMap, key);
+      if (hit) from = 'user';
+    } else if (p && p.from === 'user') { hit = p.ar; from = 'user'; }
+    if (!hit) {
+      if (builtinMap) {
+        hit = lookup(builtinMap, key);
+        if (hit) from = 'builtin';
+      } else if (p && p.from === 'builtin') { hit = p.ar; from = 'builtin'; }
+    }
+    basis.push(`${from === 'user' ? 'u' : from === 'builtin' ? 'b' : '-'}:${key}`);
+    if (!hit) return part;
+    anyHit = true;
+    if (from === 'user') anyUser = true;
+    return hit;
+  });
+  if (!anyHit) return ['', '', ''];
+  return [out.join(NAME_SEPARATOR), anyUser ? 'user' : 'builtin', basis.join('/')];
+}
+
+/**
+ * Every DISTINCT name part of a tracker's owner and organization cells, in tracker order,
+ * with the Arabic the layers give it — the review editor's «ترجمة الأسماء» list:
+ *   {owners: [{en, key, ar, source, builtinAr}], entities: [...]}
+ *   en = the part as first written; key = normEn(en) (what setUserTranslation stores under);
+ *   ar = the user's Arabic, else the built-in's, else ''; source 'user' | 'builtin' | '';
+ *   builtinAr = the built-in's Arabic ('' when none / not loaded) — what clearing the
+ *   user's entry falls back to.
+ * @param {import('../contracts.js').ProjectTracker} tracker
+ * @param {{user?:Object|null, builtin?:Object|null}} [opts]
+ */
+export function trackerNameEntries(tracker, { user = null, builtin = null } = {}) {
+  const out = { owners: [], entities: [] };
+  const tasks = isPlainObject(tracker) && Array.isArray(tracker.tasks) ? tracker.tasks : [];
+  for (const { kind, en } of NAME_KINDS) {
+    const userMap = isPlainObject(user) ? layerMap(user, kind) : null;
+    const builtinMap = isPlainObject(builtin) ? layerMap(builtin, kind) : null;
+    const seen = new Set();
+    for (const t of tasks) {
+      if (!isPlainObject(t)) continue;
+      for (const part of splitNameParts(t[en])) {
+        const key = normEn(part);
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        const u = lookup(userMap, key);
+        const b = lookup(builtinMap, key);
+        out[kind].push({ en: part, key, ar: u || b, source: u ? 'user' : b ? 'builtin' : '', builtinAr: b });
+      }
+    }
+  }
+  return out;
+}
+
 /**
  * A NEW tracker whose tasks carry the Arabic of every text a layer covers.
  *
@@ -310,8 +499,14 @@ function lookup(map, key) {
  * showOriginal: when the user TM is available it decides (original[normEn(task)]); without
  * it the task's own flag is kept.
  *
- * Each output task carries taskArSource / trackArSource / milestoneArSource ('' when no
- * Arabic) and showOriginal (boolean). The English fields are never touched.
+ * Names (owner → ownerAr, organization → organizationAr): user then builtin, PER
+ * '/'-separated part, unmapped parts kept as written, joined with NAME_SEPARATOR; never
+ * from the file or the machine layer (translateNames).
+ *
+ * Each output task carries taskArSource / trackArSource / milestoneArSource /
+ * ownerArSource / organizationArSource ('' when no Arabic), ownerAr / organizationAr with
+ * their ownerArBasis / organizationArBasis (NAME_BASIS_FIELDS), and showOriginal (boolean).
+ * The English fields are never touched.
  * @param {import('../contracts.js').ProjectTracker} tracker
  * @param {{user?:Object|null, builtin?:Object|null, machine?:Object|null}} [opts]
  * @returns {import('../contracts.js').ProjectTracker} (the input itself when it has no tasks array)
@@ -346,6 +541,12 @@ export function applyTrackerTranslations(tracker, { user = null, builtin = null,
       if (!from && !key && cur) { text = t[ar]; from = curSrc; }
       o[ar] = text;
       o[src] = from;
+    }
+    for (const d of NAME_KINDS) {
+      const [text, from, basis] = translateNames(t, d, userTm, isPlainObject(builtin) ? builtin : null);
+      o[d.ar] = text;
+      o[d.src] = from;
+      o[d.basis] = basis;
     }
     const key = normEn(t.task);
     o.showOriginal = original && key ? original[key] === true : t.showOriginal === true;

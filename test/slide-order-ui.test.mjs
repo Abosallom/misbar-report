@@ -72,8 +72,10 @@ function reviewRender(state, settings = SETTINGS) {
   overlayTempSlideOrder(m, state);
   return m;
 }
-const TRACKER_FIRST = ['tracker', 'execFunnel', 'shipments', 'monthly', 'sendout', 'compliance', 'challenges', 'definitions'];
-const COMPLIANCE_FIRST = ['compliance', 'execFunnel', 'shipments', 'monthly', 'sendout', 'tracker', 'challenges', 'definitions'];
+// 'trackerCompleted' (2026-10-18) travels right behind 'tracker' — where a saved order from
+// before it existed puts it too (model/slide-order.js weave).
+const TRACKER_FIRST = ['tracker', 'trackerCompleted', 'execFunnel', 'shipments', 'monthly', 'sendout', 'compliance', 'challenges', 'definitions'];
+const COMPLIANCE_FIRST = ['compliance', 'execFunnel', 'shipments', 'monthly', 'sendout', 'tracker', 'trackerCompleted', 'challenges', 'definitions'];
 
 /* ------------------------------------------------------------------ *
  * state.js — the temporary order's own rules
@@ -249,7 +251,7 @@ test('reportOptionsFromSettings: the saved order only when stored (normalised); 
   assert.equal('slideOrder' in reportOptionsFromSettings({}), false);
   assert.equal('slideOrder' in reportOptionsFromSettings({ reportOptions: { deltaMode: 'week' } }), false);
   assert.equal('slideOrder' in reportOptionsFromSettings({ reportOptions: { slideOrder: 'tracker' } }), false);
-  assert.deepEqual(reportOptionsFromSettings({ reportOptions: { slideOrder: ['tracker', 'action', ...SLIDE_ORDER_KEYS] } }).slideOrder, TRACKER_FIRST);
+  assert.deepEqual(reportOptionsFromSettings({ reportOptions: { slideOrder: ['tracker', 'trackerCompleted', 'action', ...SLIDE_ORDER_KEYS] } }).slideOrder, TRACKER_FIRST);
 });
 
 test('the saved order round-trips the REAL store; a chip persist after it keeps it', () => {
@@ -285,7 +287,7 @@ test('the saved order round-trips the REAL store; a chip persist after it keeps 
  * ------------------------------------------------------------------ */
 
 test('units per report type: KAMC + SGH = exec + its toggles; KAMC / SGH all, shipments only when scoped to shipments', () => {
-  assert.deepEqual(slideOrderUnitsFor('both'), ['execFunnel', 'monthly', 'sendout', 'compliance', 'tracker']);
+  assert.deepEqual(slideOrderUnitsFor('both'), ['execFunnel', 'monthly', 'sendout', 'compliance', 'tracker', 'trackerCompleted']);
   // Every unit of the main deck is the exec slide or a chip that deck offers.
   const bothChips = slideTogglesFor('both').map((t) => t.key);
   assert.ok(slideOrderUnitsFor('both').every((k) => k === 'execFunnel' || bothChips.includes(k)));
@@ -309,7 +311,7 @@ test('hidden units: chip off, shipment box off, definitions opt-in; the main dec
 
 test('rows: the deck\'s units in the order in force; a hidden unit keeps its row and place; empty from the last preview', () => {
   const r = slideOrderRows({ hospital: 'both', slides: { compliance: false }, order: TRACKER_FIRST, present: new Set(['execFunnel', 'monthly']) });
-  assert.deepEqual(r.map((x) => x.key), ['tracker', 'execFunnel', 'monthly', 'sendout', 'compliance']);
+  assert.deepEqual(r.map((x) => x.key), ['tracker', 'trackerCompleted', 'execFunnel', 'monthly', 'sendout', 'compliance']);
   const by = Object.fromEntries(r.map((x) => [x.key, x]));
   assert.equal(by.compliance.hidden, true);
   assert.equal(by.compliance.empty, false, 'hidden wins over empty');
@@ -340,8 +342,8 @@ test('save merge: only the DECIDED units take the current order; the rest are pl
   // How an undecided unit is placed is model/slide-order.js mergeVisibleOrder's rule (core's,
   // pinned in slide-order.test.mjs) — here: that rule is what the save applies, the decided
   // units come out in the current sequence, and a unit that led the saved order still leads.
-  const saved = ['challenges', 'execFunnel', 'shipments', 'monthly', 'sendout', 'compliance', 'tracker', 'definitions'];
-  const current = ['tracker', 'execFunnel', 'shipments', 'monthly', 'sendout', 'compliance', 'challenges', 'definitions'];
+  const saved = ['challenges', 'execFunnel', 'shipments', 'monthly', 'sendout', 'compliance', 'tracker', 'trackerCompleted', 'definitions'];
+  const current = ['tracker', 'trackerCompleted', 'execFunnel', 'shipments', 'monthly', 'sendout', 'compliance', 'challenges', 'definitions'];
   const both = slideOrderUnitsFor('both');
   const out = slideOrderToSave(saved, current, both);
   assert.deepEqual(out, mergeVisibleOrder(saved, current.filter((k) => both.includes(k))));
@@ -392,7 +394,7 @@ test('save after a type switch: a move made on KAMC, saved from KAMC + SGH, keep
   const shown = slideOrderOf(m).filter((k) => kamcUnits.includes(k));
   setTempSlideOrder(st, mergeVisibleOrder(slideOrderOf(m), slideUnitToTop(shown, 'challenges')), kamcUnits);
   const current = tempSlideOrder(st);
-  assert.deepEqual(current.filter((k) => k !== 'shipments').slice(0, 3), ['challenges', 'tracker', 'execFunnel']);
+  assert.deepEqual(current.filter((k) => k !== 'shipments').slice(0, 4), ['challenges', 'tracker', 'trackerCompleted', 'execFunnel']);
   // …switch to KAMC + SGH (the order survives), then «حفظ كترتيب ثابت» there.
   const out = slideOrderToSave(saved, current, tempSlideOrderUnits(st));
   assert.deepEqual(out, current, 'challenges stays first — not put back to its old saved place');

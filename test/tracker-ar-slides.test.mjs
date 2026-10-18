@@ -4,7 +4,8 @@
 //   • 'en' ignores the translations entirely (today's slides, byte for byte), and a tracker
 //     without translations prints the same in every mode (default 'ar' included);
 //   • 'ar': task / track / milestone print the Arabic, falling back to the English PER CELL;
-//     owner, organization, priority, status and dates never change;
+//     without ownerAr / organizationAr (none here) the owner and entity cells, and always
+//     priority, status and dates, are the very cells 'en' prints;
 //   • 'both': a translated task is two table rows (Arabic, then the English 8pt grey LTR, the
 //     border between them dropped; every other cell spans both); a translated group label is
 //     split into an Arabic part and an English part inside its merged block;
@@ -147,8 +148,9 @@ test("'ar': the Arabic in task / track / milestone, English per cell where none;
   const rows = grid(tableOf(s));
   assert.equal(rows.length, 3, 'one table row per task in ar');
   assert.deepEqual([rows[0][0].text, rows[0][0].rowSpan, rows[0][1].text], ['المسار أ', 2, 'المرحلة الأولى']);
-  assert.deepEqual([rows[0][2].text, rows[0][2].align, rows[0][2].rtl], ['مهمة تجريبية أولى', 'right', true]);
-  assert.deepEqual([rows[1][2].text, rows[1][2].align, rows[1][2].rtl], ['English two', 'left', false], 'per-cell fallback');
+  // Stage order (2026-10-18 rule 2): the Late («Deleyed») task before the Completed one.
+  assert.deepEqual([rows[1][2].text, rows[1][2].align, rows[1][2].rtl], ['مهمة تجريبية أولى', 'right', true]);
+  assert.deepEqual([rows[0][2].text, rows[0][2].align, rows[0][2].rtl], ['English two', 'left', false], 'per-cell fallback');
   assert.deepEqual([rows[2][0].text, rows[2][1].text, rows[2][2].text], ['Track B', 'Stage 2', 'مهمة ثالثة']);
   // Owner, org, priority, status, due: the very cells 'en' prints.
   const en = grid(tableOf(slidesOf(tasks, 'en')[0]));

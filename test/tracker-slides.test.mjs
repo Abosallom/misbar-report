@@ -7,8 +7,11 @@
 //     NUPCO ↔ Lean plan) — single-hospital and main deck alike;
 //   • no content box below the 6.95 floor for 0..60 tasks, with long texts, unbroken words,
 //     Arabic text and one group per row; every cell's estimated lines fit its row;
-//   • overdue = due strictly before the REPORT date and not Completed; unknown statuses
-//     print verbatim; blank / «Not Found» print «–»;
+//   • overdue = due strictly before the REPORT date and not Completed; since the 2026-10-18
+//     status rules (model/tracker-status.js) an overdue task prints «متأخر» unless Stopped,
+//     blank / «Not Found» print «لم يبدأ», unknown statuses print verbatim, and the rows of a
+//     stage are sorted Late → Stopped → In Progress → Not Started → Completed (the deeper
+//     rule tests live in test/tracker-rules-slides.test.mjs);
 //   • placement + toggle: KAMC/SGH in the retired action slot, main deck after compliance;
 //     challenges only when on AND non-empty; every other slide unchanged.
 // SYNTHETIC data only (public repo) — never the user's workbook rows.
@@ -223,13 +226,17 @@ test('overdue: due strictly before the REPORT date and not Completed → red bol
   // The SAME task is overdue on one report date and not on an earlier one.
   const t = tracker([task({ due: '2026-09-30' }), task({ due: '2026-09-30', status: 'Completed' }), task({ due: '2026-11-30' })]);
   const dueCells = (rdate) => grid(tableOf(buildTrackerSlides(t, { reportDate: rdate })[0])).map((r) => r[7]);
+  // Rows are in the stage's status order (rule 2): the overdue task is Late → first, then In
+  // Progress, then Completed (its overdue-looking date is never red).
   const late = dueCells('2026-10-13');
   assert.deepEqual(late.map((c) => [c.text, c.color ?? null, c.bold ?? false]),
-    [['30/09/2026', '#DC2626', true], ['30/09/2026', '#1E293B', false], ['30/11/2026', '#1E293B', false]]);
-  assert.deepEqual(dueCells('2026-09-30').map((c) => c.color ?? null), ['#1E293B', '#1E293B', '#1E293B']);
+    [['30/09/2026', '#DC2626', true], ['30/11/2026', '#1E293B', false], ['30/09/2026', '#1E293B', false]]);
+  assert.deepEqual(dueCells('2026-09-30').map((c) => [c.text, c.color ?? null]),
+    [['30/09/2026', '#1E293B'], ['30/11/2026', '#1E293B'], ['30/09/2026', '#1E293B']]);
   const chips = (rdate) => buildTrackerSlides(t, { reportDate: rdate })[0].elements.filter((e) => e.t === 'text' && e.y === TR.stripY).map((e) => e.text);
   assert.ok(chips('2026-10-13').includes('متجاوزة الموعد 1'));
-  assert.ok(!chips('2026-09-30').some((x) => x.startsWith('متجاوزة الموعد')));
+  // The past-due pill is part of the FIXED pill set now (rule 3): shown at 0 too.
+  assert.ok(chips('2026-09-30').includes('متجاوزة الموعد 0'));
 });
 
 test('due shapes: ISO and d/m/yyyy → dd/mm/yyyy; free text verbatim (italic); blank «–»', () => {
@@ -243,15 +250,17 @@ test('due shapes: ISO and d/m/yyyy → dd/mm/yyyy; free text verbatim (italic); 
   assert.deepEqual([row[0][7].text, row[0][7].italic, row[1][7].text, row[1][7].color], ['daily', true, '–', '#94A3B8']);
 });
 
-test('status: Arabic pill for the known words (incl. Deleyed), unknown VERBATIM, blank / Not Found «–»', () => {
+// 2026-10-18 (user rules 1-4): On Hold is Stopped («متوقف», one box), blank / «Not Found» are
+// Not Started («لم يبدأ», was «–»), and the rows of one stage come in status order.
+test('status: Arabic pill for the known words (incl. Deleyed), unknown VERBATIM, blank / Not Found «لم يبدأ»', () => {
   const statuses = ['Completed', 'In Progress', 'Deleyed', 'Delayed', 'Blocked', 'On Hold', 'Not Started', 'Awaiting vendor', 'Not Found', '', 'in   progress'];
   const t = tracker(statuses.map((status) => task({ status })));
   const cells = grid(tableOf(buildTrackerSlides(t, { reportDate: '2026-10-13' })[0])).map((r) => r[6]);
   assert.deepEqual(cells.map((c) => c.text),
-    ['مكتمل', 'قيد التنفيذ', 'متأخر', 'متأخر', 'متوقف', 'معلّق', 'لم يبدأ', 'Awaiting vendor', '–', '–', 'قيد التنفيذ']);
+    ['متأخر', 'متأخر', 'متوقف', 'متوقف', 'قيد التنفيذ', 'قيد التنفيذ', 'لم يبدأ', 'لم يبدأ', 'لم يبدأ', 'Awaiting vendor', 'مكتمل']);
   assert.deepEqual(cells.map((c) => c.fill ?? null),
-    ['#C6EFCE', '#DDEBF7', '#FCE4D6', '#FCE4D6', '#FFC7CE', '#FFF2CC', '#E7E6E6', null, null, null, '#DDEBF7']);
-  assert.equal(cells[7].color, '#64748B', 'an unknown word is neutral, not one of the status colours');
+    ['#FCE4D6', '#FCE4D6', '#FFC7CE', '#FFC7CE', '#DDEBF7', '#DDEBF7', '#E7E6E6', '#E7E6E6', '#E7E6E6', null, '#C6EFCE']);
+  assert.equal(cells[9].color, '#64748B', 'an unknown word is neutral, not one of the status colours');
   assert.equal(statusKey('Not Found'), 'unset');
   assert.equal(statusKey('مكتمل'), 'completed', 'an Arabic word typed on the website lands in its bucket');
   // Priority: Arabic words, unknown verbatim in grey, blank «–».
@@ -267,16 +276,20 @@ test('summary strip: first slide only, counts over ALL rows, every chip inside t
   const slides = buildTrackerSlides(tracker(tasks), { reportDate: '2026-10-13' });
   assert.ok(slides.length >= 3);
   const chipTexts = (s) => s.elements.filter((e) => e.t === 'text' && Math.abs(e.y - TR.stripY) < EPS).map((e) => e.text);
-  assert.deepEqual(chipTexts(slides[0]), ['إجمالي المهام 48', 'مكتمل 6', 'قيد التنفيذ 6', 'متأخر 6', 'متوقف 6', 'معلّق 6', 'لم يبدأ 6', 'أخرى 6', 'غير محدد 6', 'متجاوزة الموعد 42']);
+  // Every task is overdue (2026-01-01): all but Completed and the two Stopped words (Blocked,
+  // On Hold) become Late; Past Due counts the overdue Stopped ones too (rules 1 + 3). The pill
+  // set is fixed — «قيد التنفيذ 0» / «لم يبدأ 0» show — and «غير محدد» is gone.
+  assert.deepEqual(chipTexts(slides[0]), ['إجمالي المهام 48', 'مكتمل 6', 'قيد التنفيذ 0', 'متأخر 30', 'متوقف 12', 'لم يبدأ 0', 'متجاوزة الموعد 42']);
   for (const s of slides.slice(1)) assert.deepEqual(chipTexts(s), [], 'no strip on continuation slides');
   const pills = slides[0].elements.filter((e) => e.t === 'rect' && Math.abs(e.y - TR.stripY) < EPS);
-  assert.equal(pills.length, 10);
+  assert.equal(pills.length, 7);
   for (const p of pills) assert.ok(p.x >= TR.x - EPS && p.x + p.w <= TR.x + TR.w + EPS, 'chip inside the table width');
   for (let i = 1; i < pills.length; i++) assert.ok(pills[i].x + pills[i].w <= pills[i - 1].x + EPS, 'chips do not overlap');
   // The design's 7-chip case keeps the full 1.25in chips, right-anchored at 12.90.
   const few = buildTrackerSlides(tracker([task({ status: 'Completed' }), task({ status: '' })]), { reportDate: '2026-10-13' })[0];
   const fewPills = few.elements.filter((e) => e.t === 'rect' && Math.abs(e.y - TR.stripY) < EPS);
-  assert.deepEqual(fewPills.map((p) => [p.x, p.w]), [[11.65, 1.25], [10.3, 1.25], [8.95, 1.25]]);
+  assert.deepEqual(fewPills.map((p) => [p.x, p.w]),
+    [[11.65, 1.25], [10.3, 1.25], [8.95, 1.25], [7.6, 1.25], [6.25, 1.25], [4.9, 1.25], [3.35, 1.25]]);
 });
 
 test('summary strip: overridden total / overdue labels stay on one line inside their pill', () => {
@@ -286,8 +299,8 @@ test('summary strip: overridden total / overdue labels stay on one line inside t
   const statuses = ['Completed', 'In Progress', 'Deleyed', 'Blocked', 'On Hold', 'Not Started', 'Odd', ''];
   const long = { trkTotal: 'إجمالي جميع المهام في المشروع الحالي', trkOverdue: 'مهام متجاوزة الموعد المحدد في الخطة' };
   const cases = [
-    { n: 3, sts: ['In Progress'], labels: long },               // 3 chips: room to grow
-    { n: 60, sts: statuses, labels: long },                     // 10 chips: no room → cut
+    { n: 3, sts: ['In Progress'], labels: long },               // 7 chips: room to grow
+    { n: 60, sts: statuses, labels: long },                     // 7 chips, long labels
     { n: 60, sts: statuses, labels: { trkTotal: 'x'.repeat(200), trkOverdue: 'كلمة'.repeat(60) } },
     { n: 3, sts: ['In Progress'], labels: { trkTotal: '  إجمالي\nالمهام  ' } },   // whitespace collapses
   ];
@@ -310,19 +323,20 @@ test('summary strip: overridden total / overdue labels stay on one line inside t
     assert.match(texts.at(-1).text, / \d+$/, 'the overdue count is never cut');
     assert.ok(texts.at(-1).text.startsWith(c.labels.trkOverdue ? clean(c.labels.trkOverdue).slice(0, 1) : 'متجاوزة'));
   }
-  // 3 chips + room: the long total grows to its full text, nothing is cut, statuses keep 1.25.
+  // The fixed 7-pill set + room: the long total grows to its full text, nothing is cut, the
+  // status pills keep 1.25. (The overdue In Progress task is Late — rule 1.)
   const roomy = buildTrackerSlides(tracker([task({ status: 'In Progress', due: '2026-01-01' })]), { reportDate: '2026-10-13', labels: long })[0];
   const rt = roomy.elements.filter((e) => e.t === 'text' && Math.abs(e.y - TR.stripY) < EPS);
-  assert.deepEqual(rt.map((e) => e.text), [`${long.trkTotal} 1`, 'قيد التنفيذ 1', `${long.trkOverdue} 1`]);
-  assert.equal(rt[1].w, 1.25);
-  assert.ok(rt[0].w > 1.25 && rt[2].w > 1.25);
+  assert.deepEqual(rt.map((e) => e.text), [`${long.trkTotal} 1`, 'مكتمل 0', 'قيد التنفيذ 0', 'متأخر 1', 'متوقف 0', 'لم يبدأ 0', `${long.trkOverdue} 1`]);
+  for (const e of rt.slice(1, -1)) assert.equal(e.w, 1.25);
+  assert.ok(rt[0].w > 1.25 && rt.at(-1).w > 1.25);
   // Whitespace in an override collapses (a newline would otherwise wrap the pill).
   const ws = buildTrackerSlides(tracker([task()]), { labels: { trkTotal: '  إجمالي\nالمهام  ' } })[0];
   assert.equal(ws.elements.find((e) => e.t === 'text' && Math.abs(e.y - TR.stripY) < EPS).text, 'إجمالي المهام 1');
-  // DEFAULT labels are never cut. Up to nine chips they keep the design's even width; in the
-  // 10-chip worst case (every bucket + a 3-digit overdue) the overdue chip takes what it needs
-  // from the short status chips' slack — every chip still holds its full text on one line.
-  const many = Array.from({ length: 160 }, (_, i) => task({ track: `T${i % 9}`, status: statuses[i % 8], due: '2026-01-01' }));
+  // DEFAULT labels are never cut. The worst case is now 8 pills (total, the five statuses,
+  // «أخرى», past due — an unknown word only stays «other» when it is not overdue, hence its
+  // undated rows) with 3-digit counts — every chip still holds its full text on one line.
+  const many = Array.from({ length: 160 }, (_, i) => task({ track: `T${i % 9}`, status: statuses[i % 8], due: i % 8 === 6 || i % 8 === 0 ? '' : '2026-01-01' }));
   const d = buildTrackerSlides(tracker(many), { reportDate: '2026-10-13' })[0];
   const dp = d.elements.filter((e) => e.t === 'rect' && Math.abs(e.y - TR.stripY) < EPS);
   const dt = d.elements.filter((e) => e.t === 'text' && Math.abs(e.y - TR.stripY) < EPS);
@@ -330,10 +344,12 @@ test('summary strip: overridden total / overdue labels stay on one line inside t
   assert.match(dt.at(-1).text, /^متجاوزة الموعد \d{3}$/);
   assert.ok(!dt.some((x) => x.text.includes('…')));
   dt.forEach((t, i) => assert.ok(chipTextWidth(t.text) + CHIP_PAD <= dp[i].w + 1e-5, t.text));
-  assert.ok(Math.abs(dp.at(-1).x - TR.x) < 1e-4, 'the strip spans exactly the table width');
-  const nine = buildTrackerSlides(tracker(many.filter((t) => t.status !== 'Odd').slice(0, 99)), { reportDate: '2026-10-13' })[0];   // 2-digit counts
-  const np = nine.elements.filter((e) => e.t === 'rect' && Math.abs(e.y - TR.stripY) < EPS);
-  assert.equal(np.length, 9);
+  // Eight pills fit the design width with room to spare (the old 10-pill case had to borrow).
+  assert.ok(dp.at(-1).x >= TR.x - 1e-9, 'the strip stays inside the table width');
+  assert.equal(dp.length, 8);
+  const seven = buildTrackerSlides(tracker(many.filter((t) => t.status !== 'Odd').slice(0, 99)), { reportDate: '2026-10-13' })[0];   // 2-digit counts
+  const np = seven.elements.filter((e) => e.t === 'rect' && Math.abs(e.y - TR.stripY) < EPS);
+  assert.equal(np.length, 7);
   for (const p of np) assert.equal(p.w, 1.25);
 });
 
@@ -426,8 +442,10 @@ test('the tracker slides on the fixture: real-file shapes print as designed', ()
   const rows = slides.flatMap((s) => grid(tableOf(s)));
   assert.equal(rows.length, MOCK_REPORT_MODEL.projectTracker.tasks.length);
   const first = slides[0];
-  assert.equal(first.elements[1].text, 'متابعة المشروع');
-  assert.equal(slides[1].elements[1].text, 'متابعة المشروع — تتمة');
+  // Rule 6 (2026-10-18): «متابعة المهام» (was «متابعة المشروع»), continuation exactly as the
+  // user wrote it.
+  assert.equal(first.elements[1].text, 'متابعة المهام');
+  assert.equal(slides[1].elements[1].text, 'متابعة المهام —تتمة');
   assert.deepEqual(tableOf(first).rows[0], ['الاستحقاق', 'الحالة', 'الأولوية', 'المسؤول', 'الجهة', 'المهمة / المخرج', 'المرحلة', 'المسار']);
   assert.deepEqual(tableOf(first).colW, [1.0, 1.17, 0.82, 1.98, 1.05, 4.607, 0.92, 0.92]);
   // Track cells: workbook blue, white bold; a 1.25pt rule above each new track.
@@ -454,7 +472,7 @@ test('both renderers accept the tracker slides (PPTX + HTML)', async () => {
     assert.equal(names.filter((n) => /^ppt\/slides\/slide\d+\.xml$/.test(n)).length, spec.length);
     const idx = spec.findIndex((s) => s.id === 'tracker') + 1;
     const xml = await read(`ppt/slides/slide${idx}.xml`);
-    assert.match(xml, /متابعة المشروع/);
+    assert.match(xml, /متابعة المهام/);
     assert.match(xml, /rowSpan="\d+"/, 'merged group cells');
     assert.ok(renderSlides(spec, { variant: 'nupco' }), 'html renderer returns a tree');
   }

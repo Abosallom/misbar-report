@@ -1,6 +1,9 @@
 // contracts.js — frozen shared shapes (Phase 0). All tracks code against these.
 // Pure JSDoc typedefs; no runtime code except tiny helpers/constants.
 
+// The report-cadence enum (below) is owned by the slide-order leaf (no imports of its own).
+import { REPORT_CADENCES, DEFAULT_REPORT_CADENCE, reportCadence } from './model/slide-order.js?v=v2026-10-18.1';
+
 /**
  * Normalized order line (grain = one test on one order). Produced by ingest/csv.js
  * from the 30-col KAMC export (plus the optional ordering-hospital columns since
@@ -230,6 +233,11 @@
  *   NOTE: 'funnel.resulted' is the (unrenamed) key of the funnel's COMPLETED final
  *   stage, so it and 'completed' address the same figure on two slides.
  * @property {Settings['reportOptions']} [reportOptions] - presentation options (see Settings)
+ * @property {TrackerStatusLog|null} [trackerStatusLog] - (2026-10-18) the tracker's status
+ *   history (Settings.trackerStatusLog) the weekly «المهام المكتملة خلال الأسبوع» slide reads
+ *   (model/tracker-status.js completedDuring). Carried beside projectTracker by every model
+ *   (review, generate fallback, automation, buildReportModel / buildBothModel); null = no
+ *   history yet → that slide says no task was recorded as completed this week.
  * @property {string[]} [slideOrder] - the review screen's TEMPORARY slide order for THIS
  *   report only (unit keys, model/slide-order.js). Wins over reportOptions.slideOrder (the
  *   saved one) in every deck builder; memory only, never written to settings, never set on
@@ -328,7 +336,7 @@
  *     'https://elab.seha.sa/hpapm'. Empty/disabled → CSV drop only. The access
  *     token is the public-dashboard token (view-only, server-side-masked data);
  *     it is NEVER seeded in the repo — the user enters it once in Settings.
- * @property {{excludeNoTat:boolean, slides:Object<string,boolean>, kpiCards:Object<string,boolean>, labels:Object<string,string>, deltaMode:('daily'|'week'), autoDownloadFiles:boolean, trackerLang:('ar'|'en'|'both'), slideOrder?:string[]}} reportOptions
+ * @property {{excludeNoTat:boolean, slides:Object<string,boolean>, kpiCards:Object<string,boolean>, labels:Object<string,string>, deltaMode:('daily'|'week'), autoDownloadFiles:boolean, trackerLang:('ar'|'en'|'both'), cadence:('weekly'|'daily'), slideOrder?:string[]}} reportOptions
  *   - presentation defaults: excludeNoTat drops rows with no TAT from ANY source
  *     (lookup + CSV fallback = null → 'No Match') before aggregation; slides keys
  *     'execFunnel'|'monthly'|'compliance'|'action'|'challenges'|'definitions'|'sendout'|'tracker' toggle the middle
@@ -375,6 +383,10 @@
  *     only this saved order (a one-report order is ReportModel.slideOrder). An import
  *     REPLACES it, absence included: a backup whose reportOptions has no slideOrder is a
  *     default-order backup and resets the device to the default.
+ *     cadence (2026-10-18; CADENCES below, default 'weekly') — «دورية التقرير»: 'daily' =
+ *     the cover says «اليومي», the task slides show only tasks that are NOT completed, and
+ *     there is no «المهام المكتملة خلال الأسبوع» slide (slides key 'trackerCompleted',
+ *     default ON, weekly decks only). Validated like deltaMode; backfilled when absent.
  * @property {{enabled:boolean, autoPull:boolean, autoGenerate:boolean, autoDownload:boolean,
  *             autoLabFiles:boolean, autoEmailDrafts:boolean, autoAcceptTat:boolean,
  *             dailyTime:string, labRecipients:Object<string,string>}} automation
@@ -400,6 +412,14 @@
  *     API — nothing is sent to any server). OPTIONAL, NEVER SEEDED (absent = empty);
  *     cleaned on load; an import UNIONS it with this device's memory (the backup winning
  *     per key), bounded by TM_ENTRY_LIMIT per map and TM_MAX_CHARS overall.
+ * @property {TrackerStatusLog} [trackerStatusLog]
+ *   - (2026-10-18) WHEN each tracker task's status changed: recorded by store.js
+ *     updateCachedTracker (every upload and every website edit; an entry only when a task's
+ *     effective status differs from its last one) and SEEDED ONCE from an existing
+ *     cachedTracker when absent (dated by its editedAt || loadedAt), so the first upload
+ *     after this feature can already tell which tasks became Completed. Project-management
+ *     content like cachedTracker (WBS ids + status words + dates, no task text). Exported
+ *     and imported; an import REPLACES it (it describes the imported document's history).
  * @property {{model:ProjectTracker, updatedAt:string}|null} cachedTracker
  *   - the project task tracker DOCUMENT: the last uploaded MISBAR Task Tracker plus
  *     every website edit (model.editedAt), reused when no fresh file is dropped and
@@ -408,6 +428,13 @@
  *     old backup's untagged cache is discarded on import (store.js). NOTE on the no-PHI
  *     invariant: this is PROJECT-management content (tasks, owners, dates), not
  *     patient data — patient rows remain memory-only.
+ */
+
+/**
+ * The tracker status history (model/tracker-status.js recordStatusLog writes it; the store
+ * cleans and caps it). Key = taskLogKey(task) (the WBS, else the id); each entry = the
+ * task's EFFECTIVE status key (STATUS_KEYS, or 'other') as of that local date.
+ * @typedef {{v:1, tasks:Object<string,{at:string, status:string}[]>}} TrackerStatusLog
  */
 
 /** Screen module contract: each ui/screen-*.js exports render(containerEl, ctx)
@@ -423,3 +450,24 @@ export const VARIANTS = /** @type {const} */ ({
 export const normFacility = (s) => (s == null ? null : String(s).replace(/\s+/g, ' ').trim());
 /** Test-name normalizer for TAT lookup matching. */
 export const normTest = (s) => (s == null ? '' : String(s).replace(/\s+/g, ' ').trim());
+
+/* REPORT CADENCE (2026-10-18 user request): the SAME report as a «أسبوعي» (weekly — the
+ * default, today's deck) or a «يومي» (daily) one — settings.reportOptions.cadence. Daily
+ * changes the cover title, drops Completed tasks from the task slides and has no
+ * «المهام المكتملة خلال الأسبوع» slide. INDEPENDENT of reportOptions.deltaMode (the chips'
+ * activity window): the two are never coupled. The enum's OWNER is model/slide-order.js (the
+ * leaf the deck builders gate the weekly-only unit with); it is re-exported here so the
+ * store, the screens and the automation read the very same list — two copies could drift. */
+export const CADENCES = REPORT_CADENCES;
+export const DEFAULT_CADENCE = DEFAULT_REPORT_CADENCE;
+/** The cadence a value names ('weekly' | 'daily', case/space-insensitive), else null — the
+ *  STRICT reading an import validates with (an unknown value is an error there, not weekly). */
+export function canonicalCadence(v) {
+  const s = typeof v === 'string' ? v.trim().toLowerCase() : '';
+  return CADENCES.includes(s) ? s : null;
+}
+/** The cadence to USE: the value's, else the default (an absent / junk value = weekly) —
+ *  the deck builders' own reading (slide-order.js reportCadence). */
+export const normalizeCadence = (v) => reportCadence(v);
+/** True for a daily report. */
+export const isDailyCadence = (v) => normalizeCadence(v) === 'daily';

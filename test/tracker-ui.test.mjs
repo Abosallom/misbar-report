@@ -28,7 +28,7 @@ import { resolveProjectTracker } from '../src/model/report-model.js';
 import * as store from '../src/store.js';
 import { compute } from '../src/engine/engine.js';
 import { takeOrders } from '../src/model/hospital.js';
-import { statusKey as slideStatusKey, isOverdue } from '../src/slidespec/build-tracker.js';
+import { baseStatus, effectiveStatus, trackerSummary, STATUS_AR, STATUS_KEYS } from '../src/model/tracker-status.js';
 
 const NOW = '2026-10-13T09:00:00.000Z';
 const LATER = '2026-10-13T10:30:00.000Z';
@@ -76,60 +76,78 @@ test('editor fields: exactly the 19 task fields (every column + the 3 Arabic tra
   assert.equal(TRACKER_EDIT_FIELDS.filter((f) => f.due).map((f) => f.key).join(), 'due');
 });
 
-test('status keys: the file\'s «Deleyed» is a delay, «Not Found» / blank unknown, any other word verbatim', () => {
+// UPDATED 2026-10-18 (review): the app reads statuses through model/tracker-status.js, the
+// module the deck's task slides use — one alias table AND one overdue rule — so the upload
+// card and the editor pill can never disagree with the deck (On Hold was a separate
+// «معلّق» here while the deck printed «متوقف»; an overdue task kept its raw status).
+test('status keys: the status module\'s reading — «Deleyed» late, On Hold stopped, blank «لم يبدأ», other verbatim', () => {
   assert.equal(trackerStatusKey('Completed'), 'completed');
   assert.equal(trackerStatusKey(' in  progress '), 'inProgress');
-  assert.equal(trackerStatusKey('Deleyed'), 'delayed');
-  assert.equal(trackerStatusKey('Delayed'), 'delayed');
-  assert.equal(trackerStatusKey('BLOCKED'), 'blocked');
-  assert.equal(trackerStatusKey('On Hold'), 'onHold');
+  assert.equal(trackerStatusKey('Deleyed'), 'late');
+  assert.equal(trackerStatusKey('Delayed'), 'late');
+  assert.equal(trackerStatusKey('BLOCKED'), 'stopped');
+  assert.equal(trackerStatusKey('On Hold'), 'stopped');
   assert.equal(trackerStatusKey('Not Started'), 'notStarted');
-  assert.equal(trackerStatusKey('Not Found'), 'unknown');
-  assert.equal(trackerStatusKey(''), 'unknown');
-  assert.equal(trackerStatusKey(undefined), 'unknown');
+  assert.equal(trackerStatusKey('Not Found'), 'notStarted');
+  assert.equal(trackerStatusKey(''), 'notStarted');
+  assert.equal(trackerStatusKey(undefined), 'notStarted');
   assert.equal(trackerStatusKey('Waiting on vendor'), 'other');
   assert.equal(trackerStatusLabel('Deleyed'), 'متأخر');
+  assert.equal(trackerStatusLabel('On Hold'), 'متوقف');
   assert.equal(trackerStatusLabel('Completed'), 'مكتمل');
   assert.equal(trackerStatusLabel('Waiting on vendor'), 'Waiting on vendor');
   assert.equal(trackerPriorityKey('Critical'), 'critical');
   assert.equal(trackerPriorityKey('urgent'), null);
 });
 
-test('ONE status rule: the editor pill / upload counts read every status exactly as the slide does', () => {
-  // Every alias either side ever knew, the free words an operator may type, and the
-  // file's own words (review R-1: 'Closed' was «مكتمل» in the editor but 'other' + overdue
-  // on the slide; 'مكتمل' / 'متوقف' were grey in the editor but mapped on the slide).
+test('ONE status rule: the editor / upload card read every status exactly as tracker-status.js (the deck) does', () => {
   const words = [
     'Completed', 'complete', 'Done', 'Closed', 'In Progress', 'in_progress', 'InProgress', 'Ongoing',
     'Delayed', 'Deleyed', 'Late', 'Overdue', 'Blocked', 'On Hold', 'on-hold', 'Not Started', 'Not Found',
     '', '  ', null, undefined, 'Waiting on vendor',
-    'مكتمل', 'مكتملة', 'قيد التنفيذ', 'متأخر', 'متأخرة', 'متوقف', 'متوقفة', 'معلّق', 'معلق', 'لم يبدأ', 'لم تبدأ',
+    'مكتمل', 'مكتملة', 'قيد التنفيذ', 'متأخر', 'متأخرة', 'متوقف', 'متوقفة', 'معلّق', 'معلق', 'لم يبدأ', 'لم تبدأ', 'غير محدد',
   ];
   for (const w of words) {
-    const slide = slideStatusKey(w);
-    assert.equal(trackerStatusKey(w), slide === 'unset' ? 'unknown' : slide, `status ${JSON.stringify(w)}`);
+    assert.equal(trackerStatusKey(w), baseStatus(w), `status ${JSON.stringify(w)}`);
+    if (baseStatus(w) !== 'other') assert.equal(trackerStatusLabel(w), STATUS_AR[baseStatus(w)], `label ${JSON.stringify(w)}`);
   }
-  // …so the overdue test and the pill agree: a word the slide does not call completed is
-  // never shown as «مكتمل» in the editor.
-  assert.equal(trackerStatusLabel('مكتمل'), 'مكتمل');
-  assert.equal(trackerStatusLabel('متوقف'), STR.tracker.status.blocked);
-  assert.equal(trackerStatusLabel('Closed'), 'Closed');
-  assert.equal(isOverdue({ status: 'Closed', due: '2026-01-01' }, '2026-10-13'), true);
-  const c = trackerStatusCounts({ tasks: [{ status: 'مكتمل' }, { status: 'Completed' }, { status: 'Closed' }] });
-  assert.deepEqual(c.map((x) => [x.label, x.count]), [['مكتمل', 2], ['Closed', 1]]);
-  // Priority: the slide's Arabic words are known too.
+  // The labels are exactly the deck's five words — no «معلّق», no «غير محدد».
+  for (const w of words) assert.ok(!['معلّق', 'غير محدد'].includes(trackerStatusLabel(w)), `label ${JSON.stringify(w)}`);
+  // 'Closed' is a completion word for the status module: never turned Late when overdue.
+  assert.equal(trackerStatusLabel('Closed'), 'مكتمل');
+  assert.equal(effectiveStatus({ status: 'Closed', due: '2026-01-01' }, '2026-10-13').key, 'completed');
+  const c = trackerStatusCounts({ tasks: [{ status: 'مكتمل' }, { status: 'Completed' }, { status: 'Closed' }] }, '2026-10-13');
+  assert.deepEqual(c.map((x) => [x.label, x.count]), [['مكتمل', 3]]);
   assert.equal(trackerPriorityKey('حرجة'), 'critical');
   assert.equal(trackerPriorityKey('منخفضة'), 'low');
 });
 
-test('status counts: the slide\'s order and labels, unknown words verbatim, «غير محدد» last, zeros omitted', () => {
-  const c = trackerStatusCounts(tracker());
-  assert.deepEqual(c.map((x) => [x.label, x.count]), [
-    ['مكتمل', 1], ['قيد التنفيذ', 1], ['متأخر', 1], ['Waiting on vendor', 1], ['غير محدد', 1],
-  ]);
+test('status counts = the deck\'s summary boxes on the report date: overdue → «متأخر», Stopped stays, «متجاوزة الموعد»', () => {
+  // Report date 2026-10-13: 9.1.1 In Progress due 09-01 → Late; 9.1.2 Deleyed → Late;
+  // 9.2.1 Completed; 9.3.1 Not Found (undated) → Not Started; 9.3.2 other, not yet due.
+  const c = trackerStatusCounts(tracker(), '2026-10-13');
+  assert.deepEqual(c.map((x) => [x.key, x.label, x.count]), [
+    ['late', 'متأخر', 2], ['completed', 'مكتمل', 1], ['notStarted', 'لم يبدأ', 1],
+    ['other:Waiting on vendor', 'Waiting on vendor', 1], ['pastDue', 'متجاوزة الموعد', 2],
+  ].sort((a, b) => order(a[0]) - order(b[0])));
+  // …the same numbers as tracker-status.js trackerSummary (what the deck's boxes print).
+  const s = trackerSummary(tracker().tasks, '2026-10-13');
+  const byKey = Object.fromEntries(c.map((x) => [x.key, x.count]));
+  for (const k of ['late', 'stopped', 'inProgress', 'notStarted', 'completed', 'pastDue']) {
+    assert.equal(byKey[k] || 0, s[k], k);
+  }
+  // An overdue On Hold / Blocked task stays «متوقف» but is past due; one box, not two.
+  const stopped = trackerStatusCounts({ tasks: [
+    { status: 'On Hold', due: '2026-09-01' }, { status: 'Blocked', due: '2026-12-01' }, { status: '', due: '2026-09-01' },
+  ] }, '2026-10-13');
+  assert.deepEqual(stopped.map((x) => [x.key, x.count]), [['late', 1], ['stopped', 2], ['pastDue', 2]]);
+  // Without a report date nothing is overdue: the file's own statuses.
+  assert.deepEqual(trackerStatusCounts({ tasks: [{ status: '' }, { status: 'Not Started' }, { status: 'Not Found' }] }).map((x) => [x.key, x.count]),
+    [['notStarted', 3]], 'one «لم يبدأ» line, never two');
   assert.deepEqual(trackerStatusCounts(null), []);
   assert.deepEqual(trackerStatusCounts({ tasks: [] }), []);
 });
+const order = (k) => (k === 'pastDue' ? 99 : k.startsWith('other:') ? 50 : STATUS_KEYS.indexOf(k));
 
 /* ------------------------------------------------------------------ *
  * Suggestions
@@ -410,12 +428,19 @@ test('review model: an OLD-shape tracker in state → projectTracker null (no sl
  * Slide toggles
  * ------------------------------------------------------------------ */
 
-test('slide toggles: «متابعة المشروع» offered in all three report types; the old «المهام» chip retired', () => {
+// UPDATED 2026-10-18: the chip carries the slides' new name «متابعة المهام» (user rule 6), and
+// the weekly «المهام المكتملة خلال الأسبوع» chip sits beside it in every report type.
+test('slide toggles: «متابعة المهام» offered in all three report types; the old «المهام» chip retired', () => {
   for (const h of ['kamc', 'sgh', 'both']) {
     const chips = slideTogglesFor(h);
     const tr = chips.find((c) => c.key === 'tracker');
     assert.ok(tr, h);
-    assert.equal(tr.label, 'متابعة المشروع');
+    assert.equal(tr.label, 'متابعة المهام');
+    const done = chips.find((c) => c.key === 'trackerCompleted');
+    assert.ok(done, `${h}: the completed-this-week chip`);
+    assert.equal(done.label, 'المهام المكتملة خلال الأسبوع');
+    assert.equal(done.weeklyOnly, true);
+    assert.equal(chips.indexOf(done), chips.indexOf(tr) + 1, 'right after the task slides');
     assert.ok(!chips.some((c) => c.key === 'action'), h);
   }
   // Challenges stays a single-hospital chip (the main deck has no such slide).

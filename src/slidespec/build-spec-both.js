@@ -14,10 +14,12 @@
 // Same slide ids as the single-hospital deck, so every consumer (PDF export, the preview)
 // treats them alike. The variant changes NOTHING here: the BOTH deck has no action /
 // challenges slides (CONTRACT §1.10), and those were the only variant-dependent ones.
-// PROJECT TRACKER (2026-10-13): the «متابعة المشروع» slides (build-tracker.js, shared with
+// PROJECT TRACKER (2026-10-13): the «متابعة المهام» slides (build-tracker.js, shared with
 // the single-hospital deck) follow compliance, before thanks, under the 'tracker' toggle —
 // a project-wide addition to the reference shape, identical for both variants, and absent
-// when no tracker is loaded. Nothing else in this deck changes.
+// when no tracker is loaded; WEEKLY decks follow them with «المهام المكتملة خلال الأسبوع»
+// ('trackerCompleted', 2026-10-18). Nothing else in this deck changes (a DAILY cadence also
+// swaps the cover title, as in build-spec.js).
 //
 // SLIDE ORDER (2026-10-13): the sequence above is the DEFAULT. The operator's saved order
 // (reportOptions.slideOrder) or one-report order (model.slideOrder) re-sequences the content
@@ -52,14 +54,14 @@
 //
 // HOSPITAL NAMES. The old "no hospital name on any slide" rule applies to the KAMC report
 // only (CONTRACT §1.13): this deck prints the names the reference prints.
-import { COLORS as C } from '../theme.js?v=v2026-10-13.7';
-import { AR_COUNTRY } from '../model/sendout.js?v=v2026-10-13.7';
-import { HOSPITALS } from '../model/hospital.js?v=v2026-10-13.7';
+import { COLORS as C } from '../theme.js?v=v2026-10-18.1';
+import { AR_COUNTRY } from '../model/sendout.js?v=v2026-10-18.1';
+import { HOSPITALS } from '../model/hospital.js?v=v2026-10-18.1';
 // The project-tracker slides — a leaf module (imports nothing from either spec file), so it
 // is safe to import at top level despite the cycle described below.
-import { buildTrackerSlides } from './build-tracker.js?v=v2026-10-13.7';
+import { buildTrackerSlides, buildTrackerCompletedSlides } from './build-tracker.js?v=v2026-10-18.1';
 // Slide ORDER — also a leaf module (no imports at all), equally safe at top level.
-import { orderUnits, slideOrderOf } from '../model/slide-order.js?v=v2026-10-13.7';
+import { orderUnits, slideOrderOf, cadenceOf, unitInCadence } from '../model/slide-order.js?v=v2026-10-18.1';
 // DEFAULT_LABELS (the registry) and SGH_TEXT (the reference's SGH sentences, shared with the
 // single-SGH deck so both print one source) come from build-spec.js.
 // CIRCULAR IMPORT, SAFE ONLY AT CALL TIME: build-spec.js imports this file to dispatch
@@ -68,7 +70,7 @@ import { orderUnits, slideOrderOf } from '../model/slide-order.js?v=v2026-10-13.
 // inside a function, never at this module's top level (that would be a TDZ ReferenceError)
 // — which is also why the palette below keeps its own literal hexes (the same values as
 // build-spec.js SGH_COLORS) instead of reading them at load time.
-import { DEFAULT_LABELS, SGH_TEXT } from './build-spec.js?v=v2026-10-13.7';
+import { DEFAULT_LABELS, SGH_TEXT } from './build-spec.js?v=v2026-10-18.1';
 
 // ---- palette added by the BOTH reference (not in theme.js) ---------------------------
 const KAMC_C = '#00897B';      // KAMC teal — slices, segments, dots, counts, tags
@@ -186,7 +188,8 @@ function buildCover(m) {
       rect(0, 0, 0.15, 7.5, C.purple),
       rect(13.15, 0, 0.15, 7.5, C.orange),
       text(8.7, 0.5, 4.0, 0.5, 'NUPCO  |  Lean', 18, { bold: true, color: C.white, align: 'right', valign: 'middle' }),
-      text(0.6, 2.6, 11.9, 1.3, L('coverTitle'), 60, { bold: true, color: C.white, align: 'right', valign: 'middle', rtl: true }),
+      // Cadence (build-spec.js DEFAULT_LABELS.coverTitle): «…اليومي» for a daily report.
+      text(0.6, 2.6, 11.9, 1.3, L(cadenceOf(m) === 'daily' ? 'coverTitleDaily' : 'coverTitle'), 60, { bold: true, color: C.white, align: 'right', valign: 'middle', rtl: true }),
       text(0.6, 4.0, 11.9, 0.6, L('coverSubtitle'), 22, { color: CARD_TITLE, align: 'right', valign: 'middle', rtl: true }),
       text(0.6, 6.15, 11.9, 0.4, 'تاريخ التقرير: ' + fmtDate(m.reportDate), 12, { color: CARD_TITLE, align: 'right', valign: 'middle', rtl: true }),
       text(0.6, 6.55, 11.9, 0.4, L('coverPreparedBy'), 12, { color: CARD_TITLE, align: 'right', valign: 'middle', rtl: true }),
@@ -953,9 +956,13 @@ export function buildBothSpec(model, { variant = 'internal' } = {}) {
     { key: 'monthly', build: () => [buildMonthly(m)] },
     { key: 'sendout', build: () => (sendoutData ? [buildCountries(m), buildLabs(m)] : []) },
     { key: 'compliance', build: () => [buildCompliance(m)] },
-    // Project tracker: [] without a tracker. Text language = reportOptions.trackerLang, as
-    // in build-spec.js.
-    { key: 'tracker', build: () => buildTrackerSlides(m.projectTracker, { reportDate: m.reportDate, variant, labels: labelOf(m), lang: m.reportOptions?.trackerLang }) },
+    // Project tracker: [] without a tracker. Text language = reportOptions.trackerLang and
+    // the cadence (daily: no Completed task), as in build-spec.js.
+    { key: 'tracker', build: () => buildTrackerSlides(m.projectTracker, { reportDate: m.reportDate, variant, labels: labelOf(m), lang: m.reportOptions?.trackerLang, cadence: cadenceOf(m) }) },
+    // The weekly completed-this-week slide, as in build-spec.js (weekly only, own toggle).
+    { key: 'trackerCompleted', build: () => (unitInCadence('trackerCompleted', cadenceOf(m))
+      ? buildTrackerCompletedSlides(m.projectTracker, m.trackerStatusLog, { reportDate: m.reportDate, labels: labelOf(m), lang: m.reportOptions?.trackerLang })
+      : []) },
   ];
   const middle = orderUnits(defs, slideOrderOf(m)).filter((d) => d.always || on(d.key)).flatMap((d) => d.build());
   middle.forEach((s, i) => s.elements.push(pageFooter(i + 1)));

@@ -5,11 +5,11 @@
 // build-spec reads from the very same predicate. A local re-derivation here is exactly
 // how a filename would one day say «مخصص» while the cover says nothing (or the reverse).
 // scope.js is pure (no DOM, no vendor, no ar.js back-edge), so this adds no cycle.
-import { isScoped, normalizeScope } from '../model/scope.js?v=v2026-10-13.7';
+import { isScoped, normalizeScope } from '../model/scope.js?v=v2026-10-18.1';
 // The hospital registry's short codes (KAMC / SGH) are what the file-name tag, the report
 // type pills and the share text print — read from the ONE registry, never re-typed here.
 // hospital.js is pure (no imports at all), so this adds no cycle either.
-import { HOSPITALS } from '../model/hospital.js?v=v2026-10-13.7';
+import { HOSPITALS } from '../model/hospital.js?v=v2026-10-18.1';
 
 /** Join ids for a sentence: Arabic comma, tolerant of a bare string or a missing list. */
 const joinIds = (ids) => [].concat(ids == null ? [] : ids).map(String).join('، ');
@@ -86,7 +86,7 @@ export const STR = {
     trackerStillUsing: (name) => `لم يُعتمد الملف المرفوع — ما زال المعتمد: ${name}`,
     trackerModuleMissing: 'وحدة قراءة ملف متابعة المشروع غير متوفرة — لم يُحمَّل الملف.',
     // No tracker loaded: the report goes ahead without the tracker slides.
-    trackerOptional: 'ملف متابعة المشروع اختياري: بدونه لا تظهر شرائح «متابعة المشروع» في التقرير.',
+    trackerOptional: 'ملف متابعة المشروع اختياري: بدونه لا تظهر شرائح «متابعة المهام» في التقرير.',
     // The tasks' Arabic is AUTOMATIC (2026-10-13, CONTRACT-AUTO): the card's line is
     // STR.tracker.autoTranslated — the user never prepares an Arabic workbook, so nothing
     // here tells them to.
@@ -313,15 +313,33 @@ export const STR = {
       // was built for the old rows, so it is dropped and nothing is generated yet.
       dataChanged: 'تغيّرت بيانات الطلبات فأُلغي نطاق التقرير ولم يُولَّد شيء — راجع التقرير الكامل قبل التوليد.',
     },
+    // «دورية التقرير» (2026-10-18, reportOptions.cadence — contracts.js CADENCES): the SAME
+    // report as a weekly (default) or a daily one. Independent of «نافذة النشاط» (deltaMode).
+    cadence: {
+      title: 'دورية التقرير',
+      weekly: 'أسبوعي',
+      daily: 'يومي',
+      hint: {
+        weekly: 'التقرير الأسبوعي: كل المهام، وشريحة «المهام المكتملة خلال الأسبوع».',
+        daily: 'التقرير اليومي: نفس التقرير، لكن شرائح المهام تعرض المهام غير المكتملة فقط.',
+      },
+      // On the «المهام المكتملة خلال الأسبوع» chip while the report is daily (the slide is
+      // never in a daily deck).
+      weeklyOnly: 'أسبوعي فقط',
+    },
     // Slide-toggle chip row (bound to reportOptions.slides.*).
     slideTogglesTitle: 'الشرائح:',
     slideToggles: {
       execFunnel: 'الملخص',
       monthly: 'الشهرية',
       compliance: 'الالتزام',
-      // «متابعة المشروع» — the new tracker slides, offered in ALL three report types
-      // (the old «المهام» chip, key 'action', is retired: the tracker replaced its slide).
-      tracker: 'متابعة المشروع',
+      // «متابعة المهام» (renamed from «متابعة المشروع», 2026-10-18 — the slide title the user
+      // chose) — the tracker slides, offered in ALL three report types (the old «المهام»
+      // chip, key 'action', is retired: the tracker replaced its slide).
+      tracker: 'متابعة المهام',
+      // The weekly «المهام المكتملة خلال الأسبوع» slide (2026-10-18) — its own unit, so it can
+      // be switched off / moved apart from the task slides. Weekly decks only.
+      trackerCompleted: 'المهام المكتملة خلال الأسبوع',
       challenges: 'التحديات والمخاطر',
       sendout: 'محلي/دولي',
     },
@@ -380,6 +398,7 @@ export const STR = {
         shipments: 'في التقرير المخصّص بشحنات فقط',
         sendout: 'شريحتان تنتقلان معاً',
         tracker: 'قد تمتد لعدة صفحات تنتقل معاً',
+        trackerCompleted: 'التقرير الأسبوعي فقط',
         challenges: 'تقرير المستشفى الواحد فقط',
         definitions: 'تقرير المستشفى الواحد فقط، عند تفعيلها',
       },
@@ -436,7 +455,9 @@ export const STR = {
   // data; `status` / `priority` are only the Arabic DISPLAY labels of the known values,
   // the same wording as the slide (slidespec/build-tracker.js).
   tracker: {
-    title: 'متابعة المشروع',
+    // The editor card (and its Settings mirror) carries the slides' name «متابعة المهام»;
+    // the uploaded FILE keeps its own name, «ملف متابعة المشروع» (upload.trackerZoneTitle).
+    title: 'متابعة المهام',
     hint: 'كل الأعمدة قابلة للتعديل. تُحفظ التعديلات تلقائيًا في هذا المتصفح، وتظهر في المعاينة وفي التقرير الآلي، ويستبدلها رفع ملف جديد.',
     none: 'لم يُحمَّل ملف متابعة المشروع، فلن تظهر شرائح المتابعة. ارفع الملف من شاشة الرفع، أو أضف مهمة لبدء متابعة يدوية.',
     empty: 'لا توجد مهام — لن تظهر شرائح المتابعة حتى تُضاف مهمة.',
@@ -452,7 +473,7 @@ export const STR = {
     moveUp: 'نقل المهمة لأعلى',
     moveDown: 'نقل المهمة لأسفل',
     remove: 'حذف المهمة',
-    removeConfirm: (label) => `حذف المهمة «${label}» من متابعة المشروع؟`,
+    removeConfirm: (label) => `حذف المهمة «${label}» من متابعة المهام؟`,
     untitled: 'مهمة بدون عنوان',
     noTrack: 'بدون مسار',
     noMilestone: 'بدون مرحلة',
@@ -498,7 +519,20 @@ export const STR = {
     arHint: 'اتركه فارغًا للعودة إلى الترجمة التلقائية',
     dueHint: 'تاريخ (يوم/شهر/سنة أو YYYY-MM-DD)، أو نص مثل daily',
     suggestHint: 'اختر من القائمة أو اكتب قيمة جديدة',
-    saveFailed: 'تعذّر حفظ تعديلات متابعة المشروع في هذا المتصفح',
+    saveFailed: 'تعذّر حفظ تعديلات متابعة المهام في هذا المتصفح',
+    // «ترجمة الأسماء» (2026-10-18): the owner names and entities of the loaded tracker with
+    // their Arabic — the built-in list's, or the user's own (editable, remembered by the
+    // English name, so a re-upload keeps it). Names are never machine-translated.
+    names: {
+      title: 'ترجمة الأسماء',
+      hint: 'الأسماء كما تظهر في عمودي «المسؤول» و«الجهة» بالشريحة. اكتب الاسم بالعربية لتعديله، أو امسحه للعودة إلى الترجمة المعتمدة. الاسم بلا ترجمة يظهر كما هو في الملف.',
+      owners: 'المسؤولون',
+      entities: 'الجهات',
+      placeholder: 'الاسم بالعربية',
+      none: 'لا توجد أسماء في المهام بعد.',
+      source: { user: 'تعديلك', builtin: 'من الترجمة المعتمدة', none: 'بدون ترجمة' },
+      field: (en) => `الاسم بالعربية — ${en}`,
+    },
     // The 19 editable task fields (every column of the workbook + Portfolio's Track /
     // Milestone + the three Arabic translations). Order = the editor's field order.
     // The three Arabic fields (taskAr / trackAr / milestoneAr) sit beside their English
@@ -525,15 +559,12 @@ export const STR = {
       definitionOfDone: 'معيار الإنجاز',
       notes: 'ملاحظات',
     },
-    status: {
-      completed: 'مكتمل',
-      inProgress: 'قيد التنفيذ',
-      delayed: 'متأخر',
-      blocked: 'متوقف',
-      onHold: 'معلّق',
-      notStarted: 'لم يبدأ',
-      unknown: 'غير محدد',
-    },
+    // The status words themselves live in model/tracker-status.js (STATUS_AR) — the deck and
+    // the app print the same five (2026-10-18: On Hold is «متوقف», a blank is «لم يبدأ»).
+    // «متجاوزة الموعد» — the upload card's past-due count (the deck's summary box).
+    pastDue: 'متجاوزة الموعد',
+    // The editor pill's tooltip when the deck's status differs from the file's (overdue).
+    statusInFile: (label) => `الحالة في الملف: ${label} — تظهر في التقرير «متأخر» لتجاوز موعدها`,
     priority: {
       critical: 'حرجة',
       high: 'عالية',
@@ -578,6 +609,8 @@ export const STR = {
     lateLabsUnscoped: 'ملفات المختبرات أدناه لا يُطبَّق عليها نطاق التقرير المخصص: تشمل جميع الطلبات كما في {date}.',
     // The generate screen's head names the report being produced (all three types).
     reportType: (label) => `نوع التقرير: ${label}`,
+    // The share card's heading — the cover's title for the report's cadence.
+    shareTitle: (cadence) => (cadence === 'daily' ? 'تقرير مسبار اليومي' : 'تقرير مسبار الأسبوعي'),
     // Head note while the review's «ترتيب الشرائح» card holds an unsaved (temporary) order.
     tempSlideOrder: 'ترتيب الشرائح: مؤقت لهذا التقرير فقط (لم يُحفظ كترتيب ثابت).',
     // SGH / KAMC + SGH run, above the per-lab "Late & Due" section: those chase lists

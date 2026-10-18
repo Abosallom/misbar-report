@@ -7,8 +7,8 @@
 // scripts/fetch-kamc.mjs): which hospital a row belongs to (KAMC, SGH, or a third one
 // that is never counted) is decided by model/hospital.js takeOrders where the app takes
 // rows in, so every hospital's history is kept.
-import { normFacility } from '../contracts.js?v=v2026-10-13.7';
-import { MAPPED_COLUMNS, findHospitalColumns } from './csv.js?v=v2026-10-13.7';
+import { normFacility } from '../contracts.js?v=v2026-10-18.1';
+import { MAPPED_COLUMNS, findHospitalColumns } from './csv.js?v=v2026-10-18.1';
 
 // ---- cell coercers (mirror csv.js semantics; Grafana cells may be null/number/string) ----
 const clean = (v) => {

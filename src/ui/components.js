@@ -1,5 +1,5 @@
 // ui/components.js — shared DOM helpers used by Track E screens.
-import { STR, formatDateAr } from '../i18n/ar.js?v=v2026-10-13.7';
+import { STR, formatDateAr } from '../i18n/ar.js?v=v2026-10-18.1';
 // The project tracker document's OWNER (shape, tag, due-date rule, new-row factory). STATIC,
 // like scope.js / hospital.js elsewhere: the module is pure (SheetJS is injected, never
 // imported), and the editor below must apply the parser's own rules — a website-typed
@@ -9,11 +9,16 @@ import { STR, formatDateAr } from '../i18n/ar.js?v=v2026-10-13.7';
 import {
   isProjectTracker, newTask as blankTrackerTask, normalizeDueText, TRACKER_FORMAT,
   TRACKER_LANGS, DEFAULT_TRACKER_LANG, normalizeTrackerLang as parseTrackerLang,
-} from '../ingest/task-tracker.js?v=v2026-10-13.7';
-// ONE status rule for the editor pill, the upload card's counts and the slide (its pill and
-// its overdue test): the slide builder's statusKey owns the alias table (English as the
-// workbook writes it, 'Deleyed' included, plus the Arabic words). Pure; imports theme only.
-import { statusKey as slideStatusKey } from '../slidespec/build-tracker.js?v=v2026-10-13.7';
+} from '../ingest/task-tracker.js?v=v2026-10-18.1';
+// ONE status rule for the editor pill, the upload card's counts and the deck (2026-10-18):
+// model/tracker-status.js owns the alias table (English as the workbook writes it,
+// 'Deleyed' included, plus the Arabic words) AND the overdue rule (not Completed + due before
+// the report date → «متأخر»; «متوقف» stays «متوقف»). The deck's task slides read it, so the
+// app must too — otherwise the website would show «معلّق» or a raw «قيد التنفيذ» for a task
+// the deck prints as «متوقف» / «متأخر». Pure; no imports.
+import {
+  baseStatus, effectiveStatus, STATUS_KEYS, STATUS_AR,
+} from '../model/tracker-status.js?v=v2026-10-18.1';
 // AUTOMATIC ARABIC (2026-10-13, CONTRACT-AUTO §1): the translation memory's ONE set of rules
 // — the lookup key, the layer precedence (file > user > built-in > machine), the user-TM
 // edits, the machine cache + glossary, the counts. Pure (no DOM, no storage, no imports), so
@@ -21,7 +26,9 @@ import { statusKey as slideStatusKey } from '../slidespec/build-tracker.js?v=v20
 import {
   applyTrackerTranslations, setUserTranslation, setOriginal, addMachineTranslations,
   trackerTranslationStats, collectUntranslated, normEn, TM_MAX_CHARS,
-} from '../model/tracker-translate.js?v=v2026-10-13.7';
+  // «ترجمة الأسماء» (2026-10-18): every distinct owner / entity name part with its Arabic.
+  trackerNameEntries,
+} from '../model/tracker-translate.js?v=v2026-10-18.1';
 
 /** Tiny hyperscript helper. */
 export function el(tag, props = {}, children = []) {
@@ -288,14 +295,13 @@ export const TRACKER_VOCAB = Object.freeze({
 
 const vocabKey = (s) => String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9؀-ۿ]/g, '');
 
-/** Status text → display key — the SLIDE's reading (slidespec/build-tracker.js statusKey),
- *  so the editor, the upload card and the deck always agree: the file's misspelt 'Deleyed'
- *  is a delay; the Arabic words map to their status; 'Not Found' (the Portfolio formula's
- *  miss) and blank are 'unknown' (the slide's 'unset'); any other word is 'other' (shown
- *  verbatim, neutral — and, like on the slide, not completed for the overdue test). */
+/** Status text → the status module's key (tracker-status.js baseStatus): 'completed',
+ *  'inProgress', 'late', 'stopped', 'notStarted' or 'other' — BEFORE the overdue rule (that
+ *  needs a report date; see trackerStatusCounts / trackerStatusPill). The file's misspelt
+ *  'Deleyed' is late; Blocked / On Hold are «متوقف» (one box for the user); blank and
+ *  'Not Found' are «لم يبدأ»; any other word is 'other' (shown verbatim, neutral). */
 export function trackerStatusKey(status) {
-  const k = slideStatusKey(status);
-  return k === 'unset' ? 'unknown' : k;
+  return baseStatus(status);
 }
 
 /** Priority text → display key (critical / high / medium / low) or null. */
@@ -306,51 +312,56 @@ export function trackerPriorityKey(priority) {
   return ['critical', 'high', 'medium', 'low'].includes(k) ? k : null;
 }
 
-/* The slide's status pill colours (the workbook's conditional formats; Delayed has no
- * rule there and takes the orange pair — map/slide-design.md §6), reused for the editor's
- * pills and the upload card so the three surfaces read alike. */
+/* The slide's status pill colours (the workbook's conditional formats; Late takes the
+ * orange pair, Stopped the red one — map/slide-design.md §6), reused for the editor's
+ * pills so the surfaces read alike. */
 const STATUS_PILL = {
   completed: ['#C6EFCE', '#006100'],
   inProgress: ['#DDEBF7', '#1F4E78'],
-  delayed: ['#FCE4D6', '#C55A11'],
-  blocked: ['#FFC7CE', '#9C0006'],
-  onHold: ['#FFF2CC', '#7F6000'],
+  late: ['#FCE4D6', '#C55A11'],
+  stopped: ['#FFC7CE', '#9C0006'],
   notStarted: ['#E7E6E6', '#404040'],
-  unknown: ['#F1F5F9', '#64748B'],
   other: ['#F1F5F9', '#475569'],
 };
-const STATUS_ORDER = ['completed', 'inProgress', 'delayed', 'blocked', 'onHold', 'notStarted'];
 
-/** Arabic label of a status value (verbatim for an unrecognised word). */
+/** Arabic label of a status value as the FILE states it (verbatim for an unrecognised word). */
 export function trackerStatusLabel(status) {
-  const key = trackerStatusKey(status);
+  const key = baseStatus(status);
   if (key === 'other') return String(status).trim();
-  return STR.tracker.status[key];
+  return STATUS_AR[key];
 }
 
 /**
- * Task count per status, in the slide's status order: the known statuses first, then
- * each unrecognised word under its own name (first-seen order), then «غير محدد» (blank /
- * 'Not Found'). Zero counts are omitted. Pure; the upload card's stats.
+ * Task count per status AS THE DECK SHOWS IT on `reportDate` (tracker-status.js
+ * effectiveStatus: an overdue non-completed task is «متأخر», an overdue «متوقف» stays
+ * «متوقف»), in the deck's order (STATUS_KEYS: متأخر, متوقف, قيد التنفيذ, لم يبدأ, مكتمل),
+ * then each unrecognised word under its own name (first-seen order), then «متجاوزة الموعد»
+ * (every non-completed task past its date — overdue Stopped included). Zero counts are
+ * omitted. Pure; the upload card's stats. Without a valid reportDate nothing is overdue,
+ * so the counts are the file's own statuses.
+ * The deck's DAILY variant drops the Completed tasks; the upload card describes the whole
+ * file, so its «مكتمل» line stays.
+ * @param {object} tracker
+ * @param {string} [reportDate] - 'yyyy-mm-dd' — the report's date (the overdue reference)
  * @returns {{key:string, label:string, count:number}[]}
  */
-export function trackerStatusCounts(tracker) {
+export function trackerStatusCounts(tracker, reportDate) {
   const tasks = (tracker && Array.isArray(tracker.tasks)) ? tracker.tasks : [];
-  const known = new Map(STATUS_ORDER.map((k) => [k, 0]));
+  const known = new Map(STATUS_KEYS.map((k) => [k, 0]));
   const other = new Map();
-  let unknown = 0;
+  let pastDue = 0;
   for (const t of tasks) {
-    const key = trackerStatusKey(t && t.status);
-    if (key === 'unknown') unknown += 1;
-    else if (key === 'other') {
+    const e = effectiveStatus(t, reportDate);
+    if (e.pastDue) pastDue++;
+    if (e.key === 'other') {
       const word = String(t.status).trim();
       other.set(word, (other.get(word) || 0) + 1);
-    } else known.set(key, known.get(key) + 1);
+    } else known.set(e.key, known.get(e.key) + 1);
   }
   const out = [];
-  for (const [key, count] of known) if (count) out.push({ key, label: STR.tracker.status[key], count });
+  for (const [key, count] of known) if (count) out.push({ key, label: STATUS_AR[key], count });
   for (const [word, count] of other) out.push({ key: `other:${word}`, label: word, count });
-  if (unknown) out.push({ key: 'unknown', label: STR.tracker.status.unknown, count: unknown });
+  if (pastDue) out.push({ key: 'pastDue', label: STR.tracker.pastDue, count: pastDue });
   return out;
 }
 
@@ -571,6 +582,10 @@ export function trackerHasAnyArabic(tracker) {
 /** The per-task fields a translation pass writes (the English fields are never touched). */
 export const TRACKER_TRANSLATION_FIELDS = Object.freeze([
   'taskAr', 'trackAr', 'milestoneAr', 'taskArSource', 'trackArSource', 'milestoneArSource', 'showOriginal',
+  // The owner / entity names (2026-10-18, rule 5): filled per name part from the user's and
+  // the built-in lists. Copied in place like the texts — without them the session document
+  // (the editor's = the preview's) would never get its Arabic names.
+  'ownerAr', 'organizationAr', 'ownerArSource', 'organizationArSource',
 ]);
 /** Arabic field → its English source field (the TM key) and its source field. */
 const AR_FIELD = Object.freeze({
@@ -745,6 +760,109 @@ export function recordOriginalChoice(task, on, { remember = true } = {}) {
   return true;
 }
 
+/* ---------- «ترجمة الأسماء» — the owner / entity names (2026-10-18, CONTRACT E) ----------
+ * The slide's المسؤول / الجهة cells print each '/'-separated name part in Arabic from the
+ * user's list, else the built-in one, else as written. The list below edits the USER'S list
+ * (settings.trackerTranslations.owners / .entities, keyed by the English name part), queued
+ * and written with the tracker's own debounced save like every other correction. */
+
+/** The two name lists the section shows, in its order. */
+export const TRACKER_NAME_KINDS = Object.freeze([
+  Object.freeze({ kind: 'owners', field: 'owner' }),
+  Object.freeze({ kind: 'entities', field: 'organization' }),
+]);
+
+/** Every distinct owner / entity name part of `tracker` with the Arabic the layers give it
+ *  — the user's queued edits included (trackerTMLayers): {owners:[{en, key, ar, source,
+ *  builtinAr}], entities:[…]}. Pure apart from reading the module-level queue. */
+export function trackerNameList(tracker, settings, builtin) {
+  const empty = { owners: [], entities: [] };
+  if (!isProjectTracker(tracker) || typeof trackerNameEntries !== 'function') return empty;
+  try {
+    const out = trackerNameEntries(tracker, trackerTMLayers(settings, builtin));
+    return { owners: Array.isArray(out && out.owners) ? out.owners : [],
+      entities: Array.isArray(out && out.entities) ? out.entities : [] };
+  } catch (e) {
+    console.warn('[tracker-ar] name list unavailable', e);
+    return empty;
+  }
+}
+
+/** The user typed / cleared the Arabic of ONE name part ('owners' | 'entities'). Queued for
+ *  the next tracker save; '' removes the user's entry (back to the built-in name, else the
+ *  English). `remember` false (the ?mock=1 demo) queues nothing. Returns true when queued. */
+export function recordNameTranslation(kind, en, ar, { remember = true } = {}) {
+  if (!remember || (kind !== 'owners' && kind !== 'entities') || !normEn(en)) return false;
+  queueTmOp({ op: 'user', kind, en: String(en), ar: String(ar == null ? '' : ar).trim() });
+  return true;
+}
+
+/**
+ * The «ترجمة الأسماء» section (DOM) — a collapsed <details> inside the tracker card: two
+ * lists (المسؤولون / الجهات), each name part as the file writes it (LTR) beside its Arabic
+ * (an RTL input; placeholder = the built-in name) and where that Arabic comes from.
+ * `onChange()` after every edit (the caller re-applies the layers in place, previews and
+ * schedules the save). `getTracker` / `getSettings` / `getBuiltin` are read at paint time.
+ * @returns {{el:HTMLElement, refresh:()=>void}}
+ */
+export function trackerNamesEditor({ getTracker, getSettings, getBuiltin, onChange, remember }) {
+  const N = STR.tracker.names;
+  const body = el('div', { class: 'trk-names__body' });
+  const root = el('details', { class: 'trk-names' }, [
+    el('summary', { class: 'trk-names__title', text: N.title }),
+    el('p', { class: 'small muted', style: 'margin:4px 0 8px', text: N.hint }),
+    body,
+  ]);
+  let signature = null;
+  const list = () => trackerNameList(getTracker(), getSettings(), getBuiltin());
+  const sourceText = (src) => N.source[src] || N.source.none;
+  function row(kind, entry) {
+    const badge = el('span', { class: 'trk-src', dataset: { src: entry.source || 'none' }, text: sourceText(entry.source) });
+    const input = el('input', {
+      type: 'text', dir: 'rtl', lang: 'ar', autocomplete: 'off', class: 'trk-names__input',
+      value: entry.source === 'user' ? entry.ar : '', placeholder: entry.builtinAr || N.placeholder,
+      'aria-label': N.field(entry.en),
+    });
+    input.addEventListener('input', () => {
+      const v = input.value.trim();
+      const keep = typeof remember === 'function' ? remember(getTracker()) !== false : true;
+      recordNameTranslation(kind, entry.en, v, { remember: keep });
+      const src = v ? 'user' : (entry.builtinAr ? 'builtin' : '');
+      badge.textContent = sourceText(src);
+      badge.dataset.src = src || 'none';
+      if (typeof onChange === 'function') onChange();
+    });
+    return el('div', { class: 'trk-names__row' }, [
+      el('span', { class: 'trk-names__en', dir: 'ltr', lang: 'en', text: entry.en }),
+      input, badge,
+    ]);
+  }
+  function paint() {
+    const l = list();
+    // Rebuilt only when the SET of names changed (a new owner typed in the editor) — never
+    // under the operator's caret while they type an Arabic name here.
+    const sig = JSON.stringify([l.owners.map((e) => e.key), l.entities.map((e) => e.key)]);
+    if (sig === signature) return;
+    signature = sig;
+    body.replaceChildren();
+    if (!l.owners.length && !l.entities.length) {
+      body.appendChild(el('p', { class: 'small muted', text: N.none }));
+      return;
+    }
+    for (const { kind } of TRACKER_NAME_KINDS) {
+      if (!l[kind].length) continue;
+      body.appendChild(el('div', { class: 'trk-names__group', text: N[kind] }));
+      for (const e of l[kind]) body.appendChild(row(kind, e));
+    }
+  }
+  paint();
+  return {
+    el: root,
+    /** The tracker or the layers changed (an owner edit, the built-in memory arrived). */
+    refresh({ force = false } = {}) { if (force) signature = null; paint(); },
+  };
+}
+
 /** Write the queued user-TM edits to settings.trackerTranslations (load → replay → save).
  *  Returns true when something was written. Throws what the store throws (the caller's
  *  saver reports it); the queue is kept on a failure so the next save retries. */
@@ -808,7 +926,7 @@ export function loadBuiltinTrackerTM(state, store, importer) {
   state.trackerBuiltinTMLoading = (async () => {
     let doc = null;
     try {
-      const mod = await imp('../ingest/tracker-translations.js?v=v2026-10-13.7');
+      const mod = await imp('../ingest/tracker-translations.js?v=v2026-10-18.1');
       const load = mod && (mod.loadTrackerTranslations || mod.fetchTrackerTranslations);
       const key = ((((store && store.settings) || {}).grafana) || {}).dataKey || '';
       doc = typeof load === 'function' ? await load(key) : null;
@@ -1048,11 +1166,20 @@ export function trackerMetaLine(tracker, { coverage = true } = {}) {
   ].filter(Boolean).join(' · ');
 }
 
-/** A status pill (the deck's colours) — the editor rows and the upload card. */
-export function trackerStatusPill(status) {
-  const key = trackerStatusKey(status);
+/** A status pill (the deck's colours) — the editor rows. With a task and a report date it
+ *  shows the status the DECK prints (effectiveStatus: an overdue task reads «متأخر»), and
+ *  says in its tooltip what the file itself states, so the operator sees why the pill and
+ *  the status field differ. Without a date: the file's own status. */
+export function trackerStatusPill(status, { task, reportDate } = {}) {
+  const base = baseStatus(status);
+  const eff = task ? effectiveStatus(task, reportDate) : { key: base };
+  const key = eff.key;
   const [bg, ink] = STATUS_PILL[key] || STATUS_PILL.other;
-  const pill = el('span', { class: 'trk-pill', text: trackerStatusLabel(status) || STR.tracker.status.unknown });
+  const text = key === 'other' ? String(status).trim() : STATUS_AR[key];
+  const pill = el('span', {
+    class: 'trk-pill', text,
+    title: key !== base ? STR.tracker.statusInFile(trackerStatusLabel(status)) : null,
+  });
   pill.style.background = bg;
   pill.style.color = ink;
   return pill;
@@ -1078,12 +1205,15 @@ const GROUP_KEYS = new Set(['track', 'trackAr', 'milestone', 'milestoneAr']);
  *   onCreate?: () => Object|null,
  *   translate?: (tracker:Object) => void,
  *   remember?: (tracker:Object) => boolean,
+ *   reportDate?: () => string,
  * }} o  onChange after EVERY mutation (the caller previews + schedules the save);
  *        onCreate makes the document when there is none (returns the new tracker);
  *        translate re-applies the translation layers to the document IN PLACE (after an
  *        Arabic field is cleared or an English text changes — CONTRACT-AUTO §3);
  *        remember says whether this document's Arabic edits go to the user TM (false for
- *        the ?mock=1 demo document; default true).
+ *        the ?mock=1 demo document; default true);
+ *        reportDate returns the report's date — each row's pill then shows the status the
+ *        deck prints that day (an overdue task «متأخر»), not only the file's word.
  *
  * AUTOMATIC ARABIC (CONTRACT-AUTO §6): each Arabic field shows WHERE its text came from
  * («من الترجمة المعتمدة» / «ترجمة آلية — راجعها» / «تعديلك» / «من الملف»), an edit is the
@@ -1091,7 +1221,7 @@ const GROUP_KEYS = new Set(['track', 'trackAr', 'milestone', 'milestoneAr']);
  * task's English original on the slide. The English stays visible in the row summary.
  * @returns {{el:HTMLElement, setTracker:(t:Object|null)=>void, setLang:(lang:string)=>void, refresh:()=>void}}
  */
-export function trackerEditor({ tracker: initial, lang: initialLang, onChange, onCreate, translate, remember }) {
+export function trackerEditor({ tracker: initial, lang: initialLang, onChange, onCreate, translate, remember, reportDate }) {
   const T = STR.tracker;
   const F = T.fields;
   const uid = `trk${++trackerEditorSeq}`;
@@ -1224,7 +1354,9 @@ export function trackerEditor({ tracker: initial, lang: initialLang, onChange, o
       untrEl.hidden = !tag;
       untrEl.classList.toggle('is-machine', tag === T.machineTag);
       pillHost.innerHTML = '';
-      pillHost.appendChild(trackerStatusPill(task.status));
+      pillHost.appendChild(trackerStatusPill(task.status, {
+        task, reportDate: typeof reportDate === 'function' ? reportDate() : undefined,
+      }));
       dueEl.textContent = dueDisplay(task.due);
     };
     paintHead();

@@ -100,6 +100,9 @@ function hospitalModel(hospital, rows, ro = {}, { scoped = true } = {}) {
   m.overrides = {};
   m.challenges = MOCK_REPORT_MODEL.challenges;
   m.risks = MOCK_REPORT_MODEL.risks;
+  // An (empty) status log, so the weekly «المهام المكتملة خلال الأسبوع» unit renders too (its
+  // empty-state slide) — without a log a deck has no such slide (build-tracker.js).
+  m.trackerStatusLog = { v: 1, tasks: {} };
   if (scoped) {
     m.scope = normalizeScope({ labs: [], shipments: DETAILS.map((d) => d.id), from: null, to: null, shipmentSlide: true });
     m.shipmentDetails = DETAILS;
@@ -123,8 +126,10 @@ const REVERSED = [...SLIDE_ORDER_KEYS].reverse();
 
 // ---- the pure module -----------------------------------------------------------------------
 
-test('SLIDE_ORDER_KEYS: the eight units, frozen, no retired \'action\' — and it IS today\'s deck order', () => {
-  assert.deepEqual([...SLIDE_ORDER_KEYS], ['execFunnel', 'shipments', 'monthly', 'sendout', 'compliance', 'tracker', 'challenges', 'definitions']);
+// 2026-10-18: NINE units — 'trackerCompleted' (the weekly completed-this-week slide) right
+// after 'tracker' (was eight).
+test('SLIDE_ORDER_KEYS: the nine units, frozen, no retired \'action\' — and it IS today\'s deck order', () => {
+  assert.deepEqual([...SLIDE_ORDER_KEYS], ['execFunnel', 'shipments', 'monthly', 'sendout', 'compliance', 'tracker', 'trackerCompleted', 'challenges', 'definitions']);
   assert.ok(Object.isFrozen(SLIDE_ORDER_KEYS));
   assert.equal(DEFAULT_SLIDE_ORDER, SLIDE_ORDER_KEYS);
   assert.ok(!SLIDE_ORDER_KEYS.includes('action'));
@@ -147,7 +152,8 @@ test('normalizeSlideOrder: unknown, duplicate, non-string and the retired \'acti
   assert.deepEqual(
     normalizeSlideOrder(['tracker', 'action', 'tracker', 'Tracker', 'bogus', 3, null, { k: 1 },
       'execFunnel', 'shipments', 'monthly', 'sendout', 'compliance', 'challenges', 'definitions', 'execFunnel']),
-    ['tracker', 'execFunnel', 'shipments', 'monthly', 'sendout', 'compliance', 'challenges', 'definitions'],
+    // trackerCompleted (not listed) is GLUED behind the tracker.
+    ['tracker', 'trackerCompleted', 'execFunnel', 'shipments', 'monthly', 'sendout', 'compliance', 'challenges', 'definitions'],
   );
   // A legacy list that only knew 'action' (the old «المهام» slide) reads as the default.
   assert.deepEqual(normalizeSlideOrder(['action']), [...SLIDE_ORDER_KEYS]);
@@ -157,20 +163,45 @@ test('normalizeSlideOrder: unknown, duplicate, non-string and the retired \'acti
 test('normalizeSlideOrder: a missing unit goes back to its DEFAULT neighbourhood (lead stays first, trail stays last)', () => {
   // The spec's own example: the units after 'tracker' in the default (challenges,
   // definitions) TRAIL it — they stay at the end, they do not follow the tracker to the front.
+  // trackerCompleted is GLUED behind the tracker (slide-order.js GLUED), wherever it moves.
   assert.deepEqual(normalizeSlideOrder(['tracker', 'execFunnel']),
-    ['tracker', 'execFunnel', 'shipments', 'monthly', 'sendout', 'compliance', 'challenges', 'definitions']);
+    ['tracker', 'trackerCompleted', 'execFunnel', 'shipments', 'monthly', 'sendout', 'compliance', 'challenges', 'definitions']);
   // A saved order from before a unit existed (here: no 'challenges'): it is not a trailing
   // unit, so it lands behind 'tracker', its default predecessor, wherever the tracker went.
   const noChallenges = ['tracker', 'execFunnel', 'shipments', 'monthly', 'sendout', 'compliance', 'definitions'];
   assert.deepEqual(normalizeSlideOrder(noChallenges),
-    ['tracker', 'challenges', 'execFunnel', 'shipments', 'monthly', 'sendout', 'compliance', 'definitions']);
+    ['tracker', 'trackerCompleted', 'challenges', 'execFunnel', 'shipments', 'monthly', 'sendout', 'compliance', 'definitions']);
   // Units that LEAD the default before the first listed one stay first; a list in default
   // relative order is the default.
   assert.deepEqual(normalizeSlideOrder(['monthly', 'tracker']), [...SLIDE_ORDER_KEYS]);
   assert.deepEqual(normalizeSlideOrder(['compliance', 'monthly']),
-    ['execFunnel', 'shipments', 'compliance', 'monthly', 'sendout', 'tracker', 'challenges', 'definitions']);
+    ['execFunnel', 'shipments', 'compliance', 'monthly', 'sendout', 'tracker', 'trackerCompleted', 'challenges', 'definitions']);
   assert.deepEqual(normalizeSlideOrder(['definitions', 'execFunnel']),
-    ['definitions', 'execFunnel', 'shipments', 'monthly', 'sendout', 'compliance', 'tracker', 'challenges']);
+    ['definitions', 'execFunnel', 'shipments', 'monthly', 'sendout', 'compliance', 'tracker', 'trackerCompleted', 'challenges']);
+  // The daily-deck case GLUED exists for: an order saved where the unit was not shown, with
+  // the tracker moved to the front — the completed slide still follows the task slides.
+  assert.deepEqual(normalizeSlideOrder(['tracker', 'execFunnel', 'shipments', 'monthly', 'sendout', 'compliance', 'challenges', 'definitions']),
+    ['tracker', 'trackerCompleted', 'execFunnel', 'shipments', 'monthly', 'sendout', 'compliance', 'challenges', 'definitions']);
+  // Placed explicitly, it stays where the user put it.
+  assert.deepEqual(normalizeSlideOrder(['trackerCompleted', 'execFunnel']),
+    ['trackerCompleted', 'execFunnel', 'shipments', 'monthly', 'sendout', 'compliance', 'tracker', 'challenges', 'definitions']);
+});
+
+test('mergeVisibleOrder: a hidden trackerCompleted keeps the place the user saved it in (daily reorder)', () => {
+  // Review 2026-10-18: saved after 'challenges', then a reorder saved from a DAILY deck
+  // (which never shows it) must not pull it back behind 'tracker'.
+  const saved = ['execFunnel', 'shipments', 'monthly', 'sendout', 'compliance', 'tracker', 'challenges', 'trackerCompleted', 'definitions'];
+  const daily = ['tracker', 'execFunnel', 'shipments', 'monthly', 'sendout', 'compliance', 'challenges', 'definitions'];
+  assert.deepEqual(mergeVisibleOrder(saved, daily),
+    ['tracker', 'execFunnel', 'shipments', 'monthly', 'sendout', 'compliance', 'challenges', 'trackerCompleted', 'definitions']);
+  // Saved last, it stays last.
+  const atEnd = ['execFunnel', 'shipments', 'monthly', 'sendout', 'compliance', 'tracker', 'challenges', 'definitions', 'trackerCompleted'];
+  assert.deepEqual(mergeVisibleOrder(atEnd, daily),
+    ['tracker', 'execFunnel', 'shipments', 'monthly', 'sendout', 'compliance', 'challenges', 'definitions', 'trackerCompleted']);
+  // Right behind the tracker, it still follows the tracker — also when nothing visible comes
+  // after the tracker (the glue case).
+  assert.deepEqual(mergeVisibleOrder(SLIDE_ORDER_KEYS, ['tracker', 'execFunnel', 'monthly', 'sendout', 'compliance']),
+    ['tracker', 'trackerCompleted', 'execFunnel', 'shipments', 'monthly', 'sendout', 'compliance', 'challenges', 'definitions']);
 });
 
 test('normalizeSlideOrder: always a permutation that keeps the listed units\' relative order; idempotent', () => {
@@ -223,6 +254,7 @@ test('unitOfSlideId: multi-page units collapse onto one key; cover / thanks / un
     execFunnel: 'execFunnel', shipments: 'shipments', 'shipments-cont-1': 'shipments', 'shipments-cont-12': 'shipments',
     monthly: 'monthly', sendoutCountries: 'sendout', sendoutLabs: 'sendout', compliance: 'compliance',
     tracker: 'tracker', 'tracker-cont-1': 'tracker', 'tracker-cont-3': 'tracker', challenges: 'challenges',
+    trackerCompleted: 'trackerCompleted', 'trackerCompleted-cont-2': 'trackerCompleted', 'trackerCompleted-cont-': null,
     definitions: 'definitions', cover: null, thanks: null, action: null, 'tracker-cont-': null, sendout: 'sendout', '': null,
   };
   for (const [id, want] of Object.entries(cases)) assert.equal(unitOfSlideId(id), want, id);
@@ -234,28 +266,28 @@ test('mergeVisibleOrder: the visible units take their new sequence; hidden units
   // stays right behind the executive summary; challenges / definitions trail, so stay last.
   const bothVisible = ['tracker', 'execFunnel', 'monthly', 'sendout', 'compliance'];
   assert.deepEqual(mergeVisibleOrder(undefined, bothVisible),
-    ['tracker', 'execFunnel', 'shipments', 'monthly', 'sendout', 'compliance', 'challenges', 'definitions']);
+    ['tracker', 'trackerCompleted', 'execFunnel', 'shipments', 'monthly', 'sendout', 'compliance', 'challenges', 'definitions']);
   // The review case: an unscoped main deck (no shipments) with monthly moved to the top, saved,
   // then a shipment-scoped deck: the shipments details still follow the executive summary —
   // never ahead of it (a slot rule left shipments at index 1, i.e. before execFunnel).
   const monthlyTop = mergeVisibleOrder(undefined,
     ['monthly', 'execFunnel', 'sendout', 'compliance', 'tracker', 'challenges', 'definitions']);
-  assert.deepEqual(monthlyTop, ['monthly', 'execFunnel', 'shipments', 'sendout', 'compliance', 'tracker', 'challenges', 'definitions']);
+  assert.deepEqual(monthlyTop, ['monthly', 'execFunnel', 'shipments', 'sendout', 'compliance', 'tracker', 'trackerCompleted', 'challenges', 'definitions']);
   assert.equal(monthlyTop.indexOf('shipments'), monthlyTop.indexOf('execFunnel') + 1);
   // From a custom saved order: a hidden unit that LEADS stays first, the others follow the unit
   // they followed in the saved order, wherever it moved.
-  const saved = ['definitions', 'execFunnel', 'challenges', 'monthly', 'shipments', 'sendout', 'compliance', 'tracker'];
+  const saved = ['definitions', 'execFunnel', 'challenges', 'monthly', 'shipments', 'sendout', 'compliance', 'tracker', 'trackerCompleted'];
   const merged = mergeVisibleOrder(saved, ['compliance', 'monthly', 'execFunnel', 'tracker', 'sendout']);
-  assert.deepEqual(merged, ['definitions', 'compliance', 'monthly', 'shipments', 'execFunnel', 'challenges', 'tracker', 'sendout']);
+  assert.deepEqual(merged, ['definitions', 'compliance', 'monthly', 'shipments', 'execFunnel', 'challenges', 'tracker', 'trackerCompleted', 'sendout']);
   // A hidden run after the LAST visible unit of the saved order stays at the end.
   assert.deepEqual(mergeVisibleOrder(['execFunnel', 'tracker', 'challenges', 'definitions'], ['tracker', 'execFunnel']),
-    ['tracker', 'execFunnel', 'shipments', 'monthly', 'sendout', 'compliance', 'challenges', 'definitions']);
+    ['tracker', 'trackerCompleted', 'execFunnel', 'shipments', 'monthly', 'sendout', 'compliance', 'challenges', 'definitions']);
   // Unchanged visible sequence → unchanged order; every unit visible → exactly the new order.
   assert.deepEqual(mergeVisibleOrder(saved, ['execFunnel', 'monthly', 'sendout', 'compliance', 'tracker']), saved);
   assert.deepEqual(mergeVisibleOrder(saved, REVERSED), REVERSED);
   // Unknown / duplicate / retired names in the visible list are ignored; nothing visible → as is.
   assert.deepEqual(mergeVisibleOrder(undefined, ['tracker', 'action', 'tracker', 'bogus', 'execFunnel']),
-    ['tracker', 'execFunnel', 'shipments', 'monthly', 'sendout', 'compliance', 'challenges', 'definitions']);
+    ['tracker', 'trackerCompleted', 'execFunnel', 'shipments', 'monthly', 'sendout', 'compliance', 'challenges', 'definitions']);
   assert.deepEqual(mergeVisibleOrder(undefined, 'junk'), [...SLIDE_ORDER_KEYS]);
   assert.deepEqual(mergeVisibleOrder(saved, []), saved);
   // Always a permutation that puts the visible units exactly in their new sequence.
@@ -270,11 +302,20 @@ test('mergeVisibleOrder: the visible units take their new sequence; hidden units
     const out = mergeVisibleOrder(base, vis);
     assert.deepEqual([...out].sort(), [...SLIDE_ORDER_KEYS].sort());
     assert.deepEqual(out.filter((k) => vis.includes(k)), vis);
-    const lastVis = [...base].reverse().find((k) => vis.includes(k));
-    base.forEach((k, i) => {
+    // A hidden GLUED unit (trackerCompleted) right behind its anchor, when that anchor is the
+    // last visible unit of the base, stays behind it (instead of riding the trailing run to
+    // the end); every hidden unit otherwise keeps its neighbourhood (the rule weave() applies).
+    const lastVisBase = [...base].reverse().find((k) => vis.includes(k));
+    const tc = base.indexOf('trackerCompleted');
+    const glued = !vis.includes('trackerCompleted') && tc > 0 && base[tc - 1] === 'tracker' && lastVisBase === 'tracker';
+    if (glued) assert.equal(out.indexOf('trackerCompleted'), out.indexOf('tracker') + 1, 'glued behind tracker');
+    const b = glued ? base.filter((k) => k !== 'trackerCompleted') : base;
+    const o = glued ? out.filter((k) => k !== 'trackerCompleted') : out;
+    const lastVis = [...b].reverse().find((k) => vis.includes(k));
+    b.forEach((k, i) => {
       if (vis.includes(k) || i === 0) return;
-      const prev = base[i - 1];
-      if (prev !== lastVis) assert.equal(out.indexOf(k), out.indexOf(prev) + 1, `${k} stays behind ${prev}`);
+      const prev = b[i - 1];
+      if (prev !== lastVis) assert.equal(o.indexOf(k), o.indexOf(prev) + 1, `${k} stays behind ${prev}`);
     });
   }
 });
@@ -339,7 +380,7 @@ test('the one-report order (model.slideOrder) wins over the saved one; without i
 });
 
 test('a toggled-off unit keeps its place: switching it off and on again never moves anything', () => {
-  const order = ['compliance', 'tracker', 'execFunnel', 'shipments', 'monthly', 'sendout', 'challenges', 'definitions'];
+  const order = ['compliance', 'tracker', 'trackerCompleted', 'execFunnel', 'shipments', 'monthly', 'sendout', 'challenges', 'definitions'];
   for (const [name, make] of Object.entries(DECKS)) {
     const on = buildSpec(withSaved(make(), order));
     const offModel = withSaved(make(), order);

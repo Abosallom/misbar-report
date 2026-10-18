@@ -8,17 +8,17 @@
 // mirror of the automation panel), live source (Grafana + cached-tracker), and
 // backup (export/import).
 
-import { SNAPSHOT_SEED, REPORT_OPTIONS_SEED, AUTOMATION_SEED } from '../seeds/defaults.js?v=v2026-10-13.7';
-import { normalizeDeltaMode } from '../model/delta-baseline.js?v=v2026-10-13.7';
+import { SNAPSHOT_SEED, REPORT_OPTIONS_SEED, AUTOMATION_SEED } from '../seeds/defaults.js?v=v2026-10-18.1';
+import { normalizeDeltaMode } from '../model/delta-baseline.js?v=v2026-10-18.1';
 // The connection test's per-hospital line (STR.settings) — ar.js is pure and DOM-free
 // (every other screen imports it), so module-smoke's bare-Node import still holds.
-import { STR } from '../i18n/ar.js?v=v2026-10-13.7';
+import { STR } from '../i18n/ar.js?v=v2026-10-18.1';
 // NAMESPACE import on purpose: the access tab reads lock.currentUser(), which is a
 // newer export. A named import would throw at link time on any build of lock.js that
 // predates it (and take the whole settings screen down); a namespace import lets the
 // tab degrade to 'unknown user' instead. lock.js is DOM-free at module scope, so this
 // stays importable in bare Node (test/module-smoke).
-import * as lock from './lock.js?v=v2026-10-13.7';
+import * as lock from './lock.js?v=v2026-10-18.1';
 // The project tracker document (tracker CONTRACT §1.3): the review editor's pending save
 // (flushed before this screen loads its working copy — its autosave would otherwise
 // write the stale cache back), and the one "is this a tagged tracker" rule.
@@ -27,11 +27,13 @@ import * as lock from './lock.js?v=v2026-10-13.7';
 import {
   trackerSaver, trackerMetaLine, TRACKER_LANG_OPTIONS, normalizeTrackerLang,
   slideOrderList, slideOrderLabel,
-} from './components.js?v=v2026-10-13.7';
+} from './components.js?v=v2026-10-18.1';
 // «ترتيب الشرائح» — the SAVED (fixed) slide order, reportOptions.slideOrder: the shared unit
 // vocabulary (model/slide-order.js, a pure leaf) and the review card's own list widget.
-import { SLIDE_ORDER_KEYS, normalizeSlideOrder } from '../model/slide-order.js?v=v2026-10-13.7';
-import { resolveProjectTracker } from '../model/report-model.js?v=v2026-10-13.7';
+import { SLIDE_ORDER_KEYS, normalizeSlideOrder } from '../model/slide-order.js?v=v2026-10-18.1';
+import { resolveProjectTracker } from '../model/report-model.js?v=v2026-10-18.1';
+// «دورية التقرير» (2026-10-18): the cadence enum's one home (the review pills read it too).
+import { CADENCES, normalizeCadence } from '../contracts.js?v=v2026-10-18.1';
 
 const TABS = [
   { id: 'tat', label: 'مدة الفحوصات' },
@@ -79,7 +81,10 @@ const REPORT_SLIDE_FIELDS = [
   { key: 'monthly', label: 'الطلبات الشهرية' },
   { key: 'sendout', label: 'أين تُجرى الفحوصات — محلي مقابل دولي' },
   { key: 'compliance', label: 'مقياس الالتزام' },
-  { key: 'tracker', label: 'متابعة المشروع (كل أنواع التقارير)' },
+  { key: 'tracker', label: 'متابعة المهام (كل أنواع التقارير)' },
+  // The weekly slide of the tasks that BECAME completed this week (2026-10-18) — its own
+  // switch, apart from the task slides; never in a daily report.
+  { key: 'trackerCompleted', label: 'المهام المكتملة خلال الأسبوع (التقرير الأسبوعي فقط)' },
   { key: 'challenges', label: 'التحديات والمخاطر (تقرير المستشفى الواحد، عند وجود محتوى)' },
   { key: 'definitions', label: 'منهجية الأرقام', optIn: true },
 ];
@@ -147,6 +152,13 @@ const REPORT_CARD_FIELDS = [
  * (model/delta-window.js), it no longer picks a stored report to compare against. THE
  * INVARIANT it must never imply otherwise: the big numbers on the slides stay CUMULATIVE
  * TOTALS — only the chips are the window's activity. */
+/* reportOptions.cadence radio options (2026-10-18, «دورية التقرير») — CADENCES order, the
+ * LABELS word-for-word the review pills' (STR.review.cadence), with the same hints. EXPORTED
+ * so a test pins this radio, the review pills and the enum as one list. */
+export const CADENCE_OPTIONS = CADENCES.map((value) => ({
+  value, label: `${STR.review.cadence[value]} — ${STR.review.cadence.hint[value]}`,
+}));
+
 export const DELTA_MODE_OPTIONS = [
   { value: 'daily', label: 'يومي — نشاط اليوم' },
   { value: 'week', label: 'أسبوعي — نشاط الأسبوع (الجمعة–الخميس)' },
@@ -940,6 +952,7 @@ export function render(container, ctx) {
           deltaMode: REPORT_OPTIONS_SEED.deltaMode,
           autoDownloadFiles: REPORT_OPTIONS_SEED.autoDownloadFiles,
           trackerLang: normalizeTrackerLang(REPORT_OPTIONS_SEED.trackerLang),
+          cadence: normalizeCadence(REPORT_OPTIONS_SEED.cadence),
         };
       }
       const r = S.doc.reportOptions;
@@ -960,6 +973,8 @@ export function render(container, ctx) {
       // trackerLang post-dates every stored doc too: absent / unknown → the default ('ar'),
       // so the radio always has exactly one option checked.
       r.trackerLang = normalizeTrackerLang(r.trackerLang);
+      // cadence post-dates every stored doc as well: absent / unknown → weekly.
+      r.cadence = normalizeCadence(r.cadence);
       // The saved slide order: absent = the default; a stored value is kept only as a list
       // (the store's backfill cleans it on load — this is the bare-doc guard).
       if ('slideOrder' in r && !Array.isArray(r.slideOrder)) delete r.slideOrder;
@@ -1057,6 +1072,19 @@ export function render(container, ctx) {
           const row = checkField(f.label, () => ro().kpiCards[f.key], (v) => { ro().kpiCards[f.key] = v; });
           return f.hint ? [row, h('p', { class: 'st-help', text: f.hint })] : [row];
         }),
+        // (c2) «دورية التقرير» — weekly (default) / daily. Mirror of the review screen's pills;
+        // both write reportOptions.cadence, and the automation uses the saved one.
+        radioField(
+          STR.review.cadence.title,
+          'st-cadence',
+          CADENCE_OPTIONS,
+          () => ro().cadence,
+          (v) => { ro().cadence = v; },
+        ),
+        h('p', {
+          class: 'st-help',
+          text: 'لا علاقة لها بـ«نافذة النشاط» أدناه: التقرير اليومي يمكن أن يحمل أسهم الأسبوع والعكس.',
+        }),
         // (d) delta-chip ACTIVITY WINDOW — the report day alone, or the whole Sun–Thu
         // week (the default). Options come from the exported DELTA_MODE_OPTIONS so this
         // radio, the review pills and DELTA_MODES stay one list.
@@ -1091,7 +1119,7 @@ export function render(container, ctx) {
         ),
         h('p', {
           class: 'st-help',
-          text: `${TRACKER_LANG_OPTIONS.map((o) => `${o.label}: ${o.hint}`).join(' ')} النص الإنجليزي الأصلي يبقى محفوظًا دائمًا، والترجمة تُحرَّر من بطاقة «متابعة المشروع» في شاشة مراجعة التقرير.`,
+          text: `${TRACKER_LANG_OPTIONS.map((o) => `${o.label}: ${o.hint}`).join(' ')} النص الإنجليزي الأصلي يبقى محفوظًا دائمًا، والترجمة تُحرَّر من بطاقة «متابعة المهام» في شاشة مراجعة التقرير.`,
         }),
         // (e) R2 — auto-download of the 4 files after a MANUAL generation. Mirror of the
         // checkbox next to «توليد التقارير» on the review screen; both write this one key.

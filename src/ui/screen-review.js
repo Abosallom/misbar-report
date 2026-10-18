@@ -1,5 +1,5 @@
 // ui/screen-review.js — review/edit report content with a live slide preview (Track E).
-import { STR, todayISO, formatDateAr, formatRangeAr } from '../i18n/ar.js?v=v2026-10-13.7';
+import { STR, todayISO, formatDateAr, formatRangeAr } from '../i18n/ar.js?v=v2026-10-18.1';
 import {
   el, editableTable, toast, trackerEditor, trackerSaver, saveTrackerToStore, createProjectTracker,
   trackerLangControl, normalizeTrackerLang, DEFAULT_TRACKER_LANG,
@@ -9,26 +9,33 @@ import {
   // translator and the card's status line.
   translateTrackerInPlace, loadBuiltinTrackerTM, trackerTranslationStatus, trackerUntranslatedTexts,
   machineTranslateTexts, saveMachineTranslations, translatorApi, translatorAvailability,
-} from './components.js?v=v2026-10-13.7';
+  // «ترجمة الأسماء» (2026-10-18): the owner / entity names section of the tracker card.
+  trackerNamesEditor,
+} from './components.js?v=v2026-10-18.1';
+// REPORT CADENCE (2026-10-18): «دورية التقرير» weekly / daily — the enum's one home.
+import { CADENCES, DEFAULT_CADENCE, normalizeCadence } from '../contracts.js?v=v2026-10-18.1';
 // SLIDE ORDER (2026-10-13, slide-order CONTRACT). The unit vocabulary and its rules are the
 // shared leaf module's (the deck builders sort by the very same functions, so this card and
 // the deck can never disagree about what moves where); WHEN a temporary order is in force is
 // state.js's (bound to the load, like the scope). Both are pure and import nothing heavy.
 import {
   SLIDE_ORDER_KEYS, normalizeSlideOrder, slideOrderOf, unitOfSlideId, mergeVisibleOrder,
-} from '../model/slide-order.js?v=v2026-10-13.7';
+  // Which units a DAILY deck leaves out (the weekly-only «المهام المكتملة خلال الأسبوع») — the
+  // deck builders' own gate, so the order card's «مخفية» badge can never disagree with them.
+  unitInCadence, WEEKLY_ONLY_UNITS,
+} from '../model/slide-order.js?v=v2026-10-18.1';
 import {
   tempSlideOrder, setTempSlideOrder, clearTempSlideOrder, overlayTempSlideOrder, tempSlideOrderUnits,
-} from '../state.js?v=v2026-10-13.7';
-import { buildMockEngineOutput, isMockTracker } from './screen-upload.js?v=v2026-10-13.7';
+} from '../state.js?v=v2026-10-18.1';
+import { buildMockEngineOutput, isMockTracker } from './screen-upload.js?v=v2026-10-18.1';
 // THE PROJECT TRACKER (2026-10-13, tracker CONTRACT §1.3/§1.6): the report carries the
 // «ملف متابعة المشروع» document as model.projectTracker, resolved by the model layer's
 // ONE rule (the run's tagged tracker, else the tagged cache, else null — never the old
 // untagged shape, never a mock). Static: report-model.js is pure, and sendout.js — its
 // only import — is already imported below.
-import { resolveProjectTracker } from '../model/report-model.js?v=v2026-10-13.7';
-import { analyseSendout, hasMaster, AR_COUNTRY } from '../model/sendout.js?v=v2026-10-13.7';
-import { buildHistoryPanel } from './history-table.js?v=v2026-10-13.7';
+import { resolveProjectTracker, projectedStatusLog } from '../model/report-model.js?v=v2026-10-18.1';
+import { analyseSendout, hasMaster, AR_COUNTRY } from '../model/sendout.js?v=v2026-10-18.1';
+import { buildHistoryPanel } from './history-table.js?v=v2026-10-18.1';
 // REPORT SCOPE (2026-09-29). STATIC, not guarded like delta-window below: scope decides
 // WHICH ROWS every number is computed from, and there is no safe degraded answer — a
 // build that silently ignored a chosen scope would publish the full programme's numbers
@@ -37,16 +44,16 @@ import { buildHistoryPanel } from './history-table.js?v=v2026-10-13.7';
 import {
   EMPTY_SCOPE, normalizeScope, isScoped, hasRange, parseShipmentIds, labOptions,
   findShipments, applyScope, shipmentDetails,
-} from '../model/scope.js?v=v2026-10-13.7';
+} from '../model/scope.js?v=v2026-10-18.1';
 import {
   normalizeDeltaMode, isWeekDeltaMode, DEFAULT_DELTA_MODE,
-} from '../model/delta-baseline.js?v=v2026-10-13.7';
+} from '../model/delta-baseline.js?v=v2026-10-18.1';
 // REPORT TYPES (2026-10-11): KAMC + SGH (the main weekly report, default) / KAMC / SGH.
 // STATIC for scope.js's reason: WHICH hospital's rows a report reads has no safe degraded
 // answer, and hospital.js is pure (no imports at all). The per-hospital MODEL builders
 // (model/hospital-report.js) are a guarded import inside render(), like the engine they
 // depend on — absent, an SGH / KAMC + SGH build throws and modelFor says so.
-import { HOSPITALS, HOSPITAL_MODES, rowsForMode } from '../model/hospital.js?v=v2026-10-13.7';
+import { HOSPITALS, HOSPITAL_MODES, rowsForMode } from '../model/hospital.js?v=v2026-10-18.1';
 
 /* small local module helpers (kept local to avoid cross-screen coupling) */
 async function tryImport(path) { try { return await import(path); } catch { return null; } }
@@ -99,7 +106,7 @@ function defaultReportOptions() {
   return {
     excludeNoTat: false,
     // 'tracker' («متابعة المشروع») replaced 'action' (2026-10-13); absent ⇒ ON anyway.
-    slides: { execFunnel: true, monthly: true, compliance: true, tracker: true },
+    slides: { execFunnel: true, monthly: true, compliance: true, tracker: true, trackerCompleted: true },
     kpiCards: {
       total: true, awaitingDispatch: true, awaitingResults: true, completed: true,
       rejected: true, lateNoResult: true, shippedNotReceived: true,
@@ -116,6 +123,8 @@ function defaultReportOptions() {
     // The tracker slide's task language (Arabic CONTRACT §3): 'ar' | 'en' | 'both'. The
     // seed owns the default ('ar'); an absent / unknown stored value reads as it.
     trackerLang: DEFAULT_TRACKER_LANG,
+    // «دورية التقرير» (2026-10-18): weekly — today's deck — unless the user chose daily.
+    cadence: DEFAULT_CADENCE,
   };
 }
 
@@ -135,6 +144,7 @@ export function reportOptionsFromSettings(settings) {
     // doc written before R2 keeps auto-downloading exactly as it always did.
     autoDownloadFiles: ro.autoDownloadFiles != null ? !!ro.autoDownloadFiles : base.autoDownloadFiles,
     trackerLang: normalizeTrackerLang(ro.trackerLang),
+    cadence: normalizeCadence(ro.cadence),
     // The SAVED (fixed) slide order — carried only when one is stored: ABSENT means the
     // default (model/slide-order.js), so a unit added in a later version lands in its default
     // place instead of being frozen out by a copy written here. The TEMPORARY order never
@@ -167,6 +177,8 @@ export function mergeReportOptions(cur, ro) {
     autoDownloadFiles: r.autoDownloadFiles !== false,
     // The tracker card's language pills — the same key Settings' radio writes.
     trackerLang: normalizeTrackerLang(r.trackerLang),
+    // «دورية التقرير» pills — the same key Settings' radio writes.
+    cadence: normalizeCadence(r.cadence),
   };
 }
 
@@ -193,8 +205,11 @@ export function slideOrderUnitsFor(hospital, scope) {
 /** Is a unit switched OFF for this deck — the «الشرائح» chip (or the shipment-slide box, or
  *  the opt-in definitions slide not turned on)? Mirrors build-spec.js / build-spec-both.js
  *  on(): the KAMC + SGH deck ignores the exec toggle and has no opt-in set. */
-export function slideUnitHidden(key, { hospital, slides, scope } = {}) {
+export function slideUnitHidden(key, { hospital, slides, scope, cadence } = {}) {
   if (key === 'shipments') return !!(scope && scope.shipmentSlide === false);
+  // A weekly-only unit (the completed-this-week slide) is never in a DAILY deck, whatever
+  // its chip says.
+  if (!unitInCadence(key, cadence)) return true;
   if (hospital === 'both') return key !== 'execFunnel' && !!(slides && slides[key] === false);
   if (key === 'definitions') return !(slides && slides.definitions === true);
   return !!(slides && slides[key] === false);
@@ -204,10 +219,10 @@ export function slideUnitHidden(key, { hospital, slides, scope } = {}) {
  *  row and place (badge «مخفية»); a unit that is on but rendered nothing in the last preview
  *  (`present`, the unit keys of that spec — no tracker document, no challenge content, no
  *  send-out data) is marked `empty`. `present` null = not built yet = nothing marked. */
-export function slideOrderRows({ hospital, scope, slides, order, present = null } = {}) {
+export function slideOrderRows({ hospital, scope, slides, order, present = null, cadence } = {}) {
   const units = slideOrderUnitsFor(hospital, scope);
   return normalizeSlideOrder(order).filter((k) => units.includes(k)).map((key) => {
-    const hidden = slideUnitHidden(key, { hospital, slides, scope });
+    const hidden = slideUnitHidden(key, { hospital, slides, scope, cadence });
     return {
       key, label: slideOrderLabel(key), hidden,
       empty: !hidden && present instanceof Set ? !present.has(key) : false,
@@ -279,6 +294,10 @@ const SLIDE_TOGGLES = [
   // «متابعة المشروع» (2026-10-13) — the tracker slides, in every report type; it replaced
   // the old «المهام» chip (key 'action', retired: the tracker took that slide's place).
   { key: 'tracker', label: STR.review.slideToggles.tracker },
+  // «المهام المكتملة خلال الأسبوع» (2026-10-18) — the weekly slide of the tasks that BECAME
+  // completed this week; its own chip so it is switched off apart from the task slides.
+  // In a daily report the chip says «أسبوعي فقط» (the deck never has the slide then).
+  { key: 'trackerCompleted', label: STR.review.slideToggles.trackerCompleted, weeklyOnly: WEEKLY_ONLY_UNITS.includes('trackerCompleted') },
   { key: 'challenges', label: STR.review.slideToggles.challenges },
 ];
 
@@ -288,7 +307,14 @@ const SLIDE_TOGGLES = [
  * project tracker slides sit between compliance and thanks in EVERY deck, the main one
  * included). A chip the deck ignores must not be offered: clicking it would change
  * nothing in that preview yet still save a new default the KAMC deck DOES honour. */
-const BOTH_SLIDE_TOGGLES = new Set(['monthly', 'sendout', 'compliance', 'tracker']);
+// 'trackerCompleted' (2026-10-18) rides with the tracker slides: every deck has it (weekly).
+const BOTH_SLIDE_TOGGLES = new Set(['monthly', 'sendout', 'compliance', 'tracker', 'trackerCompleted']);
+
+/** «دورية التقرير» pills, in display order (= contracts.js CADENCES): weekly first — the
+ *  default — then daily. Exported so a test pins them to the enum and to Settings' radio. */
+export const CADENCE_PILLS = Object.freeze(CADENCES.map((value) => Object.freeze({
+  value, label: STR.review.cadence[value],
+})));
 
 /** The slide chips a report type offers (pure; exported for node tests). */
 export function slideTogglesFor(hospital) {
@@ -929,6 +955,17 @@ export function sessionProjectTracker(state, store) {
   return t;
 }
 
+/* THE SESSION'S TRACKER STATUS HISTORY (2026-10-18) — what model.trackerStatusLog carries for
+ * the weekly «المهام المكتملة خلال الأسبوع» slide: the stored history with the session
+ * document's CURRENT statuses projected onto it (report-model.js projectedStatusLog — the
+ * same entries the debounced save will record), so a task marked «مكتمل» in the editor shows
+ * on that slide at once. Never for the ?mock=1 demo document (no history of its own). Pure;
+ * exported for node tests. */
+export function sessionStatusLog(store, tracker, today = todayISO()) {
+  if (!tracker || isMockTracker(tracker)) return null;
+  return projectedStatusLog(store && store.settings, tracker, today);
+}
+
 /* Assemble an editable ReportModel: the order figures above + the project tracker +
  * settings. Nothing is DRAFTED from the tracker any more (the old autoDraft task split
  * and support lines keyed on the retired file's Arabic categories / statuses): the model
@@ -1160,7 +1197,7 @@ export async function render(container, ctx) {
   // any failure, which simply omits the two slides.
   if (state.sendoutMaster === undefined) {
     const dataKey = ((store.settings || {}).grafana || {}).dataKey || '';
-    const mod = await tryImport('../ingest/sendout-master.js?v=v2026-10-13.7');
+    const mod = await tryImport('../ingest/sendout-master.js?v=v2026-10-18.1');
     state.sendoutMaster = (mod && mod.loadSendoutMaster)
       ? await mod.loadSendoutMaster(dataKey)
       : null;
@@ -1176,11 +1213,11 @@ export async function render(container, ctx) {
   // so the app always takes the guarded import.
   const compute = typeof ctx.compute === 'function'
     ? ctx.compute
-    : pickFn(await tryImport('../engine/engine.js?v=v2026-10-13.7'), ['compute', 'runEngine', 'run']);
+    : pickFn(await tryImport('../engine/engine.js?v=v2026-10-18.1'), ['compute', 'runEngine', 'run']);
   // The SGH / KAMC + SGH model builders — guarded like the engine they depend on. Loaded
   // even in KAMC mode: the generate click and a report-type switch go through modelFor
   // with it, and a missing module must surface as modelFor's loud fallback, not a crash.
-  const hrMod = await tryImport('../model/hospital-report.js?v=v2026-10-13.7');
+  const hrMod = await tryImport('../model/hospital-report.js?v=v2026-10-18.1');
   const model = modelFor(state, store, compute, { hospitalReport: hrMod });
   // The report type ON SCREEN — the model's, which is the state's choice unless that
   // build failed and modelFor fell back to KAMC (it said so).
@@ -1198,6 +1235,9 @@ export async function render(container, ctx) {
   // button returns here with the old model), a Settings «مسح», or an automation run that
   // left its own model in state.reportModel — and generate would ship the stale one.
   model.projectTracker = sessionProjectTracker(state, store);
+  // …and its status history with it (re-sourced for the same reasons: an upload or an edit
+  // since the model was drafted recorded new entries).
+  model.trackerStatusLog = sessionStatusLog(store, model.projectTracker);
   // reportOptions (slides / kpiCards / excludeNoTat / labels / deltaMode) lives in the
   // shared settings doc and BOTH screens write it — the Settings checkboxes autosave and
   // this screen's chips/pills call persistReportOptions. So re-source the WHOLE thing from
@@ -1224,7 +1264,7 @@ export async function render(container, ctx) {
   // Guarded import, exactly as the retired picker was: a build without the module
   // degrades to the engine's own deltas instead of throwing. Re-run below on a
   // report-date change and on a mode switch; being PURE, every re-run agrees.
-  const dwMod = await tryImport('../model/delta-window.js?v=v2026-10-13.7');
+  const dwMod = await tryImport('../model/delta-window.js?v=v2026-10-18.1');
   const stampWindow = dwMod && dwMod.stampWindowDeltas;
   // The chips need the parsed CSV rows: with no upload in this session (mock preview)
   // stampWindowDeltas leaves the engine's deltas alone and stamps no window, and the
@@ -1324,9 +1364,9 @@ export async function render(container, ctx) {
     // A range's END when one is active (the deck is dated 'to'), else the chosen date.
     model.reportDate = effectiveReportDate(state, model.scope);
     stampDeltas(); // re-window the chips for the current report date (pure → idempotent)
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-10-13.7');
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-10-18.1');
     const buildSpec = pickFn(specMod, ['buildSpec', 'build', 'makeSpec', 'toSpec']);
-    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-10-13.7');
+    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-10-18.1');
     const renderFn = pickFn(rendMod, ['renderSpec', 'renderSlides', 'renderHtml', 'render']);
 
     if (!buildSpec || !renderFn) {
@@ -1580,7 +1620,10 @@ export async function render(container, ctx) {
       model.projectTracker = t;
       if (state.parsed) state.parsed.tracker = t;
       persistTracker(t);
+      // A status / due edit can make a task «مكتمل» this week: the weekly slide follows now.
+      model.trackerStatusLog = sessionStatusLog(store, t);
       paintTranslationStatus();
+      namesEd.refresh(); // a new owner / entity name joins «ترجمة الأسماء»
       schedulePreview();
     },
     onCreate: () => {
@@ -1592,6 +1635,26 @@ export async function render(container, ctx) {
     translate: (t) => translateTrackerInPlace(t, store.settings, state.trackerBuiltinTM),
     // The ?mock=1 demo document's Arabic edits never reach the user's translation memory.
     remember: (t) => !isMockTracker(t),
+    // The pills show the status the DECK prints on the report date (overdue → «متأخر»);
+    // a date change rerenders this screen, so a getter is enough.
+    reportDate: () => model.reportDate,
+  });
+  // «ترجمة الأسماء» (2026-10-18, CONTRACT E): the owner / entity names of the document with
+  // their Arabic — editable into the user's list (keyed by the English name part, so the next
+  // upload keeps it). An edit re-applies the layers IN PLACE (the slide's المسؤول / الجهة
+  // cells change in the preview at once) and rides the tracker's own debounced save.
+  const namesEd = trackerNamesEditor({
+    getTracker: () => model.projectTracker,
+    getSettings: () => store.settings,
+    getBuiltin: () => state.trackerBuiltinTM,
+    remember: (t) => !isMockTracker(t),
+    onChange: () => {
+      const t = model.projectTracker;
+      if (!t) return;
+      translateTrackerInPlace(t, store.settings, state.trackerBuiltinTM);
+      persistTracker(t);
+      schedulePreview();
+    },
   });
   // «لغة نص المهام في الشريحة» (Arabic CONTRACT §4): which text the tracker slides show —
   // the Arabic translation (English per row when a task has none), the English original,
@@ -1668,6 +1731,7 @@ export async function render(container, ctx) {
       trackerEd.refresh();
       schedulePreview();
     }
+    namesEd.refresh({ force: true }); // the built-in names (placeholders / badges) may have arrived
     paintTranslationStatus();
     return n;
   }
@@ -1731,6 +1795,7 @@ export async function render(container, ctx) {
     el('div', { class: 'card__title', text: STR.tracker.title }),
     trackerLang.el,
     autoStatus,
+    namesEd.el,
     trackerEd.el,
   ]);
   paintTranslationStatus();
@@ -1852,14 +1917,21 @@ export async function render(container, ctx) {
 
   // Slide-toggle chips (bound to reportOptions.slides.*). Toggling updates the model,
   // persists to settings as the new default, and live-refreshes the preview.
+  const chipPainters = [];
   function slideChip(t) {
     const btn = el('button', { type: 'button' });
     const paint = () => {
       const on = model.reportOptions.slides[t.key] !== false;
       btn.setAttribute('aria-pressed', on ? 'true' : 'false');
       btn.textContent = (on ? '✓ ' : '') + t.label;
-      btn.style.cssText = chipStyle(on);
+      // A weekly-only slide in a DAILY report: still switchable (the choice is kept for the
+      // weekly report), but it says the deck will not have it.
+      const weeklyOnly = !!t.weeklyOnly && normalizeCadence(model.reportOptions.cadence) === 'daily';
+      if (weeklyOnly) btn.appendChild(el('span', { class: 'slide-chip__note', text: `(${STR.review.cadence.weeklyOnly})` }));
+      btn.title = weeklyOnly ? STR.review.cadence.hint.daily : '';
+      btn.style.cssText = chipStyle(on) + (weeklyOnly ? ';opacity:.7' : '');
     };
+    chipPainters.push(paint);
     btn.addEventListener('click', () => {
       model.reportOptions.slides[t.key] = model.reportOptions.slides[t.key] === false;
       paint();
@@ -1870,6 +1942,38 @@ export async function render(container, ctx) {
     paint();
     return btn;
   }
+  /* «دورية التقرير» (2026-10-18, CONTRACT A) — the SAME report as weekly (default) or daily:
+   * the cover says «الأسبوعي» / «اليومي»; daily shows only the NOT-completed tasks and has no
+   * «المهام المكتملة خلال الأسبوع» slide. A report option persisted like the tracker language
+   * (persistReportOptions; Settings mirrors it; the automation reads the saved one). NEVER
+   * coupled to «نافذة النشاط» (deltaMode): a daily report may still carry the week's chips. */
+  const cadenceBtns = CADENCE_PILLS.map((p) => el('button', {
+    type: 'button', class: 'cadence-seg__btn', text: p.label, dataset: { cadence: p.value },
+    onClick: () => setCadence(p.value),
+  }));
+  const cadenceHint = el('p', { class: 'cadence-seg__hint small muted' });
+  function paintCadence() {
+    const c = normalizeCadence(model.reportOptions.cadence);
+    for (const b of cadenceBtns) b.setAttribute('aria-pressed', b.dataset.cadence === c ? 'true' : 'false');
+    cadenceHint.textContent = STR.review.cadence.hint[c];
+  }
+  function setCadence(next) {
+    const c = normalizeCadence(next);
+    if (normalizeCadence(model.reportOptions.cadence) === c) return;
+    model.reportOptions.cadence = c;
+    persistReportOptions();
+    paintCadence();
+    for (const p of chipPainters) p();
+    paintOrderCard(); // the weekly-only unit's «مخفية» badge follows at once
+    schedulePreview();
+  }
+  const cadenceTitleId = 'cadence-seg-title';
+  const cadenceControl = el('div', { class: 'cadence-seg' }, [
+    el('span', { class: 'cadence-seg__title', id: cadenceTitleId, text: `${STR.review.cadence.title}:` }),
+    el('div', { class: 'cadence-seg__pills', role: 'group', 'aria-labelledby': cadenceTitleId }, cadenceBtns),
+    cadenceHint,
+  ]);
+  paintCadence();
   const slideToggleRow = el('div', {
     class: 'slide-toggles',
     style: 'display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px',
@@ -1907,7 +2011,7 @@ export async function render(container, ctx) {
   const orderList = slideOrderList({
     getRows: () => slideOrderRows({
       hospital, scope: model.scope, slides: model.reportOptions.slides,
-      order: slideOrderOf(model), present: previewUnits,
+      order: slideOrderOf(model), present: previewUnits, cadence: model.reportOptions.cadence,
     }),
     onMove: (nextShown, key) => adoptSlideOrder(mergeVisibleOrder(slideOrderOf(model), nextShown), key, orderUnits()),
   });
@@ -2001,7 +2105,7 @@ export async function render(container, ctx) {
     el('summary', { class: 'card__title', style: 'cursor:pointer', text: STR.review.labelsCardTitle }),
   ]);
   (async () => {
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-10-13.7');
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-10-18.1');
     const LABEL_NAMES = specMod && specMod.LABEL_NAMES;
     const DEFAULT_LABELS = (specMod && specMod.DEFAULT_LABELS) || {};
     if (!LABEL_NAMES || typeof LABEL_NAMES !== 'object') {
@@ -2093,6 +2197,9 @@ export async function render(container, ctx) {
       const s = store.settings || {};
       m.scorecard = s.scorecard || m.scorecard;
       m.displayNames = s.displayNames || m.displayNames;
+      // The tracker status history as the weekly slide on screen used it (the stored one with
+      // the document's current statuses — the save flushed above recorded exactly these).
+      m.trackerStatusLog = sessionStatusLog(store, m.projectTracker);
       // The slide order on screen goes with it: the temporary one when set (all four files
       // follow it), else the saved one model.reportOptions already carries.
       overlayTempSlideOrder(m, state);
@@ -2642,7 +2749,7 @@ export async function render(container, ctx) {
   const controls = el('div', { class: 'review-controls' }, [
     deltaArea, historyHost, dateField, trackerCard, ...manualCards, kpiCard, labelsHost, generateBtn,
   ]);
-  const preview = el('div', { class: 'review-preview' }, [slideToggleRow, orderCard, previewFrame]);
+  const preview = el('div', { class: 'review-preview' }, [cadenceControl, slideToggleRow, orderCard, previewFrame]);
 
   // THIRD hospitals' orders the upload left out (state.parsed.excludedHospitals — neither
   // KAMC nor SGH; set beside every write of the orders, see state.js): one muted line

@@ -11,13 +11,50 @@
 // file's Arabic categories and statuses — the new file has neither, a stable WBS id and
 // an explicit 'Completed' status, so the tracker slides show the document as it is.
 // drafts.js / task-lifecycle.js stay importable (their own tests, old backups), inert.
-import { analyseSendout, hasMaster } from './sendout.js?v=v2026-10-13.7';
+import { analyseSendout, hasMaster } from './sendout.js?v=v2026-10-18.1';
 // The ProjectTracker's shape is owned by the ingest module (a leaf: no imports, no DOM).
 // isProjectTracker = the tag check: a value without TRACKER_FORMAT is the OLD format (an
 // install or a backup from before 2026-10-13) and is never fed on.
-import { isProjectTracker } from '../ingest/task-tracker.js?v=v2026-10-13.7';
+import { isProjectTracker } from '../ingest/task-tracker.js?v=v2026-10-18.1';
+
+// The tracker status history's recording rule (model/tracker-status.js, pure) — used here
+// only to PROJECT the stored history onto a document that is not saved yet (below).
+import { recordStatusLog } from './tracker-status.js?v=v2026-10-18.1';
 
 export { isProjectTracker };
+
+const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+
+/**
+ * The tracker status history a model carries (`trackerStatusLog` — the weekly «المهام
+ * المكتملة خلال الأسبوع» slide reads it): settings.trackerStatusLog as stored, else null.
+ * The ONE rule every builder applies, like projectTrackerFor for the document itself.
+ * @returns {import('../contracts.js').TrackerStatusLog|null}
+ */
+export function trackerStatusLogOf(settings) {
+  const log = settings && settings.trackerStatusLog;
+  return isObj(log) ? log : null;
+}
+
+/**
+ * The stored history WITH `tracker`'s current statuses recorded as of `atISO` — what the
+ * store will hold once the review's debounced save of this document lands (it records with
+ * the very same rule, recordStatusLog). WHY: the review previews (and may generate) a task
+ * marked «مكتمل» a moment ago; the weekly slide must show it now, not after the save
+ * debounce and a re-render. Pure (a NEW log; settings untouched). Falls back to the stored
+ * history when there is no tracker, no usable date, or the module fails.
+ * @returns {import('../contracts.js').TrackerStatusLog|null}
+ */
+export function projectedStatusLog(settings, tracker, atISO) {
+  const log = trackerStatusLogOf(settings);
+  if (!isProjectTracker(tracker) || !/^\d{4}-\d{2}-\d{2}$/.test(String(atISO || ''))) return log;
+  try {
+    const next = recordStatusLog(log || { v: 1, tasks: {} }, tracker, atISO);
+    return isObj(next) ? next : log;
+  } catch {
+    return log;
+  }
+}
 
 /**
  * The ProjectTracker a report carries: the run's parsed one (state.parsed.tracker), else
@@ -94,6 +131,8 @@ export function buildReportModel({
     sendout,
     panels,
     projectTracker,
+    // The tracker status history (the weekly completed-tasks slide), as stored.
+    trackerStatusLog: ed.trackerStatusLog !== undefined ? ed.trackerStatusLog : trackerStatusLogOf(settings),
     challenges,
     risks,
     scorecard: (settings && settings.scorecard) || [],

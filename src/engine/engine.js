@@ -25,14 +25,14 @@
 // Both changes make the golden workbook's _cachedDue/_cachedDelay/_cachedStatus
 // an OUT-OF-DATE external oracle for due-derived fields — deliberately.
 
-import { normTest, normFacility } from '../contracts.js?v=v2026-10-13.7';
+import { normTest, normFacility } from '../contracts.js?v=v2026-10-18.1';
 import {
   parseDateTime, toEpochDay, workday, dayDiff, calDaysBetween, monthKey,
-} from './workday.js?v=v2026-10-13.7';
-import { buildTatIndex, resolveTat, CHART_TEST_CATALOG } from './tat.js?v=v2026-10-13.7';
-import { dedupeRows } from './dedupe.js?v=v2026-10-13.7';
-import { fillBlankFacilities } from './infer-facility.js?v=v2026-10-13.7';
-import { hasTestMenu } from '../model/hospital.js?v=v2026-10-13.7';
+} from './workday.js?v=v2026-10-18.1';
+import { buildTatIndex, resolveTat, CHART_TEST_CATALOG } from './tat.js?v=v2026-10-18.1';
+import { dedupeRows } from './dedupe.js?v=v2026-10-18.1';
+import { fillBlankFacilities } from './infer-facility.js?v=v2026-10-18.1';
+import { hasTestMenu } from '../model/hospital.js?v=v2026-10-18.1';
 
 export const STATUS = Object.freeze({
   CANCELLED: 'Cancelled',

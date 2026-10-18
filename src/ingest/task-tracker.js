@@ -63,6 +63,26 @@ export const TASK_AR_SOURCES = Object.freeze(['file', 'user', 'builtin', 'machin
 const AR_SOURCE_OF = [['taskAr', 'taskArSource'], ['trackAr', 'trackArSource'], ['milestoneAr', 'milestoneArSource']];
 
 /**
+ * The NAME translations (model/tracker-translate.js NAME_KINDS, 2026-10-18): the owner /
+ * entity columns' Arabic, filled from the translation memory per '/'-separated name. NOT
+ * in TASK_FIELDS: they are never read from the workbook nor typed per task (the editor
+ * edits the memory's owners / entities lists), so they are OPTIONAL keys like the
+ * *ArSource bookkeeping — present only when they carry something.
+ */
+const NAME_AR_SOURCE_OF = [
+  ['ownerAr', 'ownerArSource', 'ownerArBasis'],
+  ['organizationAr', 'organizationArSource', 'organizationArBasis'],
+];
+// The basis beside a name's Arabic (model/tracker-translate.js NAME_BASIS_FIELDS / _RE —
+// the same shape, repeated here so the ingest layer does not import the model): per part
+// '<u|b|->:<key>', joined with '/'. It is what lets a later pass, with a layer unavailable,
+// keep a name only for the SAME English part from the SAME layer. Capped like a TM value.
+const NAME_BASIS_RE = /^[ub-]:[^/]*(?:\/[ub-]:[^/]*)*$/;
+const NAME_BASIS_MAX = 4000;
+// Only the reviewed layers fill a name: never the workbook ('file') nor the machine.
+const NAME_AR_SOURCES = ['user', 'builtin'];
+
+/**
  * The tracker slides' text language (settings.reportOptions.trackerLang): 'ar' = the
  * Arabic translation, falling back to the English per cell where a row has none;
  * 'en' = the English exactly as before translations existed; 'both' = Arabic with the
@@ -568,8 +588,10 @@ const str = (v) => (typeof v === 'string' ? v : typeof v === 'number' && Number.
  * config persists" invariant applies to this document too, so nothing a page or a
  * hand-edited backup attaches rides into localStorage. The only task keys beyond
  * TASK_FIELDS are the optional translation bookkeeping: taskArSource / trackArSource /
- * milestoneArSource (one of TASK_AR_SOURCES, beside a non-empty Arabic text) and
- * showOriginal (true only). Returns null for anything that
+ * milestoneArSource (one of TASK_AR_SOURCES, beside a non-empty Arabic text),
+ * ownerAr / organizationAr with their ownerArSource / organizationArSource ('user' |
+ * 'builtin', both kept or neither) and, beside them, a well-formed ownerArBasis /
+ * organizationArBasis, and showOriginal (true only). Returns null for anything that
  * is not a tagged ProjectTracker (the old untagged shape included).
  * @param {*} v
  * @returns {import('../contracts.js').ProjectTracker|null}
@@ -590,6 +612,19 @@ export function normalizeProjectTracker(v) {
       // translation-memory fill it may replace.
       for (const [ar, src] of AR_SOURCE_OF) {
         if (o[ar] && TASK_AR_SOURCES.includes(t[src])) o[src] = t[src];
+      }
+      // The name translations ride along with their source: an Arabic name without a
+      // valid source is dropped (the next apply recomputes it from the memory anyway), so a
+      // hand-edited backup cannot pin a name the memory does not give.
+      for (const [ar, src, basis] of NAME_AR_SOURCE_OF) {
+        const text = str(t[ar]).trim();
+        if (!text || !NAME_AR_SOURCES.includes(t[src])) continue;
+        o[ar] = text;
+        o[src] = t[src];
+        // Optional: without it (or malformed) the name is simply not kept while a layer is
+        // unavailable — the next pass recomputes it once the layer answers.
+        const b = t[basis];
+        if (typeof b === 'string' && b.length <= NAME_BASIS_MAX && NAME_BASIS_RE.test(b)) o[basis] = b;
       }
       if (t.showOriginal === true) o.showOriginal = true;
       return o;

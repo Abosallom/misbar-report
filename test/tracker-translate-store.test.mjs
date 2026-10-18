@@ -66,7 +66,7 @@ test('updateTrackerTranslations persists the clean memory; get reads it back; nu
   store.loadSettings();
   store.updateTrackerTranslations({ ...SAMPLE, junk: 1, tasks: { ...SAMPLE.tasks, '  Raw KEY ': ' ع ' } });
   const tt = stored(mock).trackerTranslations;
-  assert.deepEqual(Object.keys(tt).sort(), ['machine', 'milestones', 'original', 'tasks', 'tracks']);
+  assert.deepEqual(Object.keys(tt).sort(), ['entities', 'machine', 'milestones', 'original', 'owners', 'tasks', 'tracks']);
   assert.deepEqual(tt.tasks, { 'synthetic user task': 'تصحيح', 'raw key': 'ع' });
   assert.deepEqual(tt.original, { 'synthetic user task': true });
   assert.deepEqual(tt.machine.tasks, { 'synthetic machine task': 'آلية' });

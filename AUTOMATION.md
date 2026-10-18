@@ -110,8 +110,11 @@ distinguishable:
 Both skip silently when the Mac is offline and always exit 0, so one bad morning never
 disables a schedule. `misbar-daily.sh` takes the mode as its **only** optional argument
 (`daily` — the default — or `weekly`); an unrecognised value degrades to `daily` instead of
-failing the run. The mode is an identity, not a different pipeline: what the page actually
-builds is decided in the app, and `mode=weekly` simply lets the run be recognised.
+failing the run. The mode is not a different pipeline, with ONE exception — the report's
+cadence («دورية التقرير»): `mode=weekly` makes that run's deck **weekly** (cover «الأسبوعي»,
+Completed tasks shown, the «المهام المكتملة خلال الأسبوع» slide) even when «يومي» was last
+saved on the review screen, and `mode=daily` would make it daily. The override is per run and
+never saved. The plain daily trigger (`?auto=1`, no mode) uses the saved cadence.
 
 Only a Saudi-network Mac can refresh the snapshot (`elab.seha.sa` geo-blocks foreign IPs),
 which is why this half of the job is local rather than a GitHub Action.

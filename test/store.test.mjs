@@ -1980,7 +1980,7 @@ test('importing a pre-v9 backup does not hide the turnaround block again', () =>
 // ABSENT means "the default order", so it is never seeded and never backfilled (a unit added
 // in a later version must land in its default place, not be frozen out by a stored copy of
 // today's list). A present value is cleaned; an import REPLACES the device's order.
-const CUSTOM_ORDER = ['tracker', 'execFunnel', 'shipments', 'monthly', 'sendout', 'compliance', 'challenges', 'definitions'];
+const CUSTOM_ORDER = ['tracker', 'trackerCompleted', 'execFunnel', 'shipments', 'monthly', 'sendout', 'compliance', 'challenges', 'definitions'];
 
 test('slideOrder: never seeded, and a stored doc without one stays without one', () => {
   fresh();
@@ -2031,7 +2031,7 @@ test('importSettings: an imported slideOrder REPLACES the device order — the d
   fresh();
   const doc = store.loadSettings();
   store.saveSettings({ ...doc, reportOptions: { ...doc.reportOptions, slideOrder: CUSTOM_ORDER } });
-  const B = ['challenges', 'compliance', 'sendout', 'monthly', 'shipments', 'execFunnel', 'tracker', 'definitions'];
+  const B = ['challenges', 'compliance', 'sendout', 'monthly', 'shipments', 'execFunnel', 'tracker', 'trackerCompleted', 'definitions'];
   store.importSettings(JSON.stringify({ schemaVersion: store.SCHEMA_VERSION, reportOptions: { slideOrder: B } }));
   assert.deepEqual(store.loadSettings().reportOptions.slideOrder, B, 'exactly the backup\'s order, never a union with the device\'s');
   // A backup with no reportOptions at all says nothing about the layout: the order stays.

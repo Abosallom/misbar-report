@@ -41,14 +41,16 @@ export const REPORT_OPTIONS_SEED = {
   // 'challenges' is the «التحديات والمخاطر» slide split out of the old
   // tasks-and-challenges slide (2026-08-04); it ships ON like the other content
   // slides, and build-spec also renders it when the key is absent entirely.
-  // 'tracker' is the project-tracker «متابعة المشروع» slide(s) (2026-10-13), offered in all
+  // 'tracker' is the project-tracker «متابعة المهام» slide(s) (2026-10-13), offered in all
   // three report types; ON, and an absent key also reads ON in both deck builders, so
   // store.backfillReportOptions filling it into an existing install changes nothing.
   // 'action' (the old «المهام» slide) is RETIRED and inert — no builder reads it; it stays
   // here only so saved settings and their import validation keep the same key set.
+  // 'trackerCompleted' is the weekly «المهام المكتملة خلال الأسبوع» slide (2026-10-18): ON, and
+  // an absent key reads ON in both deck builders too; weekly decks only (cadence below).
   slides: {
     execFunnel: true, monthly: true, compliance: true, action: true, challenges: true,
-    sendout: true, definitions: false, tracker: true,
+    sendout: true, definitions: false, tracker: true, trackerCompleted: true,
   },
   kpiCards: {
     total: true,
@@ -96,13 +98,19 @@ export const REPORT_OPTIONS_SEED = {
   // A presentation checkbox on the review screen must never arm a background download,
   // and turning this off must never disable a pipeline the user deliberately armed.
   autoDownloadFiles: true,
-  // The «متابعة المشروع» slides' text language (2026-10-13 user request: the tasks in
+  // The «متابعة المهام» slides' text language (2026-10-13 user request: the tasks in
   // Arabic, the English original kept): 'ar' | 'en' | 'both'. 'ar' shows each task /
   // track / milestone's Arabic translation and falls back to the English per cell where
   // a row has none, so a tracker without translations renders exactly as before. MUST
   // stay equal to DEFAULT_TRACKER_LANG (ingest/task-tracker.js owns the enum; this is
   // the first-run copy, like deltaMode above).
   trackerLang: 'ar',
+  // Report cadence (2026-10-18 user request): 'weekly' | 'daily'. Daily = the same deck with
+  // «تقرير مسبار اليومي» on the cover, only the NOT-completed tasks on the task slides and no
+  // completed-this-week slide. 'weekly' is what every install produced before the option, so
+  // the first-run copy (and an absent key) keeps it. MUST stay equal to
+  // DEFAULT_REPORT_CADENCE (model/slide-order.js owns the enum).
+  cadence: 'weekly',
 };
 
 // Automation pipeline options (Settings.automation, v4): the unattended daily run.

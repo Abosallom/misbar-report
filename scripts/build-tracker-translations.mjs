@@ -14,15 +14,19 @@
 //   DATA_KEY=<64 hex chars> node scripts/build-tracker-translations.mjs "<translations.json>" [out.enc]
 //
 // Input (plaintext JSON, kept OUTSIDE the repo):
-//   {"tasks": {"<English task>": "<Arabic>"}, "tracks": {...}, "milestones": {...}}
-// Keys are the ENGLISH texts as they appear in the workbook; they are normalised here with
+//   {"tasks": {"<English task>": "<Arabic>"}, "tracks": {...}, "milestones": {...},
+//    "owners": {"<one person's English name>": "<Arabic>"}, "entities": {"<entity>": "<Arabic>"}}
+// owners / entities (2026-10-18) are ONE name per key ('Alpha', 'Alpha Bin Beta'), not a
+// whole cell: the app splits a cell like 'Alpha/Beta' on '/' and looks each part up.
+// Every map is optional. Keys are the ENGLISH texts as they appear in the workbook; they are normalised here with
 // the app's own normEn (whitespace / case tolerant), so the lookup can never drift from
 // the build. Empty Arabic values are skipped; two English spellings that normalise to the
 // same key keep the FIRST and are reported.
 //
 // Output (default data/tracker-ar.enc, relative to the working directory):
 //   base64( iv(12) || AES-256-GCM ciphertext+tag ) of
-//   {"generatedAt": "...", "entries": {"tasks": {normEn: ar}, "tracks": {...}, "milestones": {...}}}
+//   {"generatedAt": "...", "entries": {"tasks": {normEn: ar}, "tracks": {...}, "milestones": {...},
+//                                     "owners": {...}, "entities": {...}}}
 import { readFileSync, writeFileSync, mkdirSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import crypto from 'node:crypto';
@@ -48,11 +52,11 @@ try {
   process.exit(1);
 }
 if (!input || typeof input !== 'object' || Array.isArray(input)) {
-  console.error('the input must be an object {tasks, tracks, milestones}');
+  console.error('the input must be an object {tasks, tracks, milestones, owners, entities}');
   process.exit(1);
 }
 
-const KINDS = ['tasks', 'tracks', 'milestones'];
+const KINDS = ['tasks', 'tracks', 'milestones', 'owners', 'entities'];
 const entries = {};
 const counts = {};
 let duplicates = 0;
@@ -94,5 +98,6 @@ writeFileSync(out, Buffer.concat([iv, enc]).toString('base64'));
 // Counts only — never echo an entry: this output lands in terminals and logs.
 console.log(`tracker-translations: wrote ${out} (encrypted)`);
 console.log(`  ${counts.tasks} tasks · ${counts.tracks} tracks · ${counts.milestones} milestones`
+  + ` · ${counts.owners} owners · ${counts.entities} entities`
   + ` · ${skipped} empty/oversized skipped · ${duplicates} conflicting duplicates (first kept)`);
 console.log('  NOTE: the plaintext translations are never written to the repo.');

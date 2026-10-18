@@ -14,7 +14,7 @@ import {
 // The lifecycle module is pure and tiny — injected through the same deps seam so the
 // taskLog cases assert the REAL key/entry shape rather than a re-implementation.
 import * as taskLifecycle from '../src/model/task-lifecycle.js';
-import { slideOrderOf, normalizeSlideOrder } from '../src/model/slide-order.js';
+import { slideOrderOf, normalizeSlideOrder, reportCadence } from '../src/model/slide-order.js';
 
 const { taskKey } = taskLifecycle;
 
@@ -118,6 +118,7 @@ const run = (opts = {}) => runAutomation({
   deps: opts.deps || fakeDeps(),
   onEvent: opts.onEvent,
   signal: opts.signal,
+  cadence: opts.cadence,
 });
 
 const statusOf = (res, id) => (res.steps.find((s) => s.id === id) || {}).status;
@@ -708,8 +709,8 @@ test('automation.autoDownload:false downloads nothing even with autoDownloadFile
  * ------------------------------------------------------------------ */
 
 test('the automation publishes with the SAVED slide order — never the review\'s one-report order', async () => {
-  const SAVED = ['compliance', 'tracker', 'execFunnel', 'shipments', 'monthly', 'sendout', 'challenges', 'definitions'];
-  const TEMP = ['challenges', 'definitions', 'execFunnel', 'shipments', 'monthly', 'sendout', 'compliance', 'tracker'];
+  const SAVED = ['compliance', 'tracker', 'trackerCompleted', 'execFunnel', 'shipments', 'monthly', 'sendout', 'challenges', 'definitions'];
+  const TEMP = ['challenges', 'definitions', 'execFunnel', 'shipments', 'monthly', 'sendout', 'compliance', 'tracker', 'trackerCompleted'];
   const handed = [];
   const store = makeStore({ reportOptions: { slides: {}, kpiCards: {}, labels: {}, deltaMode: 'week', slideOrder: SAVED } });
   const state = makeState();
@@ -730,4 +731,47 @@ test('the automation publishes with the SAVED slide order — never the review\'
   const deps2 = fakeDeps({ produceReportFiles: async ({ model: m }) => { handed2.push(m); return [{ def: { name: 'report.pptx' }, blob: { size: 2 } }]; } });
   await run({ store: store2, state, deps: deps2 });
   assert.deepEqual(slideOrderOf(handed2[0]), normalizeSlideOrder(undefined));
+});
+
+/* ------------------------------------------------------------------ *
+ * Cadence — the trigger's ?mode= wins for THAT run, never saved.
+ *
+ * scripts/misbar-daily.sh opens the Thursday job with &mode=weekly; main.js hands it to
+ * runAutomation as `cadence`. A «يومي» the operator last saved on the review screen must
+ * not turn the weekly report daily (cover «اليومي», no Completed tasks, no
+ * «المهام المكتملة خلال الأسبوع» slide) — and the override must not leak into settings.
+ * ------------------------------------------------------------------ */
+
+test('cadence: a saved «يومي» + the weekly trigger (cadence:\'weekly\') publishes a WEEKLY deck; settings untouched', async () => {
+  const opts = () => ({ slides: {}, kpiCards: {}, labels: {}, deltaMode: 'week', cadence: 'daily' });
+  const grab = () => {
+    const handed = [];
+    const deps = fakeDeps({ produceReportFiles: async ({ model }) => { handed.push(model); return [{ def: { name: 'report.pptx' }, blob: { size: 2 } }]; } });
+    return { handed, deps };
+  };
+  // The weekly job.
+  const store = makeStore({ reportOptions: opts() });
+  const a = grab();
+  const res = await run({ store, deps: a.deps, cadence: 'weekly' });
+  assert.equal(statusOf(res, 'generate'), 'done');
+  assert.equal(a.handed[0].reportOptions.cadence, 'weekly', 'the run\'s model is weekly');
+  assert.equal(reportCadence(a.handed[0].reportOptions.cadence), 'weekly', 'as the deck builders read it');
+  assert.equal(a.handed[0].reportOptions.deltaMode, 'week', 'every other saved option carried over');
+  assert.notEqual(a.handed[0].reportOptions, store.settings.reportOptions, 'a copy — the settings object is not rewritten');
+  assert.equal(store.settings.reportOptions.cadence, 'daily', 'the saved cadence is unchanged');
+  // The plain daily trigger (no mode) — the saved cadence, verbatim.
+  const store2 = makeStore({ reportOptions: opts() });
+  const b = grab();
+  await run({ store: store2, deps: b.deps });
+  assert.equal(b.handed[0].reportOptions, store2.settings.reportOptions);
+  assert.equal(b.handed[0].reportOptions.cadence, 'daily');
+  // An explicit daily trigger over a saved weekly; junk = the saved one.
+  const store3 = makeStore({ reportOptions: { ...opts(), cadence: 'weekly' } });
+  const c = grab();
+  await run({ store: store3, deps: c.deps, cadence: 'DAILY' });
+  assert.equal(c.handed[0].reportOptions.cadence, 'daily');
+  assert.equal(store3.settings.reportOptions.cadence, 'weekly');
+  const d = grab();
+  await run({ store: store3, deps: d.deps, cadence: 'fortnightly' });
+  assert.equal(d.handed[0].reportOptions, store3.settings.reportOptions, 'an unknown value = no override');
 });

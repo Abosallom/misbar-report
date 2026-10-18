@@ -67,17 +67,17 @@
 //   the «<0.1%» input), multi-country labs, compliance rows (continuous numbering) and
 //   totals (late KAMC only).
 
-import { compute, round1 } from '../engine/engine.js?v=v2026-10-13.7';
-import { buildReportModel, projectTrackerFor } from './report-model.js?v=v2026-10-13.7';
-import { stampWindowDeltas, windowFor } from './delta-window.js?v=v2026-10-13.7';
+import { compute, round1 } from '../engine/engine.js?v=v2026-10-18.1';
+import { buildReportModel, projectTrackerFor, trackerStatusLogOf } from './report-model.js?v=v2026-10-18.1';
+import { stampWindowDeltas, windowFor } from './delta-window.js?v=v2026-10-18.1';
 import {
   FACILITY_DISPLAY, norm, share, analyseSendout, hasMaster,
-} from './sendout.js?v=v2026-10-13.7';
+} from './sendout.js?v=v2026-10-18.1';
 import {
   EMPTY_SCOPE, normalizeScope, isScoped, hasRange, applyScope, shipmentDetails,
-} from './scope.js?v=v2026-10-13.7';
-import { HOSPITALS } from './hospital.js?v=v2026-10-13.7';
-import { normFacility } from '../contracts.js?v=v2026-10-13.7';
+} from './scope.js?v=v2026-10-18.1';
+import { HOSPITALS } from './hospital.js?v=v2026-10-18.1';
+import { normFacility } from '../contracts.js?v=v2026-10-18.1';
 
 /** The hospitals a BOTH report combines, in the registry's (display) order. */
 const BOTH_KEYS = Object.freeze(Object.keys(HOSPITALS));
@@ -644,6 +644,9 @@ export function buildBothModel({
     reportOptions: (settings && settings.reportOptions) || {},
     // Resolved exactly as buildReportModel resolves it for each sub-model below.
     projectTracker: projectTrackerFor(tracker, settings, edits),
+    // …and its status history beside it (the weekly «المهام المكتملة خلال الأسبوع» slide).
+    trackerStatusLog: edits && edits.trackerStatusLog !== undefined
+      ? edits.trackerStatusLog : trackerStatusLogOf(settings),
   };
   for (const h of BOTH_KEYS) {
     const rows = Array.isArray(rowsOf[h]) ? rowsOf[h] : [];

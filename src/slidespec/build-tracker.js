@@ -1,5 +1,7 @@
 // src/slidespec/build-tracker.js
-// buildTrackerSlides(tracker, { reportDate, variant, labels }) -> SlideSpec[] — «متابعة المشروع».
+// buildTrackerSlides(tracker, { reportDate, variant, labels, lang, cadence }) -> SlideSpec[] — «متابعة المهام».
+// buildTrackerCompletedSlides(tracker, log, { reportDate, labels, lang }) -> SlideSpec[] —
+//   «المهام المكتملة خلال الأسبوع» (weekly decks only; its own slide unit 'trackerCompleted').
 //
 // THE PROJECT TASK TRACKER (the MISBAR Task Tracker workbook, src/ingest/task-tracker.js →
 // ProjectTracker, possibly edited on the review screen) laid out as the workbook's own
@@ -52,18 +54,44 @@
 // A task flagged showOriginal (the user's per-task «النص الأصلي» — the machine / built-in
 // translation of that one task was wrong) prints its English in every mode, like a row
 // without a translation; its group labels follow the mode as usual.
-// Owner, organization, priority, status and dates never change with the language.
-// An untranslated tracker therefore renders identically in all three modes.
+// THE LANGUAGE RULE (2026-10-18 rule 4): a value follows its COLUMN's language, not its
+// own. Status and priority are Arabic columns — always Arabic, in every mode (a status
+// word prints raw only when it is truly unmappable). Owner and entity follow the task
+// column: their Arabic (ownerAr / organizationAr) outside 'en' — Arabic only, also in
+// 'both' (the English line under the Arabic is for task / group cells only) — and the
+// original English in 'en'. Dates never change. An untranslated tracker therefore
+// renders identically in all three modes.
 // Arabic TRANSLATIONS are measured with real Cairo metrics (contextual forms, lam-alef, the
 // font's one positive Arabic kern — shapedTextWidth below); every other cell keeps the
 // legacy estimate, so the English / fallback layout never moves.
-import { COLORS as C } from '../theme.js?v=v2026-10-13.7';
+// STATUS RULES (2026-10-18 user rules, model/tracker-status.js owns them): every status and
+// overdue date printed here is effectiveStatus() — a task that is not Completed and is past
+// its due date prints «متأخر» (no status included), a Stopped one stays «متوقف»; either way
+// the overdue date is red. Inside each stage (milestone block) the rows are sortStageTasks()
+// order (Late → Stopped → In Progress → Not Started → Completed, priority then date); the
+// stages and tracks keep the Portfolio (first-appearance) order. The summary pills are
+// trackerSummary() over the rows SHOWN, so they always add up to the table.
+// CADENCE (reportOptions.cadence): 'daily' prints only the tasks that are not Completed — no
+// Completed row and no «مكتمل» pill at all; 'weekly' (default) prints every task, and the
+// weekly deck adds buildTrackerCompletedSlides (below) as a separate, toggleable unit.
+// NAMES (rule 5/6): the owner (المسؤول) and entity (الجهة) cells print ownerAr /
+// organizationAr outside 'en' (model/tracker-translate.js fills them from the translation
+// memory), several names joined « / », centred, RTL.
+import { COLORS as C } from '../theme.js?v=v2026-10-18.1';
+// Model leaves (no slidespec imports), so this file stays a leaf of the spec ESM cycle.
+import {
+  effectiveStatus, sortStageTasks, trackerSummary, dailyTasks, completedDuring, priorityKey, STATUS_AR,
+} from '../model/tracker-status.js?v=v2026-10-18.1';
+import { isoToDays } from '../model/delta-baseline.js?v=v2026-10-18.1';
+import { reportCadence } from '../model/slide-order.js?v=v2026-10-18.1';
 
 // ---- labels (registry keys; build-spec.js DEFAULT_LABELS spreads this object so the
 // labels editor reaches them and an override reaches all three decks) ------------------
 export const TRACKER_LABELS = Object.freeze({
-  titleTracker: 'متابعة المشروع',
-  titleTrackerCont: 'متابعة المشروع — تتمة',
+  // «متابعة المهام» (2026-10-18 user rule 6, was «متابعة المشروع»); the continuation title is
+  // exactly as the user wrote it — a space before the em dash, none after.
+  titleTracker: 'متابعة المهام',
+  titleTrackerCont: 'متابعة المهام —تتمة',
   trkTrack: 'المسار',
   trkMilestone: 'المرحلة',
   trkTask: 'المهمة / المخرج',
@@ -76,6 +104,12 @@ export const TRACKER_LABELS = Object.freeze({
   trkDue: 'الاستحقاق',
   trkTotal: 'إجمالي المهام',
   trkOverdue: 'متجاوزة الموعد',
+  // The weekly «completed this week» slide (buildTrackerCompletedSlides).
+  titleTrackerCompleted: 'المهام المكتملة خلال الأسبوع',
+  titleTrackerCompletedCont: 'المهام المكتملة خلال الأسبوع —تتمة',
+  trkPrevStatus: 'الحالة السابقة',
+  trkWeekRange: 'آخر سبعة أيام: من {from} إلى {to}',
+  trkCompletedNone: 'لم تُسجَّل مهام اكتملت خلال هذا الأسبوع',
 });
 // The deck's continuation idiom (build-spec.js uses the same literal under its tables).
 const MORE = 'يتبع…';
@@ -102,7 +136,19 @@ export const TR = Object.freeze({
   enSize: 8, enRowH: 0.33, enLineH: 0.215,
   enInk: C.slate500, enTrackInk: '#DCE6F5', enMsInk: C.slate500,
 });
-const COL = { track: 0, milestone: 1, task: 2, org: 3, owner: 4, priority: 5, status: 6, due: 7 };
+// COLUMN SETS (LOGICAL order, RTL right → left). The task slides: the eight columns above.
+// The completed-this-week slide: the same columns plus «الحالة السابقة» right of «الحالة»
+// (read first, then the status it became); its 1.25in comes out of the task column (a
+// 9pt-bold «الحالة السابقة» needs ≈1.03in of text width, so it heads one line).
+const colSet = (keys, colW, head) => Object.freeze({
+  keys: Object.freeze(keys), colW: Object.freeze(colW), head: Object.freeze(head),
+  w: Object.freeze(Object.fromEntries(keys.map((k, i) => [k, colW[i]]))),
+});
+const TASK_COLS = colSet(['track', 'milestone', 'task', 'org', 'owner', 'priority', 'status', 'due'], TR.colW,
+  ['trkTrack', 'trkMilestone', 'trkTask', 'trkOrg', 'trkOwner', 'trkPriority', 'trkStatus', 'trkDue']);
+export const DONE_COLW = Object.freeze([0.92, 0.92, 3.357, 1.05, 1.98, 0.82, 1.25, 1.17, 1.0]);   // Σ 12.467
+const DONE_COLS = colSet(['track', 'milestone', 'task', 'org', 'owner', 'priority', 'prev', 'status', 'due'], DONE_COLW,
+  ['trkTrack', 'trkMilestone', 'trkTask', 'trkOrg', 'trkOwner', 'trkPriority', 'trkPrevStatus', 'trkStatus', 'trkDue']);
 // pptxgenjs' default cell insets are 0.1in left + right, and QuickLook always insets ≈0.1in
 // whatever the XML says — so a column's usable text width is colW − 0.20 everywhere.
 const CELL_PAD = 0.2;
@@ -135,27 +181,26 @@ function chrome(title) {
 }
 
 // ---- vocabularies ---------------------------------------------------------------------
-// Status fills/inks are the workbook's own conditional formats (Hierarchical!I). Delayed has
-// no rule there (the file even spells it «Deleyed»), so it gets Excel's orange tint pair,
-// between On Hold (amber) and Blocked (red). Arabic words are masculine, like the old deck.
-// The status is a CELL FILL (not an overlaid shape), so it cannot drift from its row.
-const STATUS = {
-  completed: { ar: 'مكتمل', fill: '#C6EFCE', color: '#006100' },
-  inProgress: { ar: 'قيد التنفيذ', fill: '#DDEBF7', color: '#1F4E78' },
-  delayed: { ar: 'متأخر', fill: '#FCE4D6', color: '#C55A11' },
-  blocked: { ar: 'متوقف', fill: '#FFC7CE', color: '#9C0006' },
-  onHold: { ar: 'معلّق', fill: '#FFF2CC', color: '#7F6000' },
-  notStarted: { ar: 'لم يبدأ', fill: '#E7E6E6', color: '#404040' },
+// Status fills/inks are the workbook's own conditional formats (Hierarchical!I), keyed by
+// model/tracker-status.js STATUS_KEYS: Late takes Excel's orange tint pair (the workbook has
+// no rule for its «Deleyed»), Stopped the red Blocked pair. The status is a CELL FILL (not an
+// overlaid shape), so it cannot drift from its row.
+const STATUS_STYLE = {
+  late: { fill: '#FCE4D6', color: '#C55A11' },
+  stopped: { fill: '#FFC7CE', color: '#9C0006' },
+  inProgress: { fill: '#DDEBF7', color: '#1F4E78' },
+  notStarted: { fill: '#E7E6E6', color: '#404040' },
+  completed: { fill: '#C6EFCE', color: '#006100' },
 };
 const NEUTRAL_CHIP = { fill: '#F1F5F9', color: '#64748B' };
-// Summary-strip order. 'other' = a status outside the vocabulary (printed VERBATIM in its
-// cell — the file's words are never guessed at); 'unset' = blank or the Portfolio sheet's
-// «Not Found» (printed «–»).
-const STATUS_ORDER = ['completed', 'inProgress', 'delayed', 'blocked', 'onHold', 'notStarted', 'other', 'unset'];
-const CHIP_WORD = { other: 'أخرى', unset: 'غير محدد' };
+// «أخرى»: the pill for statuses outside the vocabulary (printed VERBATIM in their cells — the
+// file's words are never guessed at); shown only when such a task is on the slide.
+const OTHER_CHIP_WORD = 'أخرى';
 const norm = (s) => String(s ?? '').trim().toLowerCase().replace(/[\s_-]+/g, ' ');
-// English as the workbook writes it (incl. its 'Deleyed'), plus the Arabic words themselves,
-// so a status typed in Arabic on the website lands in the same bucket.
+
+// LEGACY status reading, kept ONLY for the review screen (src/ui/components.js imports
+// statusKey for its editor pills / upload counts, test/tracker-ui.test.mjs pins the two
+// equal). The slides no longer read it — they use model/tracker-status.js effectiveStatus.
 const STATUS_ALIASES = {
   completed: 'completed', complete: 'completed', done: 'completed', 'مكتمل': 'completed', 'مكتملة': 'completed',
   'in progress': 'inProgress', 'قيد التنفيذ': 'inProgress',
@@ -164,21 +209,20 @@ const STATUS_ALIASES = {
   'on hold': 'onHold', 'معلّق': 'onHold', 'معلق': 'onHold',
   'not started': 'notStarted', 'لم يبدأ': 'notStarted', 'لم تبدأ': 'notStarted',
 };
+/** LEGACY (review-screen only, see above): status text → completed | inProgress | delayed |
+ *  blocked | onHold | notStarted | other | unset. */
 export function statusKey(s) {
   const k = norm(s);
   if (!k || k === 'not found') return 'unset';
   return STATUS_ALIASES[k] || 'other';
 }
-// Priority is text only (no fill) so the status column stays the only filled one.
+// Priority is text only (no fill) so the status column stays the only filled one. The
+// reading (aliases) is tracker-status.js priorityKey — the same one the row sort uses.
 const PRIORITY = {
   critical: { ar: 'حرجة', color: '#C00000', bold: true },
   high: { ar: 'عالية', color: C.slate900, bold: false },
   medium: { ar: 'متوسطة', color: C.slate600, bold: false },
   low: { ar: 'منخفضة', color: C.slate500, bold: false },
-};
-const PRIORITY_ALIASES = {
-  critical: 'critical', 'حرجة': 'critical', high: 'high', 'عالية': 'high',
-  medium: 'medium', 'متوسطة': 'medium', low: 'low', 'منخفضة': 'low',
 };
 
 // ---- dates -------------------------------------------------------------------------------
@@ -209,9 +253,9 @@ export function formatDue(v) {
 }
 const isIso = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
 /**
- * OVERDUE = a due date strictly before the REPORT date (not today's date: a re-run of an old
- * report must print what that report said; a scoped range's reportDate is already its 'to')
- * on a task that is not Completed. An unset / unknown status counts as not completed.
+ * LEGACY (review-screen only, paired with statusKey above): a due date strictly before the
+ * REPORT date on a task statusKey() does not call completed. The slides use
+ * model/tracker-status.js effectiveStatus().pastDue — the same rule over the new vocabulary.
  */
 export function isOverdue(task, reportDate) {
   if (!isIso(reportDate)) return false;
@@ -418,11 +462,47 @@ const embedRtl = (s) => (ARABIC.test(s) && NEEDS_EMBED.test(s) ? `\u202B${s}\u20
 
 // ---- rows ---------------------------------------------------------------------------------
 // The eight on-slide fields. A row whose on-slide fields are ALL empty (a row just added on
-// the website and not filled in yet) prints nothing and is skipped; every other row prints,
-// in the tracker's order. Outside 'en' a translation alone is something to print too.
+// the website and not filled in yet) prints nothing and is skipped; every other row prints.
+// Outside 'en' a translation alone is something to print too.
 const SLIDE_FIELDS = ['track', 'milestone', 'task', 'organization', 'owner', 'priority', 'status', 'due'];
-const SLIDE_FIELDS_AR = [...SLIDE_FIELDS, 'trackAr', 'milestoneAr', 'taskAr'];
+const SLIDE_FIELDS_AR = [...SLIDE_FIELDS, 'trackAr', 'milestoneAr', 'taskAr', 'organizationAr', 'ownerAr'];
 const isBlankRow = (t, lang) => (lang === 'en' ? SLIDE_FIELDS : SLIDE_FIELDS_AR).every((k) => !clean(t?.[k]));
+
+// Merge keys: the English identity, plus (outside 'en') the translation — a block merges
+// only rows that print the same label, so each row's label is exactly its own data. The
+// stage grouping of orderStageTasks uses the very same keys, so a stage sorted as one is
+// one merged block.
+const groupKey = (en, ar, lang) => (lang === 'en' ? clean(en) : `${clean(en)}\u0001${clean(ar)}`);
+
+/**
+ * Rule 2 (user, 2026-10-18): the tasks in display order. Tracks in Portfolio (first-
+ * appearance) order, the stages (milestones) of a track in first-appearance order — a stage
+ * whose rows were scattered in the file is gathered into one block — and the tasks of each
+ * stage in sortStageTasks() order (Late, Stopped, In Progress, Not Started, Completed; see
+ * model/tracker-status.js for the keys inside each group).
+ */
+function orderStageTasks(tasks, reportDate, lang, portfolio = tasks) {
+  // The group order comes from the WHOLE tracker (`portfolio`), so the daily deck and the
+  // completed-this-week slide — which print a subset — keep the Portfolio order of the
+  // stages too, instead of one that depends on which task happened to be left out.
+  const tracks = new Map();
+  for (const t of portfolio) {
+    const tk = groupKey(t.track, t.trackAr, lang);
+    if (!tracks.has(tk)) tracks.set(tk, new Map());
+    const stages = tracks.get(tk);
+    const mk = groupKey(t.milestone, t.milestoneAr, lang);
+    if (!stages.has(mk)) stages.set(mk, []);
+  }
+  for (const t of tasks) {
+    const tk = groupKey(t.track, t.trackAr, lang);
+    const mk = groupKey(t.milestone, t.milestoneAr, lang);
+    if (!tracks.has(tk)) tracks.set(tk, new Map());
+    const stages = tracks.get(tk);
+    if (!stages.has(mk)) stages.set(mk, []);
+    stages.get(mk).push(t);
+  }
+  return [...tracks.values()].flatMap((stages) => [...stages.values()].flatMap((g) => (g.length ? sortStageTasks(g, reportDate) : [])));
+}
 
 /**
  * A group (track / milestone) label in `lang`: `main` is the line printed (bold), `sub` the
@@ -441,55 +521,96 @@ function groupLabel(en, ar, colW, lang) {
   };
 }
 
-/** Per-row layout facts that do not depend on the page: texts, styles, line counts. */
-function prepareRow(t, reportDate, lang) {
-  const W = TR.colW;
-  const track = groupLabel(t.track, t.trackAr, W[COL.track], lang);
-  const milestone = groupLabel(t.milestone, t.milestoneAr, W[COL.milestone], lang);
+/** Several names in one cell: each part trimmed, joined « / » (a space each side — rule 6). */
+export function joinNames(v) {
+  return clean(v).split('/').map((x) => x.trim()).filter(Boolean).join(' / ');
+}
+/**
+ * An owner (المسؤول) / entity (الجهة) cell. Outside 'en' the Arabic (ownerAr /
+ * organizationAr — names are never machine-translated; an unmapped part stays Latin inside
+ * it), else / without one the English. CENTRED (rule 6), and RTL whenever it holds Arabic so
+ * « / » sits between the names in reading order — embedRtl() as well, because QuickLook
+ * ignores a table cell's rtl and «ألفا / بيتا» would otherwise come out mirrored there.
+ * Translations are measured with the shaped Cairo estimate like every translation here; a
+ * name typed in Arabic in the English field keeps the legacy (over-)estimate.
+ */
+function nameCell(en, ar, colW, lang, ink) {
+  const a = lang === 'en' ? '' : joinNames(ar);
+  const e = joinNames(en);
+  if (!a && !e) return { lines: 1, cell: { text: DASH, color: NA } };
+  const f = a ? fitCell(a, colW, { shaped: true }) : fitCell(e, colW);
+  const arabic = ARABIC.test(f.text);
+  return {
+    lines: f.lines,
+    translated: !!a,
+    cell: { text: arabic ? embedRtl(f.text) : f.text, ...(ink ? { color: ink } : {}), align: 'center', rtl: arabic },
+  };
+}
+
+// A previous status (the completed-this-week slide's «الحالة السابقة»): tinted when the task
+// was Late or Stopped before it completed — the point of the slide — with the SAME pill the
+// task slides give that status (Late peach / orange, Stopped pink / red), so one word never
+// has two colours on neighbouring slides; neutral otherwise.
+const PREV_TINTED = new Set(['late', 'stopped']);
+
+/**
+ * Per-row layout facts that do not depend on the page: texts, styles, line counts.
+ * `W` — the column widths by key (TASK_COLS / DONE_COLS); `prev` — the previous status key
+ * for the completed-this-week slide (its «الحالة السابقة» cell), else undefined.
+ */
+function prepareRow(t, reportDate, lang, W, prev) {
+  const track = groupLabel(t.track, t.trackAr, W.track, lang);
+  const milestone = groupLabel(t.milestone, t.milestoneAr, W.milestone, lang);
   // showOriginal (the user's per-task «النص الأصلي», model/tracker-translate.js): this
   // row's task prints its ENGLISH original even in 'ar' / 'both' — exactly as an
   // untranslated row does. Only the task cell: the track / milestone labels are shared by
   // the rows of a block, so one row cannot opt its group out. 'en' never reads it.
   const taskAr = lang === 'en' || t.showOriginal === true ? '' : clean(t.taskAr);
   const taskEn = clean(t.task);
-  const task = taskAr ? fitCell(taskAr, W[COL.task], { shaped: true }) : fitCell(t.task || DASH, W[COL.task]);
+  const task = taskAr ? fitCell(taskAr, W.task, { shaped: true }) : fitCell(t.task || DASH, W.task);
   // 'both': the English original on a second table row under the Arabic (see the header).
   const taskSub = lang === 'both' && taskAr && taskEn && taskEn !== taskAr
-    ? fitCell(taskEn, W[COL.task], { pt: TR.enSize }) : null;
-  const org = fitCell(t.organization || DASH, W[COL.org]);
-  const owner = fitCell(t.owner || DASH, W[COL.owner]);
+    ? fitCell(taskEn, W.task, { pt: TR.enSize }) : null;
+  const org = nameCell(t.organization, t.organizationAr, W.org, lang, C.slate600);
+  const owner = nameCell(t.owner, t.ownerAr, W.owner, lang);
 
-  const sk = statusKey(t.status);
-  const st = STATUS[sk];
-  const status = fitCell(st ? st.ar : sk === 'other' ? t.status : DASH, W[COL.status], { bold: true });
-  const pk = PRIORITY_ALIASES[norm(t.priority)];
+  // Rule 1: the EFFECTIVE status (overdue → Late unless Stopped), always Arabic (rule 4).
+  const es = effectiveStatus(t, reportDate);
+  const st = STATUS_STYLE[es.key];
+  const status = fitCell(es.label || DASH, W.status, { bold: true });
+  const pk = priorityKey(t.priority);
   const pr = pk ? PRIORITY[pk] : null;
-  const priority = fitCell(pr ? pr.ar : (t.priority || DASH), W[COL.priority], { bold: !!pr?.bold });
+  const priority = fitCell(pr ? pr.ar : (t.priority || DASH), W.priority, { bold: !!pr?.bold });
   const due = formatDue(t.due);
-  const overdue = isOverdue(t, reportDate);
-  const dueCell = fitCell(due.text, W[COL.due], { bold: overdue });
+  const overdue = es.red;
+  const dueCell = fitCell(due.text, W.due, { bold: overdue });
+  const prevKey = prev === undefined ? null : (prev || 'other');
+  const prevCell = prevKey ? fitCell(STATUS_AR[prevKey] || DASH, W.prev, { bold: true }) : null;
 
   const cells = {
     task: { text: taskAr ? embedRtl(task.text) : task.text, ...(taskAr || taskEn ? dirOf(task.text) : { color: NA }) },
     taskSub: taskSub ? { text: taskSub.text, size: TR.enSize, color: TR.enInk, ...dirOf(taskSub.text) } : null,
-    org: { text: org.text, color: clean(t.organization) ? C.slate600 : NA },
-    owner: { text: owner.text, ...(clean(t.owner) ? dirOf(owner.text) : { color: NA }) },
+    org: org.cell,
+    owner: owner.cell,
     priority: pr ? { text: priority.text, color: pr.color, bold: pr.bold }
       : { text: priority.text, color: NA },
     status: st ? { text: status.text, fill: st.fill, color: st.color, bold: true }
-      // Unknown words print VERBATIM in a neutral (unfilled) style; blank / «Not Found» → «–».
-      : { text: status.text, color: sk === 'other' ? C.slate500 : NA, bold: true },
+      // A truly unmappable word prints VERBATIM in a neutral (unfilled) style.
+      : { text: status.text, color: C.slate500, bold: true },
     due: overdue ? { text: dueCell.text, color: C.red, bold: true }
       : due.kind === 'blank' ? { text: dueCell.text, color: NA }
         : due.kind === 'free' ? { text: dueCell.text, color: C.slate500, italic: true }
           : { text: dueCell.text },
+    ...(prevCell ? {
+      prev: PREV_TINTED.has(prevKey)
+        ? { text: prevCell.text, ...STATUS_STYLE[prevKey], bold: true }
+        : { text: prevCell.text, color: STATUS_AR[prevKey] ? C.slate600 : NA, bold: true },
+    } : {}),
   };
-  const spanLines = Math.max(org.lines, owner.lines, status.lines, priority.lines, dueCell.lines);
+  const spanLines = Math.max(org.lines, owner.lines, status.lines, priority.lines, dueCell.lines, prevCell ? prevCell.lines : 1);
   return {
-    // Merge keys: the English identity, plus (outside 'en') the translation — a block merges
-    // only rows that print the same label, so each row's label is exactly its own data.
-    trackKey: lang === 'en' ? clean(t.track) : `${clean(t.track)}\u0001${clean(t.trackAr)}`,
-    msKey: lang === 'en' ? clean(t.milestone) : `${clean(t.milestone)}\u0001${clean(t.milestoneAr)}`,
+    trackKey: groupKey(t.track, t.trackAr, lang),
+    msKey: groupKey(t.milestone, t.milestoneAr, lang),
     trackLabel: track.main,
     trackSub: track.sub,
     msLabel: milestone.main,
@@ -499,10 +620,8 @@ function prepareRow(t, reportDate, lang) {
     taskSub,
     spanLines,
     cells,
-    statusKey: sk,
-    overdue,
     // Prints at least one translation (never in 'en') — turns on paginate()'s polish.
-    translated: !!(taskAr || track.ar || milestone.ar),
+    translated: !!(taskAr || track.ar || milestone.ar || org.translated || owner.translated),
   };
 }
 
@@ -713,7 +832,9 @@ function balancePages(rows, headH) {
   return pages;
 }
 
-function trackerTable(pr, y, header, headH) {
+function trackerTable(pr, y, header, headH, cols = TASK_COLS) {
+  // The task's own cells (everything after the two group columns), in logical order.
+  const own = cols.keys.slice(3);
   const out = [rev(header.map((h) => h.text))];
   const lay = layoutPage(pr);
   const rowH = [headH, ...lay.h];
@@ -749,7 +870,7 @@ function trackerTable(pr, y, header, headH) {
       const mg = lay.groups.ms.get(q);
       if (mg) logical.push(groupCell(mg, r.msLabel, r.msSub, TR.msFill, TR.msInk, TR.enMsInk, rowTop));
       if (n === 1) {
-        logical.push(cell(c.task), cell(c.org), cell(c.owner), cell(c.priority), cell(c.status), cell(c.due));
+        logical.push(cell(c.task), ...own.map((k) => cell(c[k])));
       } else if (k === 0) {
         const span = { rowSpan: n };
         // Bilingual task: the Arabic on this row, its bottom border dropped so it reads as
@@ -757,8 +878,7 @@ function trackerTable(pr, y, header, headH) {
         const taskCell = c.taskSub
           ? cell({ ...c.task, valign: 'bottom', border: { ...(top.border || {}), bottom: null } })
           : cell({ ...c.task, ...span });
-        logical.push(taskCell, cell({ ...c.org, ...span }), cell({ ...c.owner, ...span }),
-          cell({ ...c.priority, ...span }), cell({ ...c.status, ...span }), cell({ ...c.due, ...span }));
+        logical.push(taskCell, ...own.map((k) => cell({ ...c[k], ...span })));
       } else if (c.taskSub) {
         logical.push({ color: C.slate900, ...c.taskSub, valign: 'top', border: { top: null } });
       }
@@ -771,7 +891,7 @@ function trackerTable(pr, y, header, headH) {
   return {
     t: 'table', x: TR.x, y, w: TR.w, rtl: true, rowH, headerSize: TR.head, bodySize: TR.body,
     header: { fill: C.navy, color: C.white, bold: true },
-    colW: rev(TR.colW),
+    colW: rev(cols.colW),
     rows: out,
   };
 }
@@ -839,25 +959,27 @@ function fitChip(label, count, w) {
 }
 
 /**
- * First-slide summary strip: «إجمالي المهام N», one chip per status present (STATUS_ORDER),
- * then «متجاوزة الموعد N» after a wider gap (its red is the legend of the red dates).
- * Right-anchored at the table's right edge, running leftwards; counts are over ALL rows.
- * Chips are 1.25in and narrow evenly only when more than the design's nine are needed; the
- * total / overdue labels are user-overridable (labels editor), so a chip whose text is wider
- * grows into the strip's spare room and, when there is none, its label is cut with «…» —
- * the text always stays on one line inside its pill (never into the title or the table).
+ * First-slide summary strip (rule 3): «إجمالي المهام N», then one pill per status in a FIXED
+ * set — مكتمل (weekly only: the daily deck shows no completed task, so not even a zero),
+ * قيد التنفيذ, متأخر, متوقف, لم يبدأ (the old «غير محدد» box) — each shown even at 0 so the
+ * boxes do not come and go from one report to the next, «أخرى» only when an unmappable
+ * status is on the slide, then «متجاوزة الموعد N» after a wider gap (its red is the legend of
+ * the red dates; it counts overdue Late AND overdue Stopped tasks). The counts are
+ * trackerSummary() over exactly the tasks the tables print — they always match the cells.
+ * Right-anchored at the table's right edge, running leftwards.
+ * Chips are 1.25in and narrow evenly only when more than nine are needed; the total / overdue
+ * labels are user-overridable (labels editor), so a chip whose text is wider grows into the
+ * strip's spare room and, when there is none, its label is cut with «…» — the text always
+ * stays on one line inside its pill (never into the title or the table).
  */
-function strip(rows, L) {
-  const counts = {};
-  for (const r of rows) counts[r.statusKey] = (counts[r.statusKey] || 0) + 1;
-  const overdue = rows.filter((r) => r.overdue).length;
-  const chips = [{ label: L('trkTotal'), n: rows.length, fill: C.navy, color: C.white, gap: 0 }];
-  for (const k of STATUS_ORDER) {
-    if (!counts[k]) continue;
-    const s = STATUS[k] ? { ar: STATUS[k].ar, fill: STATUS[k].fill, color: STATUS[k].color } : { ar: CHIP_WORD[k], ...NEUTRAL_CHIP };
-    chips.push({ label: s.ar, n: counts[k], fill: s.fill, color: s.color, gap: TR.chipGap });
+function strip(summary, L, daily) {
+  const chips = [{ label: L('trkTotal'), n: summary.total, fill: C.navy, color: C.white, gap: 0 }];
+  const keys = daily ? ['inProgress', 'late', 'stopped', 'notStarted'] : ['completed', 'inProgress', 'late', 'stopped', 'notStarted'];
+  for (const k of keys) {
+    chips.push({ label: STATUS_AR[k], n: summary[k] || 0, ...STATUS_STYLE[k], gap: TR.chipGap });
   }
-  if (overdue) chips.push({ label: L('trkOverdue'), n: overdue, fill: C.bgRed, color: C.red, gap: TR.overdueGap });
+  if (summary.other) chips.push({ label: OTHER_CHIP_WORD, n: summary.other, ...NEUTRAL_CHIP, gap: TR.chipGap });
+  chips.push({ label: L('trkOverdue'), n: summary.pastDue || 0, fill: C.bgRed, color: C.red, gap: TR.overdueGap });
   for (const c of chips) c.label = clean(c.label);
   const avail = TR.w - sum(chips.map((c) => c.gap));
   const widths = chipWidths(chips.map((c) => chipTextWidth(`${c.label} ${c.n}`) + CHIP_PAD), avail);
@@ -880,40 +1002,138 @@ function labelLookup(labels) {
   return (k) => labels?.[k] ?? TRACKER_LABELS[k];
 }
 
-/**
- * @param {Object|null} tracker   ProjectTracker ({ format, tasks:[{track, milestone, task,
- *                                organization, owner, priority, status, due, …}] }) or null
- * @param {{reportDate?:string, variant?:string, labels?:Function|Object, lang?:string}} [opts]
- *        reportDate 'YYYY-MM-DD' — the overdue reference; labels — labelOf(m) or an
- *        overrides map; variant — ignored (the tracker is the same in both decks);
- *        lang — reportOptions.trackerLang: 'ar' (default) | 'en' | 'both' (see the header)
- * @returns {Array} slides ('tracker', 'tracker-cont-1', …) without page numbers; [] when
- *          there is nothing to show
- */
-// eslint-disable-next-line no-unused-vars
-export function buildTrackerSlides(tracker, { reportDate, variant, labels, lang } = {}) {
-  const lg = trackerSlideLang(lang);
-  const tasks = Array.isArray(tracker?.tasks) ? tracker.tasks.filter((t) => t && typeof t === 'object' && !isBlankRow(t, lg)) : [];
-  if (!tasks.length) return [];
-  const L = labelLookup(labels);
-  const rows = tasks.map((t) => prepareRow(t, reportDate, lg));
-  const headKeys = ['trkTrack', 'trkMilestone', 'trkTask', 'trkOrg', 'trkOwner', 'trkPriority', 'trkStatus', 'trkDue'];
-  const header = headKeys.map((k, i) => fitCell(L(k), TR.colW[i], { bold: true, pt: TR.head, maxLines: MAX_HEAD_LINES }));
-  const headH = rowHFor(Math.max(...header.map((h) => h.lines)));
+/** Header cells + header row height of a column set (an overridden label may wrap to 2 lines). */
+function headerOf(cols, L) {
+  const header = cols.head.map((k, i) => fitCell(L(k), cols.colW[i], { bold: true, pt: TR.head, maxLines: MAX_HEAD_LINES }));
+  return { header, headH: rowHFor(Math.max(...header.map((h) => h.lines))) };
+}
+
+/** Prepared rows → paginated slides `id`, `id-cont-1`, … (first page: `firstEls` under the title). */
+function tableSlides(rows, cols, L, { id, title, titleCont, firstEls }) {
+  const { header, headH } = headerOf(cols, L);
   const pages = paginate(rows, headH);
   return pages.map((p, i) => {
     const first = i === 0;
     const last = i === pages.length - 1;
     const y = first ? TR.firstY : TR.contY;
-    const table = trackerTable(p, y, header, headH);
-    const els = [...chrome(first ? L('titleTracker') : L('titleTrackerCont'))];
-    if (first) els.push(...strip(rows, L));
+    const table = trackerTable(p, y, header, headH, cols);
+    const els = [...chrome(first ? title : titleCont)];
+    if (first) els.push(...firstEls);
     els.push(table);
     if (!last) {
       els.push(text(TR.x, y + sum(table.rowH), TR.w, TR.markerH, MORE, 9,
         { italic: true, color: C.slate600, align: 'center', valign: 'middle', rtl: true }));
     }
-    return { id: first ? 'tracker' : `tracker-cont-${i}`, bg: C.white, elements: els };
+    return { id: first ? id : `${id}-cont-${i}`, bg: C.white, elements: els };
+  });
+}
+
+const printable = (tracker, lg) => (Array.isArray(tracker?.tasks)
+  ? tracker.tasks.filter((t) => t && typeof t === 'object' && !isBlankRow(t, lg)) : []);
+
+/**
+ * @param {Object|null} tracker   ProjectTracker ({ format, tasks:[{track, milestone, task,
+ *                                organization, owner, priority, status, due, …}] }) or null
+ * @param {{reportDate?:string, variant?:string, labels?:Function|Object, lang?:string, cadence?:string}} [opts]
+ *        reportDate 'YYYY-MM-DD' — the overdue reference; labels — labelOf(m) or an
+ *        overrides map; variant — ignored (the tracker is the same in both decks);
+ *        lang — reportOptions.trackerLang: 'ar' (default) | 'en' | 'both' (see the header);
+ *        cadence — reportOptions.cadence: 'weekly' (default) | 'daily' (no Completed task)
+ * @returns {Array} slides ('tracker', 'tracker-cont-1', …) without page numbers; [] when
+ *          there is nothing to show
+ */
+// eslint-disable-next-line no-unused-vars
+export function buildTrackerSlides(tracker, { reportDate, variant, labels, lang, cadence } = {}) {
+  const lg = trackerSlideLang(lang);
+  const daily = reportCadence(cadence) === 'daily';
+  const all = printable(tracker, lg);
+  // Daily: every Completed task is left out entirely (rows AND pills) — user request.
+  const tasks = daily ? dailyTasks(all, reportDate) : all;
+  if (!tasks.length) return [];
+  const L = labelLookup(labels);
+  const rows = orderStageTasks(tasks, reportDate, lg, all).map((t) => prepareRow(t, reportDate, lg, TASK_COLS.w));
+  const summary = trackerSummary(tasks, reportDate, { excludeCompleted: daily });
+  return tableSlides(rows, TASK_COLS, L, {
+    id: 'tracker', title: L('titleTracker'), titleCont: L('titleTrackerCont'), firstEls: strip(summary, L, daily),
+  });
+}
+
+// ---- the weekly «المهام المكتملة خلال الأسبوع» slide -----------------------------------------
+
+const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+const pad2 = (n) => String(n).padStart(2, '0');
+/** Whole-UTC-day count → 'YYYY-MM-DD' (the inverse of delta-baseline isoToDays). */
+const daysToIso = (days) => {
+  const d = new Date(days * 86400000);
+  return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`;
+};
+const dmy = (iso) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
+const fillVars = (tpl, vars) => String(tpl ?? '').replace(/\{(\w+)\}/g, (m, k) => (k in vars ? vars[k] : m));
+
+/**
+ * The completed slide's window: the LAST SEVEN DAYS, report date included (reportDate − 6 →
+ * reportDate). The user asked for the tasks completed «during the last week». A calendar
+ * week (the Friday that opens it, like the activity legend) would cover only 3 days on a
+ * Sunday report, and a task completed after the previous weekly report but before that
+ * Friday would then appear in no weekly report at all (review 2026-10-18). Seven days
+ * leaves no gap between two weekly reports sent on any weekday.
+ * @returns {{from:string, to:string}|null}
+ */
+export function completedWeek(reportDate) {
+  if (!isIso(reportDate)) return null;
+  return { from: daysToIso(isoToDays(reportDate) - 6), to: reportDate };
+}
+
+/**
+ * «المهام المكتملة خلال الأسبوع» — the tasks that BECAME Completed during the report's week
+ * (user request 2026-10-18: a task remembered as Late — or anything else — last week and
+ * Completed now). SEPARATE from the task slides (its own unit 'trackerCompleted', its own
+ * toggle; weekly decks only — the deck builders gate it on the cadence). Which tasks:
+ * model/tracker-status.js completedDuring over settings.trackerStatusLog (the per-task status
+ * history the app records at every upload / edit), window = completedWeek(reportDate).
+ * Same table design as the task slides (columns, stage grouping + order, language, owner /
+ * entity rules) plus «الحالة السابقة» — the status before it completed, red-tinted when it
+ * was Late / Stopped; the status cell is «مكتمل». Under the title: «آخر سبعة أيام: من … إلى …».
+ * Nothing completed this week → ONE slide saying so («لم تُسجَّل مهام اكتملت خلال هذا الأسبوع»).
+ * [] — no slide at all — when there is no tracker with a task to show, no valid report
+ * date, or NO STATUS LOG (not an object): a model built without the history cannot know
+ * what changed, and every app model carries the log once the app has seeded it.
+ * @param {Object|null} tracker  ProjectTracker
+ * @param {Object|null} log      settings.trackerStatusLog ({ v:1, tasks:{…} })
+ * @param {{reportDate?:string, labels?:Function|Object, lang?:string}} [opts]
+ * @returns {Array} slides ('trackerCompleted', 'trackerCompleted-cont-1', …), no page numbers
+ */
+export function buildTrackerCompletedSlides(tracker, log, { reportDate, labels, lang } = {}) {
+  const lg = trackerSlideLang(lang);
+  const week = completedWeek(reportDate);
+  if (!week || !isPlainObject(log) || !printable(tracker, lg).length) return [];
+  const L = labelLookup(labels);
+  const range = fillVars(L('trkWeekRange'), { from: dmy(week.from), to: dmy(week.to) });
+  const subtitle = text(TR.x, TR.stripY - 0.02, TR.w, 0.32, range, 12,
+    { color: C.slate600, align: 'center', valign: 'middle', rtl: true });
+  const all = printable(tracker, lg);
+  // The WHOLE tracker goes to completedDuring — the same task → log-key mapping the app used
+  // when it recorded the log (repeated WBS ids fall back to ids in tracker order) — and only
+  // then are the rows with nothing to print dropped.
+  const shown = new Set(all);
+  const done = completedDuring(log, tracker, week.from, week.to, reportDate).filter((d) => shown.has(d.task));
+  const title = L('titleTrackerCompleted');
+  if (!done.length) {
+    return [{
+      id: 'trackerCompleted', bg: C.white, elements: [
+        ...chrome(title),
+        subtitle,
+        rect(TR.x + 2.5, 2.9, TR.w - 5.0, 1.3, C.bgLight, { radius: 0.12 }),
+        text(TR.x + 2.5, 2.9, TR.w - 5.0, 1.3, L('trkCompletedNone'), 18,
+          { color: C.slate500, align: 'center', valign: 'middle', rtl: true }),
+      ],
+    }];
+  }
+  const prevOf = new Map(done.map((d) => [d.task, d.previousStatus]));
+  const rows = orderStageTasks(done.map((d) => d.task), reportDate, lg, all)
+    .map((t) => prepareRow(t, reportDate, lg, DONE_COLS.w, prevOf.get(t)));
+  return tableSlides(rows, DONE_COLS, L, {
+    id: 'trackerCompleted', title, titleCont: L('titleTrackerCompletedCont'), firstEls: [subtitle],
   });
 }
 

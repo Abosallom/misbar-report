@@ -12,7 +12,7 @@
 // A failure here is never fatal: the caller gets null and the tracker keeps whatever the
 // other layers give it (the user's corrections, the on-device machine cache, or the
 // English). A deck in English is a far better outcome than no deck.
-import { sanitizeEntries } from '../model/tracker-translate.js?v=v2026-10-13.7';
+import { sanitizeEntries } from '../model/tracker-translate.js?v=v2026-10-18.1';
 
 const CIPHER = 'AES-GCM';
 const IV_BYTES = 12;
@@ -43,7 +43,9 @@ const base64ToBytes = (b64) => {
  * @param {string} dataKeyHex 64 hex chars — the same AES-256 key as the snapshot.
  * @param {{url?:string, fetchImpl?:Function}} [opts]
  * @returns {Promise<{generatedAt:string, entries:{tasks:Object<string,string>,
- *   tracks:Object<string,string>, milestones:Object<string,string>}}>} keys normEn'd
+ *   tracks:Object<string,string>, milestones:Object<string,string>,
+ *   owners:Object<string,string>, entities:Object<string,string>}}>} keys normEn'd
+ *   (owners / entities: one name per key — empty in a file built before names existed)
  * @throws on a bad key, a missing file, corrupt ciphertext or an empty memory.
  */
 export async function fetchTrackerTranslations(dataKeyHex, {
@@ -78,8 +80,8 @@ export async function fetchTrackerTranslations(dataKeyHex, {
   // Re-normalised on the way in (sanitizeEntries → normEn): a file built by an older
   // script, or by hand, still keys the way applyTrackerTranslations looks up.
   const entries = sanitizeEntries(payload && typeof payload === 'object' ? payload.entries : null);
-  const count = Object.keys(entries.tasks).length + Object.keys(entries.tracks).length
-    + Object.keys(entries.milestones).length;
+  // Any map counts: a memory of names alone is still a usable memory.
+  const count = Object.values(entries).reduce((n, m) => n + Object.keys(m).length, 0);
   if (!count) throw new Error('ملف ترجمة المهام فارغ أو تالف.');
   return {
     generatedAt: payload && typeof payload.generatedAt === 'string' ? payload.generatedAt : '',
