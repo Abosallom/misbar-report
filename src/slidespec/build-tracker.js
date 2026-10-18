@@ -1,5 +1,5 @@
 // src/slidespec/build-tracker.js
-// buildTrackerSlides(tracker, { reportDate, variant, labels, lang, cadence }) -> SlideSpec[] — «متابعة المهام».
+// buildTrackerSlides(tracker, { reportDate, variant, labels, lang, cadence, showCompleted }) -> SlideSpec[] — «متابعة المهام».
 // buildTrackerCompletedSlides(tracker, log, { reportDate, labels, lang }) -> SlideSpec[] —
 //   «المهام المكتملة خلال الأسبوع» (weekly decks only; its own slide unit 'trackerCompleted').
 //
@@ -17,7 +17,8 @@
 // and the NUPCO decks print the same rows (user rule) — `variant` is accepted for call-site
 // parity and ignored, and no slide here is internalOnly.
 // No tracker, or a tracker with no task to show → [] (no slide, no gap in the numbering) —
-// and, since 2026-10-18, a tracker whose every task is Completed (see COMPLETED TASKS below).
+// and, since 2026-10-18, a tracker whose every task is Completed (see COMPLETED TASKS below)
+// unless reportOptions.trackerShowCompleted puts them back (THE OPT-IN below).
 //
 // IMPORTS NOTHING FROM build-spec.js: build-spec.js ↔ build-spec-both.js already form an ESM
 // cycle, and both import this file, so it must be a leaf. chrome() is therefore a local copy
@@ -85,15 +86,26 @@
 // Completed task prints, and only one that became Completed during the report week.
 // `cadence` therefore no longer changes these slides (it still gates the weekly unit in the
 // deck builders); it is accepted for call-site parity.
+// THE OPT-IN (reportOptions.trackerShowCompleted, 2026-10-18 user request: «Make an OPTION
+// to choose whether I want you to show all the completed tasks in the Task Tracker or not
+// (Same rules in terms of their Orders should be applied)»). OFF (the default, and any
+// non-true value) is everything above, byte for byte. ON, in BOTH cadences, the slides print
+// EVERY task again — the Completed ones included, each in the «مكتمل» group LAST inside its
+// stage, by priority (sortStageTasks, rule 2 — the very order they had before the
+// correction), stages / tracks in Portfolio order, a stage of only Completed tasks back in
+// its place — and the strip gets its «مكتمل» pill back right after «إجمالي المهام» (counts
+// over the rows printed, so the total includes them; «متجاوزة الموعد» is unchanged — a
+// Completed task is never past due). The weekly «المهام المكتملة خلال الأسبوع» slide does
+// not read the option: it is the same either way.
 // NAMES (rule 5/6): the owner (المسؤول) and entity (الجهة) cells print ownerAr /
 // organizationAr in every mode (model/tracker-translate.js fills them from the translation
 // memory), several names joined « / », centred, RTL.
-import { COLORS as C } from '../theme.js?v=v2026-10-18.2';
+import { COLORS as C } from '../theme.js?v=v2026-10-18.3';
 // Model leaves (no slidespec imports), so this file stays a leaf of the spec ESM cycle.
 import {
   effectiveStatus, sortStageTasks, trackerSummary, openTasks, completedDuring, priorityKey, STATUS_AR,
-} from '../model/tracker-status.js?v=v2026-10-18.2';
-import { isoToDays } from '../model/delta-baseline.js?v=v2026-10-18.2';
+} from '../model/tracker-status.js?v=v2026-10-18.3';
+import { isoToDays } from '../model/delta-baseline.js?v=v2026-10-18.3';
 
 // ---- labels (registry keys; build-spec.js DEFAULT_LABELS spreads this object so the
 // labels editor reaches them and an override reaches all three decks) ------------------
@@ -978,9 +990,11 @@ function fitChip(label, count, w) {
 
 /**
  * First-slide summary strip (rule 3): «إجمالي المهام N», then one pill per status in a FIXED
- * set — قيد التنفيذ, متأخر, متوقف, لم يبدأ (the old «غير محدد» box); NO «مكتمل» pill, in
- * either cadence: these slides never show a Completed task (2026-10-18 user correction —
- * Completed tasks live only on «المهام المكتملة خلال الأسبوع»), so not even a zero. Each
+ * set — قيد التنفيذ, متأخر, متوقف, لم يبدأ (the old «غير محدد» box); NO «مكتمل» pill by
+ * default, in either cadence: by default these slides show no Completed task (2026-10-18 user
+ * correction — Completed tasks live on «المهام المكتملة خلال الأسبوع»), so not even a zero —
+ * UNLESS reportOptions.trackerShowCompleted is on: then the Completed rows are printed and
+ * «مكتمل» comes right after the total, even at 0 (`withCompleted`). Each
  * is shown even at 0 so the boxes do not come and go from one report to the next; «أخرى»
  * only when an unmappable status is on the slide, then «متجاوزة الموعد N» after a wider gap
  * (its red is the legend of the red dates; it counts overdue Late AND overdue Stopped
@@ -993,9 +1007,13 @@ function fitChip(label, count, w) {
  * stays on one line inside its pill (never into the title or the table).
  */
 const STRIP_KEYS = Object.freeze(['inProgress', 'late', 'stopped', 'notStarted']);
-function strip(summary, L) {
+// With reportOptions.trackerShowCompleted ON the Completed rows are printed, so their pill
+// comes back — first after the total, where it sat before the 2026-10-18 correction — and
+// shows even at 0, like every other box of the fixed set.
+const STRIP_KEYS_WITH_COMPLETED = Object.freeze(['completed', ...STRIP_KEYS]);
+function strip(summary, L, withCompleted = false) {
   const chips = [{ label: L('trkTotal'), n: summary.total, fill: C.navy, color: C.white, gap: 0 }];
-  for (const k of STRIP_KEYS) {
+  for (const k of (withCompleted ? STRIP_KEYS_WITH_COMPLETED : STRIP_KEYS)) {
     chips.push({ label: STATUS_AR[k], n: summary[k] || 0, ...STATUS_STYLE[k], gap: TR.chipGap });
   }
   if (summary.other) chips.push({ label: OTHER_CHIP_WORD, n: summary.other, ...NEUTRAL_CHIP, gap: TR.chipGap });
@@ -1054,29 +1072,35 @@ const printable = (tracker, lg) => (Array.isArray(tracker?.tasks)
 /**
  * @param {Object|null} tracker   ProjectTracker ({ format, tasks:[{track, milestone, task,
  *                                organization, owner, priority, status, due, …}] }) or null
- * @param {{reportDate?:string, variant?:string, labels?:Function|Object, lang?:string, cadence?:string}} [opts]
+ * @param {{reportDate?:string, variant?:string, labels?:Function|Object, lang?:string, cadence?:string, showCompleted?:boolean}} [opts]
  *        reportDate 'YYYY-MM-DD' — the overdue reference; labels — labelOf(m) or an
  *        overrides map; variant — ignored (the tracker is the same in both decks);
  *        lang — reportOptions.trackerLang: 'ar' (default) | 'en' | 'both' (see the header);
  *        cadence — reportOptions.cadence: ignored here since 2026-10-18 (no cadence prints a
- *        Completed task on these slides; see COMPLETED TASKS in the header)
+ *        Completed task on these slides; see COMPLETED TASKS in the header);
+ *        showCompleted — reportOptions.trackerShowCompleted: ONLY `true` prints the Completed
+ *        tasks (rows + «مكتمل» pill, see THE OPT-IN in the header); anything else = OFF
  * @returns {Array} slides ('tracker', 'tracker-cont-1', …) without page numbers; [] when
- *          there is nothing to show (no tracker, or no task that is not Completed)
+ *          there is nothing to show (no tracker, or no task that is not Completed — with
+ *          showCompleted, no task at all)
  */
 // eslint-disable-next-line no-unused-vars
-export function buildTrackerSlides(tracker, { reportDate, variant, labels, lang, cadence } = {}) {
+export function buildTrackerSlides(tracker, { reportDate, variant, labels, lang, cadence, showCompleted } = {}) {
   const lg = trackerSlideLang(lang);
   const all = printable(tracker, lg);
-  // Every Completed task is left out entirely — rows AND pills — in BOTH cadences (2026-10-18
-  // user correction: a Completed task prints only on «المهام المكتملة خلال الأسبوع»). `all`
-  // still fixes the Portfolio order of the stages that remain.
-  const tasks = openTasks(all, reportDate);
+  // STRICT `=== true`: a junk stored value must never put Completed rows back on a deck.
+  const withCompleted = showCompleted === true;
+  // Default: every Completed task is left out entirely — rows AND pills — in BOTH cadences
+  // (2026-10-18 user correction: a Completed task prints only on «المهام المكتملة خلال
+  // الأسبوع»). With the opt-in, every task. `all` fixes the Portfolio order of the stages
+  // either way, and orderStageTasks puts the Completed group last in each stage.
+  const tasks = withCompleted ? all : openTasks(all, reportDate);
   if (!tasks.length) return [];
   const L = labelLookup(labels);
   const rows = orderStageTasks(tasks, reportDate, all).map((t) => prepareRow(t, reportDate, lg, TASK_COLS.w));
-  const summary = trackerSummary(tasks, reportDate, { excludeCompleted: true });
+  const summary = trackerSummary(tasks, reportDate, { excludeCompleted: !withCompleted });
   return tableSlides(rows, TASK_COLS, L, {
-    id: 'tracker', title: L('titleTracker'), titleCont: L('titleTrackerCont'), firstEls: strip(summary, L),
+    id: 'tracker', title: L('titleTracker'), titleCont: L('titleTrackerCont'), firstEls: strip(summary, L, withCompleted),
   });
 }
 

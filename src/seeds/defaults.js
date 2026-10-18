@@ -111,6 +111,12 @@ export const REPORT_OPTIONS_SEED = {
   // the first-run copy (and an absent key) keeps it. MUST stay equal to
   // DEFAULT_REPORT_CADENCE (model/slide-order.js owns the enum).
   cadence: 'weekly',
+  // «إظهار المهام المكتملة في شريحة متابعة المهام» (2026-10-18 user request: an OPTION to
+  // show every Completed task on the «متابعة المهام» slides, same order rules). FALSE = the
+  // slides print only the tasks that are not Completed — what every install produced before
+  // the option, so the first-run copy (and an absent key) keeps it. TRUE = every task, the
+  // Completed ones last in each stage, plus the «مكتمل» pill, in both cadences.
+  trackerShowCompleted: false,
 };
 
 // Automation pipeline options (Settings.automation, v4): the unattended daily run.

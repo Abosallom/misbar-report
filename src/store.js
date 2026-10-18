@@ -32,17 +32,17 @@
 
 import {
   SETTINGS_KEY, CADENCES, DEFAULT_CADENCE, canonicalCadence,
-} from './contracts.js?v=v2026-10-18.2';
-import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-10-18.2';
-import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-10-18.2';
+} from './contracts.js?v=v2026-10-18.3';
+import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-10-18.3';
+import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-10-18.3';
 import {
   HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED, GRAFANA_SEED, REPORT_OPTIONS_SEED,
   SNAPSHOT_HISTORY_SEED, AUTOMATION_SEED, TASK_LOG_SEED,
-} from './seeds/defaults.js?v=v2026-10-18.2';
-import { DELTA_MODES, canonicalDeltaMode } from './model/delta-baseline.js?v=v2026-10-18.2';
+} from './seeds/defaults.js?v=v2026-10-18.3';
+import { DELTA_MODES, canonicalDeltaMode } from './model/delta-baseline.js?v=v2026-10-18.3';
 import {
   sanitizeTaskLog, recordShownTasks, TASK_LOG_LIMIT, TASK_KEY_MAX,
-} from './model/task-lifecycle.js?v=v2026-10-18.2';
+} from './model/task-lifecycle.js?v=v2026-10-18.3';
 // The ProjectTracker shape has ONE owner — the module that produces it. The store only
 // asks "is this the tagged document?" and "give me its clean copy", exactly as it
 // defers the taskLog entry shape to task-lifecycle.js above. The same module owns the
@@ -51,23 +51,23 @@ import {
 import {
   TRACKER_FORMAT, isProjectTracker, normalizeProjectTracker, normalizeTrackerLang, TRACKER_LANGS,
   backfillTaskFields,
-} from './ingest/task-tracker.js?v=v2026-10-18.2';
+} from './ingest/task-tracker.js?v=v2026-10-18.3';
 // The tracker translation memory's shape and bounds have one owner too — the module that
 // applies it. The store only decides when it is cleaned, capped and merged.
 import {
   sanitizeTranslationMemory, mergeTranslationMemory, emptyTranslationMemory,
   TM_ENTRY_LIMIT, TM_MAX_CHARS,
-} from './model/tracker-translate.js?v=v2026-10-18.2';
+} from './model/tracker-translate.js?v=v2026-10-18.3';
 // The slide-order vocabulary (reportOptions.slideOrder) has one owner too: the leaf module
 // the deck builders sort by. The store only cleans, caps and normalises with it.
-import { normalizeSlideOrder, SLIDE_ORDER_MAX } from './model/slide-order.js?v=v2026-10-18.2';
+import { normalizeSlideOrder, SLIDE_ORDER_MAX } from './model/slide-order.js?v=v2026-10-18.3';
 // The tracker status history's RECORDING rule (what an entry is, when one is appended) has
 // one owner too — the status module the weekly completed-tasks slide reads it with. The
 // store decides WHEN it runs (every cached-tracker write, the one-time seed) and bounds what
 // it keeps (sanitizeStatusLog below), exactly as it does for the translation memory.
 import {
   recordStatusLog, normalizeStatusLog, STATUS_LOG_TASK_LIMIT,
-} from './model/tracker-status.js?v=v2026-10-18.2';
+} from './model/tracker-status.js?v=v2026-10-18.3';
 
 export const SCHEMA_VERSION = 9;
 
@@ -174,6 +174,11 @@ function backfillReportOptions(doc) {
   // daily. A missing / unrecognized value takes the seed, else 'weekly' — the deck every
   // existing install already produces, so filling it changes nothing on any slide.
   ro.cadence = canonicalCadence(ro.cadence) || canonicalCadence(seed.cadence) || DEFAULT_CADENCE;
+  // trackerShowCompleted (2026-10-18, «إظهار المهام المكتملة في شريحة متابعة المهام»): a
+  // boolean like autoDownloadFiles — only a MISSING / non-boolean value is filled, so a user's
+  // «نعم» survives every load. Absent = false (the seed): the task slides stay exactly the
+  // decks every existing install already produces (no Completed task on them).
+  if (typeof ro.trackerShowCompleted !== 'boolean') ro.trackerShowCompleted = seed.trackerShowCompleted === true;
   // slideOrder (2026-10-13, the operator's SAVED slide order — model/slide-order.js). The
   // one key here that is NEVER filled: ABSENT means "the default order", so a slide unit
   // added in a later version lands in its default place instead of being frozen out by a
@@ -1233,7 +1238,7 @@ function validateImport(doc) {
     if (!isPlainObject(ro)) {
       throw new Error('حقل reportOptions غير صالح: يجب أن يكون كائناً.');
     }
-    // excludeNoTat, autoDownloadFiles (v7) and the slide/card flags are all
+    // excludeNoTat, autoDownloadFiles (v7), trackerShowCompleted and the slide/card flags are all
     // coerce-tolerant (normalized to booleans in pickImportKeys); only the container
     // shapes and deltaMode's enum are enforced here. The line between the two: these
     // are PRESENTATION preferences, so a truthy value from a hand-edited backup is
@@ -1453,7 +1458,8 @@ function pickImportKeys(doc) {
     out.grafana = picked;
   }
   if (isPlainObject(out.reportOptions)) {
-    // Whitelist exactly {excludeNoTat, autoDownloadFiles, deltaMode, trackerLang, slideOrder,
+    // Whitelist exactly {excludeNoTat, autoDownloadFiles, deltaMode, trackerLang, cadence,
+    // trackerShowCompleted, slideOrder,
     // slides(REPORT_OPTION_SLIDE_KEYS), kpiCards(REPORT_OPTION_CARD_KEYS), labels}. Flags coerce to booleans; only string label values
     // survive; unknown slide/card subkeys are discarded.
     const ro = out.reportOptions;
@@ -1474,6 +1480,10 @@ function pickImportKeys(doc) {
     // …and the cadence (an old backup has none → this device's stays).
     const cad = canonicalCadence(ro.cadence);
     if (cad != null) picked.cadence = cad;
+    // «إظهار المهام المكتملة» — a presentation flag, coerce-tolerant like autoDownloadFiles
+    // (a hand-edited 'yes' / 1 is normalised, not rejected). An old backup has none → this
+    // device's choice stays.
+    if ('trackerShowCompleted' in ro) picked.trackerShowCompleted = !!ro.trackerShowCompleted;
     // The saved slide order, normalised (unknown / duplicate / 'action' names dropped,
     // missing units back at their default place). deepMergeImportWins CLONES arrays, so a
     // backup that carries an order REPLACES this device's one — never a union of the two.

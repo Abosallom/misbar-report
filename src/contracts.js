@@ -2,7 +2,7 @@
 // Pure JSDoc typedefs; no runtime code except tiny helpers/constants.
 
 // The report-cadence enum (below) is owned by the slide-order leaf (no imports of its own).
-import { REPORT_CADENCES, DEFAULT_REPORT_CADENCE, reportCadence } from './model/slide-order.js?v=v2026-10-18.2';
+import { REPORT_CADENCES, DEFAULT_REPORT_CADENCE, reportCadence } from './model/slide-order.js?v=v2026-10-18.3';
 
 /**
  * Normalized order line (grain = one test on one order). Produced by ingest/csv.js
@@ -336,7 +336,7 @@ import { REPORT_CADENCES, DEFAULT_REPORT_CADENCE, reportCadence } from './model/
  *     'https://elab.seha.sa/hpapm'. Empty/disabled → CSV drop only. The access
  *     token is the public-dashboard token (view-only, server-side-masked data);
  *     it is NEVER seeded in the repo — the user enters it once in Settings.
- * @property {{excludeNoTat:boolean, slides:Object<string,boolean>, kpiCards:Object<string,boolean>, labels:Object<string,string>, deltaMode:('daily'|'week'), autoDownloadFiles:boolean, trackerLang:('ar'|'en'|'both'), cadence:('weekly'|'daily'), slideOrder?:string[]}} reportOptions
+ * @property {{excludeNoTat:boolean, slides:Object<string,boolean>, kpiCards:Object<string,boolean>, labels:Object<string,string>, deltaMode:('daily'|'week'), autoDownloadFiles:boolean, trackerLang:('ar'|'en'|'both'), cadence:('weekly'|'daily'), trackerShowCompleted:boolean, slideOrder?:string[]}} reportOptions
  *   - presentation defaults: excludeNoTat drops rows with no TAT from ANY source
  *     (lookup + CSV fallback = null → 'No Match') before aggregation; slides keys
  *     'execFunnel'|'monthly'|'compliance'|'action'|'challenges'|'definitions'|'sendout'|'tracker' toggle the middle
@@ -388,6 +388,12 @@ import { REPORT_CADENCES, DEFAULT_REPORT_CADENCE, reportCadence } from './model/
  *     key 'trackerCompleted', default ON, weekly decks only). The task slides show only the
  *     tasks that are NOT completed in BOTH cadences (2026-10-18 user correction).
  *     Validated like deltaMode; backfilled when absent.
+ *     trackerShowCompleted (2026-10-18; default FALSE — an ABSENT key means off) —
+ *     «إظهار المهام المكتملة في شريحة متابعة المهام»: true = the task slides print EVERY task,
+ *     the Completed ones last in each stage (same order rules) with the «مكتمل» pill, in both
+ *     cadences; false = the not-completed tasks only (the decks before the option, byte for
+ *     byte). Only `true` turns it on (build-tracker.js). The weekly completed-this-week slide
+ *     ignores it. A presentation flag: backfilled when absent, coerced to a boolean on import.
  * @property {{enabled:boolean, autoPull:boolean, autoGenerate:boolean, autoDownload:boolean,
  *             autoLabFiles:boolean, autoEmailDrafts:boolean, autoAcceptTat:boolean,
  *             dailyTime:string, labRecipients:Object<string,string>}} automation

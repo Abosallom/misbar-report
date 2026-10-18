@@ -1,5 +1,5 @@
 // ui/components.js — shared DOM helpers used by Track E screens.
-import { STR, formatDateAr } from '../i18n/ar.js?v=v2026-10-18.2';
+import { STR, formatDateAr } from '../i18n/ar.js?v=v2026-10-18.3';
 // The project tracker document's OWNER (shape, tag, due-date rule, new-row factory). STATIC,
 // like scope.js / hospital.js elsewhere: the module is pure (SheetJS is injected, never
 // imported), and the editor below must apply the parser's own rules — a website-typed
@@ -9,7 +9,7 @@ import { STR, formatDateAr } from '../i18n/ar.js?v=v2026-10-18.2';
 import {
   isProjectTracker, newTask as blankTrackerTask, normalizeDueText, TRACKER_FORMAT,
   TRACKER_LANGS, DEFAULT_TRACKER_LANG, normalizeTrackerLang as parseTrackerLang,
-} from '../ingest/task-tracker.js?v=v2026-10-18.2';
+} from '../ingest/task-tracker.js?v=v2026-10-18.3';
 // ONE status rule for the editor pill, the upload card's counts and the deck (2026-10-18):
 // model/tracker-status.js owns the alias table (English as the workbook writes it,
 // 'Deleyed' included, plus the Arabic words) AND the overdue rule (not Completed + due before
@@ -18,7 +18,7 @@ import {
 // the deck prints as «متوقف» / «متأخر». Pure; no imports.
 import {
   baseStatus, effectiveStatus, STATUS_KEYS, STATUS_AR,
-} from '../model/tracker-status.js?v=v2026-10-18.2';
+} from '../model/tracker-status.js?v=v2026-10-18.3';
 // AUTOMATIC ARABIC (2026-10-13, CONTRACT-AUTO §1): the translation memory's ONE set of rules
 // — the lookup key, the layer precedence (file > user > built-in > machine), the user-TM
 // edits, the machine cache + glossary, the counts. Pure (no DOM, no storage, no imports), so
@@ -28,7 +28,7 @@ import {
   trackerTranslationStats, collectUntranslated, normEn, TM_MAX_CHARS,
   // «ترجمة الأسماء» (2026-10-18): every distinct owner / entity name part with its Arabic.
   trackerNameEntries,
-} from '../model/tracker-translate.js?v=v2026-10-18.2';
+} from '../model/tracker-translate.js?v=v2026-10-18.3';
 
 /** Tiny hyperscript helper. */
 export function el(tag, props = {}, children = []) {
@@ -339,9 +339,10 @@ export function trackerStatusLabel(status) {
  * (every non-completed task past its date — overdue Stopped included). Zero counts are
  * omitted. Pure; the upload card's stats. Without a valid reportDate nothing is overdue,
  * so the counts are the file's own statuses.
- * The deck's task slides drop the Completed tasks in EVERY cadence (2026-10-18 — they print
- * only on the weekly «المهام المكتملة خلال الأسبوع» slide); the upload card describes the
- * whole FILE, so its «مكتمل» line stays.
+ * The deck's task slides drop the Completed tasks in EVERY cadence by default (2026-10-18 —
+ * they print on the weekly «المهام المكتملة خلال الأسبوع» slide, and on the task slides too
+ * only when reportOptions.trackerShowCompleted is on); the upload card describes the whole
+ * FILE, so its «مكتمل» line stays either way.
  * @param {object} tracker
  * @param {string} [reportDate] - 'yyyy-mm-dd' — the report's date (the overdue reference)
  * @returns {{key:string, label:string, count:number}[]}
@@ -931,7 +932,7 @@ export function loadBuiltinTrackerTM(state, store, importer) {
   state.trackerBuiltinTMLoading = (async () => {
     let doc = null;
     try {
-      const mod = await imp('../ingest/tracker-translations.js?v=v2026-10-18.2');
+      const mod = await imp('../ingest/tracker-translations.js?v=v2026-10-18.3');
       const load = mod && (mod.loadTrackerTranslations || mod.fetchTrackerTranslations);
       const key = ((((store && store.settings) || {}).grafana) || {}).dataKey || '';
       doc = typeof load === 'function' ? await load(key) : null;
@@ -1085,6 +1086,53 @@ export function trackerLangControl({ value, onChange }) {
   }
   paint();
   return { el: root, set(v) { cur = normalizeTrackerLang(v); paint(); } };
+}
+
+/* ---------- «إظهار المهام المكتملة في شريحة متابعة المهام» (reportOptions.trackerShowCompleted) ---------- */
+
+/** A stored / typed value → the boolean the deck reads. ONLY `true` is «نعم»: the deck
+ *  builders read `=== true`, so the switch must never show «نعم» for a value (a string
+ *  'false', 1) that would still print no completed task. Pure. */
+export const normalizeTrackerShowCompleted = (v) => v === true;
+/** The switch's two options (review tracker card + Settings): ONE list, one wording.
+ *  «لا» first — the default. */
+export const TRACKER_SHOW_COMPLETED_OPTIONS = Object.freeze([false, true].map((value) => Object.freeze({
+  value,
+  label: STR.tracker.showCompleted[value ? 'yes' : 'no'],
+  hint: STR.tracker.showCompletedHint[value ? 'yes' : 'no'],
+})));
+
+/**
+ * The «إظهار المهام المكتملة في شريحة متابعة المهام» switch (DOM): two pills لا / نعم
+ * (aria-pressed) in the same look as the language pills beside it, the selected option's
+ * one-line hint under them. `onChange(bool)` only on a real change.
+ * @returns {{el:HTMLElement, set:(v:boolean)=>void}}
+ */
+let trackerDoneSeq = 0;
+export function trackerShowCompletedControl({ value, onChange }) {
+  let cur = normalizeTrackerShowCompleted(value);
+  const hint = el('p', { class: 'trk-lang__hint small muted' });
+  const btns = TRACKER_SHOW_COMPLETED_OPTIONS.map((o) => el('button', {
+    type: 'button', class: 'trk-lang__btn', text: o.label, dataset: { done: o.value ? 'yes' : 'no' },
+    onClick: () => {
+      if (o.value === cur) return;
+      cur = o.value;
+      paint();
+      if (typeof onChange === 'function') onChange(cur);
+    },
+  }));
+  const titleId = `trk-done-${++trackerDoneSeq}`;
+  const root = el('div', { class: 'trk-lang trk-done' }, [
+    el('span', { class: 'trk-lang__title', id: titleId, text: `${STR.tracker.showCompletedTitle}:` }),
+    el('div', { class: 'trk-lang__pills', role: 'group', 'aria-labelledby': titleId }, btns),
+    hint,
+  ]);
+  function paint() {
+    for (const b of btns) b.setAttribute('aria-pressed', (b.dataset.done === 'yes') === cur ? 'true' : 'false');
+    hint.textContent = STR.tracker.showCompletedHint[cur ? 'yes' : 'no'];
+  }
+  paint();
+  return { el: root, set(v) { cur = normalizeTrackerShowCompleted(v); paint(); } };
 }
 
 /**

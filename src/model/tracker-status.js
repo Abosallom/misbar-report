@@ -200,7 +200,8 @@ export function sortStageTasks(tasks, reportDate) {
 
 /**
  * Counts over the tasks a deck SHOWS (pass excludeCompleted for the «متابعة المهام» slides,
- * which show no Completed task at all in either cadence — 2026-10-18 user correction),
+ * which show no Completed task at all in either cadence — 2026-10-18 user correction —
+ * unless reportOptions.trackerShowCompleted puts them back, rows and pill),
  * computed from effectiveStatus so the pills always
  * match the table cells. `other` (unmappable statuses) is reported too so the buckets
  * always add up to `total`.

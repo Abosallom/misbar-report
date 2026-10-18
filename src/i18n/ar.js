@@ -5,11 +5,11 @@
 // build-spec reads from the very same predicate. A local re-derivation here is exactly
 // how a filename would one day say «مخصص» while the cover says nothing (or the reverse).
 // scope.js is pure (no DOM, no vendor, no ar.js back-edge), so this adds no cycle.
-import { isScoped, normalizeScope } from '../model/scope.js?v=v2026-10-18.2';
+import { isScoped, normalizeScope } from '../model/scope.js?v=v2026-10-18.3';
 // The hospital registry's short codes (KAMC / SGH) are what the file-name tag, the report
 // type pills and the share text print — read from the ONE registry, never re-typed here.
 // hospital.js is pure (no imports at all), so this adds no cycle either.
-import { HOSPITALS } from '../model/hospital.js?v=v2026-10-18.2';
+import { HOSPITALS } from '../model/hospital.js?v=v2026-10-18.3';
 
 /** Join ids for a sentence: Arabic comma, tolerant of a bare string or a missing list. */
 const joinIds = (ids) => [].concat(ids == null ? [] : ids).map(String).join('، ');
@@ -323,9 +323,12 @@ export const STR = {
       // completed in BOTH cadences; a completed task appears only on the weekly
       // «المهام المكتملة خلال الأسبوع» slide, and only one completed during the week. The
       // hints must not say the weekly deck shows «كل المهام» (it did before).
+      // Since the «إظهار المهام المكتملة» option (reportOptions.trackerShowCompleted) the
+      // hints say «غير المكتملة» is the DEFAULT, not a fixed rule — a hint claiming no
+      // completed task ever prints there would be wrong once the user turns it on.
       hint: {
-        weekly: 'التقرير الأسبوعي: «متابعة المهام» بالمهام غير المكتملة فقط، والمهام التي اكتملت خلال الأسبوع في شريحة «المهام المكتملة خلال الأسبوع».',
-        daily: 'التقرير اليومي: نفس التقرير، «متابعة المهام» بالمهام غير المكتملة فقط، ولا تظهر فيه أي مهمة مكتملة.',
+        weekly: 'التقرير الأسبوعي: «متابعة المهام» بالمهام غير المكتملة (ما لم تختر إظهار المكتملة)، والمهام التي اكتملت خلال الأسبوع في شريحة «المهام المكتملة خلال الأسبوع».',
+        daily: 'التقرير اليومي: نفس التقرير بلا شريحة «المهام المكتملة خلال الأسبوع»؛ و«متابعة المهام» بالمهام غير المكتملة فقط ما لم تختر إظهار المكتملة.',
       },
       // On the «المهام المكتملة خلال الأسبوع» chip while the report is daily (the slide is
       // never in a daily deck).
@@ -488,6 +491,16 @@ export const STR = {
     // 2026-10-18 user correction: the option is the language of the TASK TEXT only — in
     // 'en' the stage, track, owner and entity still print their Arabic translations (the
     // en hint says so; it used to promise the file's English everywhere).
+    // «إظهار المهام المكتملة في شريحة متابعة المهام» (2026-10-18 user request, reportOptions
+    // .trackerShowCompleted): لا (default — only the not-completed tasks) / نعم (every task,
+    // the completed ones last in each stage + the «مكتمل» box). Saved like the language, so
+    // the user never has to ask again; the automation uses the saved choice.
+    showCompletedTitle: 'إظهار المهام المكتملة في شريحة متابعة المهام',
+    showCompleted: { no: 'لا', yes: 'نعم' },
+    showCompletedHint: {
+      no: 'تظهر المهام غير المكتملة فقط؛ والمهام التي اكتملت خلال الأسبوع في شريحتها الأسبوعية.',
+      yes: 'تظهر كل المهام المكتملة أيضًا، في آخر كل مرحلة مرتبة حسب الأولوية، مع مربع «مكتمل» — في التقرير اليومي والأسبوعي.',
+    },
     langTitle: 'لغة نص المهام في الشريحة',
     lang: { ar: 'عربي', en: 'إنجليزي', both: 'عربي + إنجليزي' },
     langHint: {

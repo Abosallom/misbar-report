@@ -1,8 +1,10 @@
 // ui/screen-review.js — review/edit report content with a live slide preview (Track E).
-import { STR, todayISO, formatDateAr, formatRangeAr } from '../i18n/ar.js?v=v2026-10-18.2';
+import { STR, todayISO, formatDateAr, formatRangeAr } from '../i18n/ar.js?v=v2026-10-18.3';
 import {
   el, editableTable, toast, trackerEditor, trackerSaver, saveTrackerToStore, createProjectTracker,
   trackerLangControl, normalizeTrackerLang, DEFAULT_TRACKER_LANG,
+  // «إظهار المهام المكتملة في شريحة متابعة المهام» (2026-10-18): the switch + its reading.
+  trackerShowCompletedControl, normalizeTrackerShowCompleted,
   slideOrderList, slideOrderLabel,
   // AUTOMATIC ARABIC (2026-10-13, CONTRACT-AUTO §4–§6): the translation layers applied to the
   // session document in place, the built-in memory (once per session), the on-device
@@ -11,9 +13,9 @@ import {
   machineTranslateTexts, saveMachineTranslations, translatorApi, translatorAvailability,
   // «ترجمة الأسماء» (2026-10-18): the owner / entity names section of the tracker card.
   trackerNamesEditor,
-} from './components.js?v=v2026-10-18.2';
+} from './components.js?v=v2026-10-18.3';
 // REPORT CADENCE (2026-10-18): «دورية التقرير» weekly / daily — the enum's one home.
-import { CADENCES, DEFAULT_CADENCE, normalizeCadence } from '../contracts.js?v=v2026-10-18.2';
+import { CADENCES, DEFAULT_CADENCE, normalizeCadence } from '../contracts.js?v=v2026-10-18.3';
 // SLIDE ORDER (2026-10-13, slide-order CONTRACT). The unit vocabulary and its rules are the
 // shared leaf module's (the deck builders sort by the very same functions, so this card and
 // the deck can never disagree about what moves where); WHEN a temporary order is in force is
@@ -23,19 +25,19 @@ import {
   // Which units a DAILY deck leaves out (the weekly-only «المهام المكتملة خلال الأسبوع») — the
   // deck builders' own gate, so the order card's «مخفية» badge can never disagree with them.
   unitInCadence, WEEKLY_ONLY_UNITS,
-} from '../model/slide-order.js?v=v2026-10-18.2';
+} from '../model/slide-order.js?v=v2026-10-18.3';
 import {
   tempSlideOrder, setTempSlideOrder, clearTempSlideOrder, overlayTempSlideOrder, tempSlideOrderUnits,
-} from '../state.js?v=v2026-10-18.2';
-import { buildMockEngineOutput, isMockTracker } from './screen-upload.js?v=v2026-10-18.2';
+} from '../state.js?v=v2026-10-18.3';
+import { buildMockEngineOutput, isMockTracker } from './screen-upload.js?v=v2026-10-18.3';
 // THE PROJECT TRACKER (2026-10-13, tracker CONTRACT §1.3/§1.6): the report carries the
 // «ملف متابعة المشروع» document as model.projectTracker, resolved by the model layer's
 // ONE rule (the run's tagged tracker, else the tagged cache, else null — never the old
 // untagged shape, never a mock). Static: report-model.js is pure, and sendout.js — its
 // only import — is already imported below.
-import { resolveProjectTracker, projectedStatusLog } from '../model/report-model.js?v=v2026-10-18.2';
-import { analyseSendout, hasMaster, AR_COUNTRY } from '../model/sendout.js?v=v2026-10-18.2';
-import { buildHistoryPanel } from './history-table.js?v=v2026-10-18.2';
+import { resolveProjectTracker, projectedStatusLog } from '../model/report-model.js?v=v2026-10-18.3';
+import { analyseSendout, hasMaster, AR_COUNTRY } from '../model/sendout.js?v=v2026-10-18.3';
+import { buildHistoryPanel } from './history-table.js?v=v2026-10-18.3';
 // REPORT SCOPE (2026-09-29). STATIC, not guarded like delta-window below: scope decides
 // WHICH ROWS every number is computed from, and there is no safe degraded answer — a
 // build that silently ignored a chosen scope would publish the full programme's numbers
@@ -44,16 +46,16 @@ import { buildHistoryPanel } from './history-table.js?v=v2026-10-18.2';
 import {
   EMPTY_SCOPE, normalizeScope, isScoped, hasRange, parseShipmentIds, labOptions,
   findShipments, applyScope, shipmentDetails,
-} from '../model/scope.js?v=v2026-10-18.2';
+} from '../model/scope.js?v=v2026-10-18.3';
 import {
   normalizeDeltaMode, isWeekDeltaMode, DEFAULT_DELTA_MODE,
-} from '../model/delta-baseline.js?v=v2026-10-18.2';
+} from '../model/delta-baseline.js?v=v2026-10-18.3';
 // REPORT TYPES (2026-10-11): KAMC + SGH (the main weekly report, default) / KAMC / SGH.
 // STATIC for scope.js's reason: WHICH hospital's rows a report reads has no safe degraded
 // answer, and hospital.js is pure (no imports at all). The per-hospital MODEL builders
 // (model/hospital-report.js) are a guarded import inside render(), like the engine they
 // depend on — absent, an SGH / KAMC + SGH build throws and modelFor says so.
-import { HOSPITALS, HOSPITAL_MODES, rowsForMode } from '../model/hospital.js?v=v2026-10-18.2';
+import { HOSPITALS, HOSPITAL_MODES, rowsForMode } from '../model/hospital.js?v=v2026-10-18.3';
 
 /* small local module helpers (kept local to avoid cross-screen coupling) */
 async function tryImport(path) { try { return await import(path); } catch { return null; } }
@@ -125,6 +127,9 @@ function defaultReportOptions() {
     trackerLang: DEFAULT_TRACKER_LANG,
     // «دورية التقرير» (2026-10-18): weekly — today's deck — unless the user chose daily.
     cadence: DEFAULT_CADENCE,
+    // «إظهار المهام المكتملة» (2026-10-18): OFF — the task slides as they were before the
+    // option; the user turns it on once and it stays (persistReportOptions).
+    trackerShowCompleted: false,
   };
 }
 
@@ -145,6 +150,9 @@ export function reportOptionsFromSettings(settings) {
     autoDownloadFiles: ro.autoDownloadFiles != null ? !!ro.autoDownloadFiles : base.autoDownloadFiles,
     trackerLang: normalizeTrackerLang(ro.trackerLang),
     cadence: normalizeCadence(ro.cadence),
+    // Only a stored `true` is ON — the deck builders' own reading, so the switch and the
+    // preview can never disagree.
+    trackerShowCompleted: normalizeTrackerShowCompleted(ro.trackerShowCompleted),
     // The SAVED (fixed) slide order — carried only when one is stored: ABSENT means the
     // default (model/slide-order.js), so a unit added in a later version lands in its default
     // place instead of being frozen out by a copy written here. The TEMPORARY order never
@@ -179,6 +187,8 @@ export function mergeReportOptions(cur, ro) {
     trackerLang: normalizeTrackerLang(r.trackerLang),
     // «دورية التقرير» pills — the same key Settings' radio writes.
     cadence: normalizeCadence(r.cadence),
+    // «إظهار المهام المكتملة» pills — the same key Settings' checkbox writes; a real boolean.
+    trackerShowCompleted: normalizeTrackerShowCompleted(r.trackerShowCompleted),
   };
 }
 
@@ -1197,7 +1207,7 @@ export async function render(container, ctx) {
   // any failure, which simply omits the two slides.
   if (state.sendoutMaster === undefined) {
     const dataKey = ((store.settings || {}).grafana || {}).dataKey || '';
-    const mod = await tryImport('../ingest/sendout-master.js?v=v2026-10-18.2');
+    const mod = await tryImport('../ingest/sendout-master.js?v=v2026-10-18.3');
     state.sendoutMaster = (mod && mod.loadSendoutMaster)
       ? await mod.loadSendoutMaster(dataKey)
       : null;
@@ -1213,11 +1223,11 @@ export async function render(container, ctx) {
   // so the app always takes the guarded import.
   const compute = typeof ctx.compute === 'function'
     ? ctx.compute
-    : pickFn(await tryImport('../engine/engine.js?v=v2026-10-18.2'), ['compute', 'runEngine', 'run']);
+    : pickFn(await tryImport('../engine/engine.js?v=v2026-10-18.3'), ['compute', 'runEngine', 'run']);
   // The SGH / KAMC + SGH model builders — guarded like the engine they depend on. Loaded
   // even in KAMC mode: the generate click and a report-type switch go through modelFor
   // with it, and a missing module must surface as modelFor's loud fallback, not a crash.
-  const hrMod = await tryImport('../model/hospital-report.js?v=v2026-10-18.2');
+  const hrMod = await tryImport('../model/hospital-report.js?v=v2026-10-18.3');
   const model = modelFor(state, store, compute, { hospitalReport: hrMod });
   // The report type ON SCREEN — the model's, which is the state's choice unless that
   // build failed and modelFor fell back to KAMC (it said so).
@@ -1264,7 +1274,7 @@ export async function render(container, ctx) {
   // Guarded import, exactly as the retired picker was: a build without the module
   // degrades to the engine's own deltas instead of throwing. Re-run below on a
   // report-date change and on a mode switch; being PURE, every re-run agrees.
-  const dwMod = await tryImport('../model/delta-window.js?v=v2026-10-18.2');
+  const dwMod = await tryImport('../model/delta-window.js?v=v2026-10-18.3');
   const stampWindow = dwMod && dwMod.stampWindowDeltas;
   // The chips need the parsed CSV rows: with no upload in this session (mock preview)
   // stampWindowDeltas leaves the engine's deltas alone and stamps no window, and the
@@ -1364,9 +1374,9 @@ export async function render(container, ctx) {
     // A range's END when one is active (the deck is dated 'to'), else the chosen date.
     model.reportDate = effectiveReportDate(state, model.scope);
     stampDeltas(); // re-window the chips for the current report date (pure → idempotent)
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-10-18.2');
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-10-18.3');
     const buildSpec = pickFn(specMod, ['buildSpec', 'build', 'makeSpec', 'toSpec']);
-    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-10-18.2');
+    const rendMod = await tryImport('../render/html-renderer.js?v=v2026-10-18.3');
     const renderFn = pickFn(rendMod, ['renderSpec', 'renderSlides', 'renderHtml', 'render']);
 
     if (!buildSpec || !renderFn) {
@@ -1674,6 +1684,18 @@ export async function render(container, ctx) {
       if (state.trackerBuiltinTM !== undefined) runMachinePass(false);
     },
   });
+  // «إظهار المهام المكتملة في شريحة متابعة المهام» (2026-10-18 user request: «I want it to
+  // be an OPTIONAL so whenever I want it I don't want to return here to tell you to do so»).
+  // A REPORT OPTION beside the language: persisted with it (persistReportOptions — Settings
+  // mirrors it, the automation reads the saved one), and the preview re-renders at once.
+  const trackerDone = trackerShowCompletedControl({
+    value: model.reportOptions.trackerShowCompleted,
+    onChange: (v) => {
+      model.reportOptions.trackerShowCompleted = normalizeTrackerShowCompleted(v);
+      persistReportOptions();
+      schedulePreview();
+    },
+  });
   // AUTOMATIC ARABIC — the status line (CONTRACT-AUTO §6). The user uploads the normal
   // English tracker; the tasks are translated FOR them (built-in memory → their corrections
   // → the on-device translator). So the card no longer asks for an Arabic Excel: it says
@@ -1821,6 +1843,7 @@ export async function render(container, ctx) {
   const trackerCard = el('div', { class: 'card' }, [
     el('div', { class: 'card__title', text: STR.tracker.title }),
     trackerLang.el,
+    trackerDone.el,
     autoStatus,
     namesEd.el,
     trackerEd.el,
@@ -1971,7 +1994,8 @@ export async function render(container, ctx) {
   }
   /* «دورية التقرير» (2026-10-18, CONTRACT A) — the SAME report as weekly (default) or daily:
    * the cover says «الأسبوعي» / «اليومي»; daily has no «المهام المكتملة خلال الأسبوع» slide
-   * (the task slides show only the NOT-completed tasks in BOTH cadences — 2026-10-18). A
+   * (the task slides show only the NOT-completed tasks in BOTH cadences — 2026-10-18 — unless
+   * the tracker card's «إظهار المهام المكتملة» is on, again in both). A
    * report option persisted like the tracker language (persistReportOptions; Settings
    * mirrors it; the automation reads the saved one). NEVER
    * coupled to «نافذة النشاط» (deltaMode): a daily report may still carry the week's chips. */
@@ -2133,7 +2157,7 @@ export async function render(container, ctx) {
     el('summary', { class: 'card__title', style: 'cursor:pointer', text: STR.review.labelsCardTitle }),
   ]);
   (async () => {
-    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-10-18.2');
+    const specMod = await tryImport('../slidespec/build-spec.js?v=v2026-10-18.3');
     const LABEL_NAMES = specMod && specMod.LABEL_NAMES;
     const DEFAULT_LABELS = (specMod && specMod.DEFAULT_LABELS) || {};
     if (!LABEL_NAMES || typeof LABEL_NAMES !== 'object') {
