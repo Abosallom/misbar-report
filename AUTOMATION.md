@@ -112,7 +112,8 @@ disables a schedule. `misbar-daily.sh` takes the mode as its **only** optional a
 (`daily` — the default — or `weekly`); an unrecognised value degrades to `daily` instead of
 failing the run. The mode is not a different pipeline, with ONE exception — the report's
 cadence («دورية التقرير»): `mode=weekly` makes that run's deck **weekly** (cover «الأسبوعي»,
-Completed tasks shown, the «المهام المكتملة خلال الأسبوع» slide) even when «يومي» was last
+the «المهام المكتملة خلال الأسبوع» slide — the only place a Completed task ever prints, and
+only one completed during the week) even when «يومي» was last
 saved on the review screen, and `mode=daily` would make it daily. The override is per run and
 never saved. The plain daily trigger (`?auto=1`, no mode) uses the saved cadence.
 

@@ -1,5 +1,5 @@
 // ui/components.js — shared DOM helpers used by Track E screens.
-import { STR, formatDateAr } from '../i18n/ar.js?v=v2026-10-18.1';
+import { STR, formatDateAr } from '../i18n/ar.js?v=v2026-10-18.2';
 // The project tracker document's OWNER (shape, tag, due-date rule, new-row factory). STATIC,
 // like scope.js / hospital.js elsewhere: the module is pure (SheetJS is injected, never
 // imported), and the editor below must apply the parser's own rules — a website-typed
@@ -9,7 +9,7 @@ import { STR, formatDateAr } from '../i18n/ar.js?v=v2026-10-18.1';
 import {
   isProjectTracker, newTask as blankTrackerTask, normalizeDueText, TRACKER_FORMAT,
   TRACKER_LANGS, DEFAULT_TRACKER_LANG, normalizeTrackerLang as parseTrackerLang,
-} from '../ingest/task-tracker.js?v=v2026-10-18.1';
+} from '../ingest/task-tracker.js?v=v2026-10-18.2';
 // ONE status rule for the editor pill, the upload card's counts and the deck (2026-10-18):
 // model/tracker-status.js owns the alias table (English as the workbook writes it,
 // 'Deleyed' included, plus the Arabic words) AND the overdue rule (not Completed + due before
@@ -18,7 +18,7 @@ import {
 // the deck prints as «متوقف» / «متأخر». Pure; no imports.
 import {
   baseStatus, effectiveStatus, STATUS_KEYS, STATUS_AR,
-} from '../model/tracker-status.js?v=v2026-10-18.1';
+} from '../model/tracker-status.js?v=v2026-10-18.2';
 // AUTOMATIC ARABIC (2026-10-13, CONTRACT-AUTO §1): the translation memory's ONE set of rules
 // — the lookup key, the layer precedence (file > user > built-in > machine), the user-TM
 // edits, the machine cache + glossary, the counts. Pure (no DOM, no storage, no imports), so
@@ -28,7 +28,7 @@ import {
   trackerTranslationStats, collectUntranslated, normEn, TM_MAX_CHARS,
   // «ترجمة الأسماء» (2026-10-18): every distinct owner / entity name part with its Arabic.
   trackerNameEntries,
-} from '../model/tracker-translate.js?v=v2026-10-18.1';
+} from '../model/tracker-translate.js?v=v2026-10-18.2';
 
 /** Tiny hyperscript helper. */
 export function el(tag, props = {}, children = []) {
@@ -339,8 +339,9 @@ export function trackerStatusLabel(status) {
  * (every non-completed task past its date — overdue Stopped included). Zero counts are
  * omitted. Pure; the upload card's stats. Without a valid reportDate nothing is overdue,
  * so the counts are the file's own statuses.
- * The deck's DAILY variant drops the Completed tasks; the upload card describes the whole
- * file, so its «مكتمل» line stays.
+ * The deck's task slides drop the Completed tasks in EVERY cadence (2026-10-18 — they print
+ * only on the weekly «المهام المكتملة خلال الأسبوع» slide); the upload card describes the
+ * whole FILE, so its «مكتمل» line stays.
  * @param {object} tracker
  * @param {string} [reportDate] - 'yyyy-mm-dd' — the report's date (the overdue reference)
  * @returns {{key:string, label:string, count:number}[]}
@@ -484,19 +485,23 @@ export function moveTrackerTask(tracker, id, delta, now) {
 }
 
 /** The «المسار › المرحلة» heading text a task sits under in the editor. Without `lang`
- *  (or 'en') it is the English pair. With 'ar' / 'both' each part is its Arabic name,
- *  falling back to the English one per part (the slide's per-cell rule). Display only —
- *  where a heading starts is trackerGroupKey's job. */
+ *  it is the English pair. With ANY slide language — 'en' included since 2026-10-18 (the
+ *  user's correction: the stage / track translations apply to the English slide too; only
+ *  the task text stays English there) — each part is its Arabic name, falling back to the
+ *  English one per part (the slide's per-cell rule). Display only — where a heading starts
+ *  is trackerGroupKey's job. */
 export function trackerGroupLabel(task, lang) {
   const t = task || {};
-  const ar = lang != null && normalizeTrackerLang(lang) !== 'en';
+  const ar = lang != null;
   const part = (en, arKey, none) => (ar && String(t[arKey] || '').trim()) || String(t[en] || '').trim() || none;
   return `${part('track', 'trackAr', STR.tracker.noTrack)} › ${part('milestone', 'milestoneAr', STR.tracker.noMilestone)}`;
 }
 
 /** The editor's GROUPING key: consecutive tasks with the same key share one heading. It is
- *  the slide's merge rule (slidespec/build-tracker.js trackKey / msKey) — the English pair,
- *  plus (outside 'en') the Arabic pair — so the list splits exactly where the deck does.
+ *  the slide's merge rule (slidespec/build-tracker.js trackKey / msKey) — the English pair
+ *  plus the Arabic pair, in every language ('en' too since 2026-10-18: its group labels
+ *  print the Arabic) — so the list splits exactly where the deck does. `lang` is accepted
+ *  for call-site parity.
  *  trackAr / milestoneAr are stored PER TASK: a group whose Arabic name differs on one task
  *  prints as separate blocks on the slide, and the editor must show that same split rather
  *  than one heading named from the group's first task. Whitespace runs collapse as on the
@@ -504,13 +509,13 @@ export function trackerGroupLabel(task, lang) {
 export function trackerGroupKey(task, lang) {
   const t = task || {};
   const c = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
-  const en = `${c(t.track)}\u0001${c(t.milestone)}`;
-  return normalizeTrackerLang(lang) === 'en' ? en : `${en}\u0001${c(t.trackAr)}\u0001${c(t.milestoneAr)}`;
+  return `${c(t.track)}\u0001${c(t.milestone)}\u0001${c(t.trackAr)}\u0001${c(t.milestoneAr)}`;
 }
 
 /* ---------- The slide's task language (reportOptions.trackerLang) ---------- */
 
-/* 'ar' (Arabic, English fallback per cell) | 'en' (the file's English, unchanged) |
+/* 'ar' (Arabic, English fallback per cell) | 'en' (the TASK text in the file's English,
+ * unchanged; stage / track / owner / entity still Arabic — 2026-10-18) |
  * 'both' (Arabic + the English original under it) — the enum and its default are the
  * tracker module's (ingest/task-tracker.js), re-exported so the screens import one place.
  * Order = the selector's order. */
@@ -926,7 +931,7 @@ export function loadBuiltinTrackerTM(state, store, importer) {
   state.trackerBuiltinTMLoading = (async () => {
     let doc = null;
     try {
-      const mod = await imp('../ingest/tracker-translations.js?v=v2026-10-18.1');
+      const mod = await imp('../ingest/tracker-translations.js?v=v2026-10-18.2');
       const load = mod && (mod.loadTrackerTranslations || mod.fetchTrackerTranslations);
       const key = ((((store && store.settings) || {}).grafana) || {}).dataKey || '';
       doc = typeof load === 'function' ? await load(key) : null;
@@ -1031,12 +1036,20 @@ export function trackerUntranslatedTexts(tracker) {
 
 /**
  * The tracker card's status (CONTRACT-AUTO §6), pure: null when there is nothing to say
- * ('en' — the slide prints the English anyway — or no tasks); else
- * { translated, total, remaining, machine } — «N من M مهمة مترجمة تلقائيًا», and how many
- * still show in English (`remaining` — the hint / button appear only when it is > 0).
+ * (no tasks); else { translated, total, remaining, machine } — «N من M مهمة مترجمة
+ * تلقائيًا», and how many still show in English (`remaining` — the hint / button appear
+ * only when it is > 0).
+ * In 'en' (2026-10-18 user correction) only the TASK text prints in English: the track and
+ * stage names still print their Arabic, so the card speaks only about those — null when
+ * every track / stage name has Arabic, else { scope: 'groups', remaining } (how many
+ * distinct track / stage names would still print in English).
  */
 export function trackerTranslationStatus(tracker, lang) {
-  if (normalizeTrackerLang(lang) === 'en') return null;
+  if (normalizeTrackerLang(lang) === 'en') {
+    const u = collectUntranslated(tracker);
+    const remaining = u.tracks.length + u.milestones.length;
+    return remaining ? { scope: 'groups', remaining } : null;
+  }
   const s = trackerTranslationStats(tracker);
   if (!s.total) return null;
   return { translated: s.translated, total: s.total, remaining: s.untranslated, machine: s.bySource.machine };
@@ -1289,8 +1302,8 @@ export function trackerEditor({ tracker: initial, lang: initialLang, onChange, o
     }
     let group = null;
     tracker.tasks.forEach((task, i) => {
-      // Grouped by the slide's own merge key (trackerGroupKey: the English pair, plus the
-      // Arabic pair outside 'en'), so a task whose Arabic group name differs from its
+      // Grouped by the slide's own merge key (trackerGroupKey: the English pair plus the
+      // Arabic pair, every language), so a task whose Arabic group name differs from its
       // neighbours' gets its own heading here exactly as it gets its own block in the deck.
       // Shown in the slide's language; 'both' adds the English original under it.
       const k = trackerGroupKey(task, lang);

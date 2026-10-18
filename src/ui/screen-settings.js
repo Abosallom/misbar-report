@@ -8,17 +8,17 @@
 // mirror of the automation panel), live source (Grafana + cached-tracker), and
 // backup (export/import).
 
-import { SNAPSHOT_SEED, REPORT_OPTIONS_SEED, AUTOMATION_SEED } from '../seeds/defaults.js?v=v2026-10-18.1';
-import { normalizeDeltaMode } from '../model/delta-baseline.js?v=v2026-10-18.1';
+import { SNAPSHOT_SEED, REPORT_OPTIONS_SEED, AUTOMATION_SEED } from '../seeds/defaults.js?v=v2026-10-18.2';
+import { normalizeDeltaMode } from '../model/delta-baseline.js?v=v2026-10-18.2';
 // The connection test's per-hospital line (STR.settings) — ar.js is pure and DOM-free
 // (every other screen imports it), so module-smoke's bare-Node import still holds.
-import { STR } from '../i18n/ar.js?v=v2026-10-18.1';
+import { STR } from '../i18n/ar.js?v=v2026-10-18.2';
 // NAMESPACE import on purpose: the access tab reads lock.currentUser(), which is a
 // newer export. A named import would throw at link time on any build of lock.js that
 // predates it (and take the whole settings screen down); a namespace import lets the
 // tab degrade to 'unknown user' instead. lock.js is DOM-free at module scope, so this
 // stays importable in bare Node (test/module-smoke).
-import * as lock from './lock.js?v=v2026-10-18.1';
+import * as lock from './lock.js?v=v2026-10-18.2';
 // The project tracker document (tracker CONTRACT §1.3): the review editor's pending save
 // (flushed before this screen loads its working copy — its autosave would otherwise
 // write the stale cache back), and the one "is this a tagged tracker" rule.
@@ -27,13 +27,13 @@ import * as lock from './lock.js?v=v2026-10-18.1';
 import {
   trackerSaver, trackerMetaLine, TRACKER_LANG_OPTIONS, normalizeTrackerLang,
   slideOrderList, slideOrderLabel,
-} from './components.js?v=v2026-10-18.1';
+} from './components.js?v=v2026-10-18.2';
 // «ترتيب الشرائح» — the SAVED (fixed) slide order, reportOptions.slideOrder: the shared unit
 // vocabulary (model/slide-order.js, a pure leaf) and the review card's own list widget.
-import { SLIDE_ORDER_KEYS, normalizeSlideOrder } from '../model/slide-order.js?v=v2026-10-18.1';
-import { resolveProjectTracker } from '../model/report-model.js?v=v2026-10-18.1';
+import { SLIDE_ORDER_KEYS, normalizeSlideOrder } from '../model/slide-order.js?v=v2026-10-18.2';
+import { resolveProjectTracker } from '../model/report-model.js?v=v2026-10-18.2';
 // «دورية التقرير» (2026-10-18): the cadence enum's one home (the review pills read it too).
-import { CADENCES, normalizeCadence } from '../contracts.js?v=v2026-10-18.1';
+import { CADENCES, normalizeCadence } from '../contracts.js?v=v2026-10-18.2';
 
 const TABS = [
   { id: 'tat', label: 'مدة الفحوصات' },
@@ -81,9 +81,12 @@ const REPORT_SLIDE_FIELDS = [
   { key: 'monthly', label: 'الطلبات الشهرية' },
   { key: 'sendout', label: 'أين تُجرى الفحوصات — محلي مقابل دولي' },
   { key: 'compliance', label: 'مقياس الالتزام' },
-  { key: 'tracker', label: 'متابعة المهام (كل أنواع التقارير)' },
+  // «المهام غير المكتملة»: since 2026-10-18 the task slides never show a completed task, in
+  // any cadence — the label says so, so nobody looks for the completed ones there.
+  { key: 'tracker', label: 'متابعة المهام — المهام غير المكتملة (كل أنواع التقارير)' },
   // The weekly slide of the tasks that BECAME completed this week (2026-10-18) — its own
-  // switch, apart from the task slides; never in a daily report.
+  // switch, apart from the task slides; never in a daily report. The ONLY slide that shows a
+  // completed task.
   { key: 'trackerCompleted', label: 'المهام المكتملة خلال الأسبوع (التقرير الأسبوعي فقط)' },
   { key: 'challenges', label: 'التحديات والمخاطر (تقرير المستشفى الواحد، عند وجود محتوى)' },
   { key: 'definitions', label: 'منهجية الأرقام', optIn: true },

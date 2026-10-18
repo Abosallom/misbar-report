@@ -237,7 +237,10 @@ const sendoutOf = (n) => ({
 const withEverySlide = (scope, details = [], countries = 2) => scoped(scope, details, {
   reportOptions: { slides: { definitions: true } },
   // 40 tracker rows → continuation pages (was 40 tasksInternal rows for the retired action slide).
-  projectTracker: { ...MOCK_REPORT_MODEL.projectTracker, tasks: Array.from({ length: 40 }, (_, i) => ({ ...MOCK_REPORT_MODEL.projectTracker.tasks[0], id: `t${i}`, task: `t${i}` })) },
+  // UPDATED 2026-10-18: forced to In Progress — the fixture's first task is Completed, and the
+  // task slides no longer print a Completed task in any cadence (user correction), so 40
+  // copies of it would print no page at all.
+  projectTracker: { ...MOCK_REPORT_MODEL.projectTracker, tasks: Array.from({ length: 40 }, (_, i) => ({ ...MOCK_REPORT_MODEL.projectTracker.tasks[0], id: `t${i}`, task: `t${i}`, status: 'In Progress' })) },
   sendout: sendoutOf(countries),
 });
 

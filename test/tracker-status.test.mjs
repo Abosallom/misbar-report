@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 
 import {
   STATUS_KEYS, STATUS_AR, PRIORITY_AR,
-  baseStatus, priorityKey, dueISO, effectiveStatus, sortStageTasks, trackerSummary, dailyTasks,
+  baseStatus, priorityKey, dueISO, effectiveStatus, sortStageTasks, trackerSummary, dailyTasks, openTasks,
   taskLogKey, recordStatusLog, completedDuring, normalizeStatusLog,
   STATUS_LOG_ENTRY_LIMIT, STATUS_LOG_TASK_LIMIT,
 } from '../src/model/tracker-status.js';
@@ -290,7 +290,9 @@ test('trackerSummary: counts match effectiveStatus; pastDue includes Late and ov
   }
 });
 
-test('trackerSummary: excludeCompleted counts only the tasks the daily deck shows', () => {
+// 2026-10-18 user correction: the task slides show no Completed task in EITHER cadence (it was
+// the daily deck's rule), so excludeCompleted / openTasks describe every deck's task slides.
+test('trackerSummary: excludeCompleted counts only the tasks the task slides show', () => {
   assert.deepEqual(trackerSummary(MIX, RD, { excludeCompleted: true }), {
     total: 9, completed: 0, inProgress: 1, late: 3, stopped: 2, notStarted: 2, other: 1, pastDue: 3,
   });
@@ -303,10 +305,11 @@ test('trackerSummary: empty / garbage → zeros', () => {
   assert.deepEqual(trackerSummary(null, RD), zero);
 });
 
-test('dailyTasks: drops every Completed task (any spelling), keeps order and everything else', () => {
-  assert.deepEqual(ids(dailyTasks(MIX, RD)), ['ip', 'ipOver', 'blankOver', 'del', 'stOver', 'st', 'ns', 'ns2', 'oth']);
-  assert.deepEqual(ids(dailyTasks([T({ id: 'a', status: 'مكتمل' }), T({ id: 'b', status: 'complete' })], RD)), []);
-  assert.deepEqual(dailyTasks(null, RD), []);
+test('openTasks (= dailyTasks, its former name): drops every Completed task (any spelling), keeps order and everything else', () => {
+  assert.equal(dailyTasks, openTasks, 'one list under both names');
+  assert.deepEqual(ids(openTasks(MIX, RD)), ['ip', 'ipOver', 'blankOver', 'del', 'stOver', 'st', 'ns', 'ns2', 'oth']);
+  assert.deepEqual(ids(openTasks([T({ id: 'a', status: 'مكتمل' }), T({ id: 'b', status: 'complete' })], RD)), []);
+  assert.deepEqual(openTasks(null, RD), []);
 });
 
 // ---- taskLogKey --------------------------------------------------------------------------

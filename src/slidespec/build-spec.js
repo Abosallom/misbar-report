@@ -14,7 +14,8 @@
 // SINCE 2026-10-18 a report has a CADENCE (reportOptions.cadence, model/slide-order.js):
 // 'weekly' (default) adds «المهام المكتملة خلال الأسبوع» (key 'trackerCompleted') after the
 // task slides when the model carries a status log; 'daily' prints «تقرير مسبار اليومي» on
-// the cover and leaves every Completed task (and that slide) out. Nothing else differs.
+// the cover and leaves that slide out. Nothing else differs. (No cadence prints a Completed
+// task on the task slides — 2026-10-18 user correction; build-tracker.js.)
 // The action slide used to carry the tasks table AND the support band AND the challenges +
 // risks tables; the user's 2026-08-04 review split the last three onto their own slide so
 // every block has room (tasks 15 → 18 rows, challenges/risks 3 → 10 rows each).
@@ -70,19 +71,19 @@
 // standing rule, unchanged for it). The SGH and BOTH decks print exactly the names the
 // reference deck prints («SGH», «مستشفى الألماني السعودي») — the reference supersedes the
 // old rule for those two report types only.
-import { COLORS as C, GEOM } from '../theme.js?v=v2026-10-18.1';
-import { AR_COUNTRY, AR_COUNTRY_SHORT, reflabShort } from '../model/sendout.js?v=v2026-10-18.1';
-import { isScoped, hasRange } from '../model/scope.js?v=v2026-10-18.1';
+import { COLORS as C, GEOM } from '../theme.js?v=v2026-10-18.2';
+import { AR_COUNTRY, AR_COUNTRY_SHORT, reflabShort } from '../model/sendout.js?v=v2026-10-18.2';
+import { isScoped, hasRange } from '../model/scope.js?v=v2026-10-18.2';
 // The project-tracker slides (shared with build-spec-both.js; a leaf module, no cycle).
-import { buildTrackerSlides, buildTrackerCompletedSlides, TRACKER_LABELS } from './build-tracker.js?v=v2026-10-18.1';
+import { buildTrackerSlides, buildTrackerCompletedSlides, TRACKER_LABELS } from './build-tracker.js?v=v2026-10-18.2';
 // Slide ORDER (a leaf module, no cycle): the unit order the operator saved or chose for
 // this one report — see buildSpec's middleDefs.
-import { orderUnits, slideOrderOf, cadenceOf, unitInCadence } from '../model/slide-order.js?v=v2026-10-18.1';
+import { orderUnits, slideOrderOf, cadenceOf, unitInCadence } from '../model/slide-order.js?v=v2026-10-18.2';
 // NAMESPACE import on purpose: build-spec-both.js may import helpers back from this file
 // (an ESM cycle). A namespace binding is only read inside buildSpec, at CALL time, when
 // both modules have finished evaluating — and it tolerates either a named
 // `buildBothSpec` export (the contract's name) or a default export.
-import * as bothSpecModule from './build-spec-both.js?v=v2026-10-18.1';
+import * as bothSpecModule from './build-spec-both.js?v=v2026-10-18.2';
 
 // EXPLICIT-TRUE kpiCards KEYS. reportOptions.kpiCards normally reads "on unless === false"
 // (see buildExec's cardDefs filter). The keys in this set INVERT that: they render only
@@ -2643,7 +2644,7 @@ export function buildSpec(reportModel, { variant = 'internal' } = {}) {
     // (المهام) slide held, default ON ('tracker' is not in OPT_IN_SLIDES). The same slides
     // for both variants; no tracker / no task → [] (no slide, no page number used). The text
     // language is reportOptions.trackerLang ('ar' default | 'en' | 'both'; build-tracker.js);
-    // a DAILY cadence leaves every Completed task out.
+    // no cadence prints a Completed task there (2026-10-18 user correction).
     { key: 'tracker', build: () => buildTrackerSlides(m.projectTracker, { reportDate: m.reportDate, variant, labels: labelOf(m), lang: m.reportOptions?.trackerLang, cadence: cadenceOf(m) }) },
     // «المهام المكتملة خلال الأسبوع» (2026-10-18) — its OWN unit + toggle right after the
     // task slides, default ON; WEEKLY decks only (unitInCadence). Tasks that became

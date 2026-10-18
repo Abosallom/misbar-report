@@ -32,17 +32,17 @@
 
 import {
   SETTINGS_KEY, CADENCES, DEFAULT_CADENCE, canonicalCadence,
-} from './contracts.js?v=v2026-10-18.1';
-import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-10-18.1';
-import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-10-18.1';
+} from './contracts.js?v=v2026-10-18.2';
+import { TAT_LOOKUP } from './seeds/tat-lookup.js?v=v2026-10-18.2';
+import { SCORECARD_SEED } from './seeds/scorecard.js?v=v2026-10-18.2';
 import {
   HISTORICAL_CONSTANTS_SEED, SNAPSHOT_SEED, GRAFANA_SEED, REPORT_OPTIONS_SEED,
   SNAPSHOT_HISTORY_SEED, AUTOMATION_SEED, TASK_LOG_SEED,
-} from './seeds/defaults.js?v=v2026-10-18.1';
-import { DELTA_MODES, canonicalDeltaMode } from './model/delta-baseline.js?v=v2026-10-18.1';
+} from './seeds/defaults.js?v=v2026-10-18.2';
+import { DELTA_MODES, canonicalDeltaMode } from './model/delta-baseline.js?v=v2026-10-18.2';
 import {
   sanitizeTaskLog, recordShownTasks, TASK_LOG_LIMIT, TASK_KEY_MAX,
-} from './model/task-lifecycle.js?v=v2026-10-18.1';
+} from './model/task-lifecycle.js?v=v2026-10-18.2';
 // The ProjectTracker shape has ONE owner — the module that produces it. The store only
 // asks "is this the tagged document?" and "give me its clean copy", exactly as it
 // defers the taskLog entry shape to task-lifecycle.js above. The same module owns the
@@ -51,23 +51,23 @@ import {
 import {
   TRACKER_FORMAT, isProjectTracker, normalizeProjectTracker, normalizeTrackerLang, TRACKER_LANGS,
   backfillTaskFields,
-} from './ingest/task-tracker.js?v=v2026-10-18.1';
+} from './ingest/task-tracker.js?v=v2026-10-18.2';
 // The tracker translation memory's shape and bounds have one owner too — the module that
 // applies it. The store only decides when it is cleaned, capped and merged.
 import {
   sanitizeTranslationMemory, mergeTranslationMemory, emptyTranslationMemory,
   TM_ENTRY_LIMIT, TM_MAX_CHARS,
-} from './model/tracker-translate.js?v=v2026-10-18.1';
+} from './model/tracker-translate.js?v=v2026-10-18.2';
 // The slide-order vocabulary (reportOptions.slideOrder) has one owner too: the leaf module
 // the deck builders sort by. The store only cleans, caps and normalises with it.
-import { normalizeSlideOrder, SLIDE_ORDER_MAX } from './model/slide-order.js?v=v2026-10-18.1';
+import { normalizeSlideOrder, SLIDE_ORDER_MAX } from './model/slide-order.js?v=v2026-10-18.2';
 // The tracker status history's RECORDING rule (what an entry is, when one is appended) has
 // one owner too — the status module the weekly completed-tasks slide reads it with. The
 // store decides WHEN it runs (every cached-tracker write, the one-time seed) and bounds what
 // it keeps (sanitizeStatusLog below), exactly as it does for the translation memory.
 import {
   recordStatusLog, normalizeStatusLog, STATUS_LOG_TASK_LIMIT,
-} from './model/tracker-status.js?v=v2026-10-18.1';
+} from './model/tracker-status.js?v=v2026-10-18.2';
 
 export const SCHEMA_VERSION = 9;
 

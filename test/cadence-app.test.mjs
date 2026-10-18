@@ -1,8 +1,9 @@
 // test/cadence-app.test.mjs — «دورية التقرير» (weekly / daily) and the tracker status history,
 // the APP side (2026-10-18, CONTRACT A + C). Run: node --test
 //
-// The deck builders' own cadence rules (cover title, daily = no Completed task, the weekly-only
-// «المهام المكتملة خلال الأسبوع» unit) are pinned in the slides' tests. This file pins that the
+// The deck builders' own cadence rules (cover title, the weekly-only «المهام المكتملة خلال
+// الأسبوع» unit; and, in either cadence, no Completed task on the task slides — 2026-10-18)
+// are pinned in the slides' tests. This file pins that the
 // APP carries the option and the history to them, end to end:
 //   • ONE enum (contracts.js re-exports model/slide-order.js's), the seed agrees;
 //   • the store backfills / validates / imports / exports reportOptions.cadence;

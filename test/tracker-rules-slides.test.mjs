@@ -7,11 +7,15 @@
 //   • rule 2 — inside each stage: Late, Stopped, In Progress, Not Started, Completed, by
 //     priority then date; undated after dated; stage / track order = first appearance;
 //   • rule 3 — the fixed pill set, «لم يبدأ» (not «غير محدد»), counts = the table cells;
-//   • rule 4 — status / priority Arabic in every language; owner / entity Arabic outside 'en';
+//   • rule 4 — status / priority Arabic in every language; owner / entity Arabic in every
+//     language, 'en' included (2026-10-18 user correction — only the task text stays English);
 //   • rule 6 — owners centred, « / » joined, RTL; titles «متابعة المهام» / «… —تتمة»;
-//   • cadence — daily: no Completed task at all (rows + pill), «تقرير مسبار اليومي» on every
-//     cover, no completed-this-week slide; weekly: «المهام المكتملة خلال الأسبوع» after the
-//     task slides (own toggle / unit), from the status log, week = Friday → report date.
+//   • COMPLETED TASKS (2026-10-18 user correction) — the task slides never print a Completed
+//     task (rows + «مكتمل» pill) in EITHER cadence; a Completed task prints only on the weekly
+//     «المهام المكتملة خلال الأسبوع» slide, and only one that became Completed in the window;
+//   • cadence — daily: «تقرير مسبار اليومي» on every cover, no completed-this-week slide;
+//     weekly: «المهام المكتملة خلال الأسبوع» after the task slides (own toggle / unit), from
+//     the status log, window = the last seven days ending on the report date.
 // SYNTHETIC data only (public repo) — never the user's workbook rows, names or translations.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -92,8 +96,9 @@ test('rule 1: overdue → «متأخر» (blank / unknown status included), Stop
     assert.equal(by[k][6].text, 'متوقف', `${k}: Stopped stays Stopped`);
     assert.equal(by[k][7].color, '#DC2626', `${k}: its overdue date is red too`);
   }
-  assert.equal(by['done-old'][6].text, 'مكتمل');
-  assert.notEqual(by['done-old'][7].color, '#DC2626', 'a completed task is never overdue');
+  // UPDATED 2026-10-18: a Completed task is no longer on the task slides at all (it used to
+  // print «مكتمل», never red) — user correction: Completed only on the completed-this-week slide.
+  assert.ok(!by['done-old'], 'a completed task is not on the task slides');
   assert.equal(by['ip-future'][6].text, 'قيد التنفيذ');
   assert.equal(by['ip-today'][6].text, 'قيد التنفيذ', 'due ON the report date is still on time');
   assert.equal(by['odd-future'][6].text, 'Waiting on a vendor', 'an unmappable word not overdue prints verbatim');
@@ -118,12 +123,14 @@ test('rule 2: inside a stage — Late, Stopped, In Progress, Not Started, Comple
     T('stop-crit', 'On Hold', 'Critical', '2026-11-01'),
     T('done-crit', 'Completed', 'Critical', '2026-09-01'),
   ];
+  // UPDATED 2026-10-18: the Completed group (done-crit, done-low — priority order) is no
+  // longer printed here; its order is pinned on the completed-this-week slide below and in
+  // tracker-status.test.mjs (sortStageTasks).
   assert.deepEqual(taskTexts(buildTrackerSlides(tracker(tasks), { reportDate: RD })), [
     'late-crit-old', 'late-crit-new', 'late-high-undated', 'late-med-old',
     'stop-crit', 'stop-high',
     'ip-crit', 'ip-crit-undated', 'ip-high-late-ish', 'ip-high-far',
     'ns-high',
-    'done-crit', 'done-low',
   ]);
 });
 
@@ -135,8 +142,10 @@ test('rule 2: tracks and stages keep their first-appearance order; a scattered s
     task({ track: 'T2', milestone: 'M1', task: 'd', status: 'Delayed' }),
   ];
   const rows = rowsOf(buildTrackerSlides(tracker(tasks), { reportDate: RD }));
-  assert.deepEqual(rows.map((r) => r[2].text), ['d', 'a', 'c', 'b']);
-  assert.deepEqual([rows[0][0].text, rows[0][0].rowSpan, rows[0][1].text, rows[0][1].rowSpan], ['T2', 3, 'M1', 2]);
+  // UPDATED 2026-10-18: 'a' (Completed) is not printed; its stage M1 still comes first — the
+  // order is the WHOLE file's first appearance, not the printed subset's.
+  assert.deepEqual(rows.map((r) => r[2].text), ['d', 'c', 'b']);
+  assert.deepEqual([rows[0][0].text, rows[0][0].rowSpan, rows[0][1].text, rows[0][1].rowSpan], ['T2', 2, 'M1', 1]);
 });
 
 // ---- rule 3 ---------------------------------------------------------------------------------
@@ -159,6 +168,8 @@ function countCells(slides) {
   return { out, red };
 }
 
+// UPDATED 2026-10-18: no «مكتمل» pill in EITHER cadence (it was weekly-only) — the task
+// slides print no Completed task, and the pills count exactly what the tables print.
 test('rule 3: the fixed pill set, «لم يبدأ» not «غير محدد», every count = the table cells (weekly and daily)', () => {
   for (const cadence of ['weekly', 'daily']) {
     const slides = buildTrackerSlides(tracker(MIX()), { reportDate: RD, cadence });
@@ -170,33 +181,55 @@ test('rule 3: the fixed pill set, «لم يبدأ» not «غير محدد», eve
     assert.equal(n('أخرى'), out['Odd word'], `${cadence}: unmappable words`);
     assert.equal(n('متجاوزة الموعد'), red, `${cadence}: past due = the red dates (Late + overdue Stopped)`);
     assert.ok(!chips.some((c) => c.startsWith('غير محدد')), 'the old box name is gone');
-    if (cadence === 'weekly') assert.equal(n('مكتمل'), out['مكتمل'], 'weekly: completed');
-    else assert.ok(!chips.some((c) => c.startsWith('مكتمل')), 'daily: no completed pill at all');
-    // The order of the strip: total, (completed), in progress, late, stopped, not started, …
+    assert.ok(!chips.some((c) => c.startsWith('مكتمل')), `${cadence}: no completed pill at all`);
+    assert.ok(!out['مكتمل'], `${cadence}: no completed row`);
+    const notDone = MIX().filter((t) => effectiveStatus(t, RD).key !== 'completed').length;
+    assert.equal(n('إجمالي المهام'), notDone, `${cadence}: the total is the tasks shown, not the file's`);
+    // The order of the strip: total, in progress, late, stopped, not started, …
     const order = chips.map((c) => c.replace(/ \d+$/, ''));
-    const want = ['إجمالي المهام', ...(cadence === 'weekly' ? ['مكتمل'] : []), 'قيد التنفيذ', 'متأخر', 'متوقف', 'لم يبدأ', 'أخرى', 'متجاوزة الموعد'];
+    const want = ['إجمالي المهام', 'قيد التنفيذ', 'متأخر', 'متوقف', 'لم يبدأ', 'أخرى', 'متجاوزة الموعد'];
     assert.deepEqual(order, want);
   }
   // A zero bucket still shows (the boxes do not come and go between reports).
   assert.deepEqual(chipTexts(buildTrackerSlides(tracker([task({ status: 'In Progress' })]), { reportDate: RD })[0]),
-    ['إجمالي المهام 1', 'مكتمل 0', 'قيد التنفيذ 1', 'متأخر 0', 'متوقف 0', 'لم يبدأ 0', 'متجاوزة الموعد 0']);
+    ['إجمالي المهام 1', 'قيد التنفيذ 1', 'متأخر 0', 'متوقف 0', 'لم يبدأ 0', 'متجاوزة الموعد 0']);
 });
 
-// ---- daily ----------------------------------------------------------------------------------
+// ---- completed tasks: never on the task slides ----------------------------------------------
 
-test('daily: every Completed task is left out entirely; nothing else changes; all completed → no slide', () => {
+// UPDATED 2026-10-18 (was 'daily: every Completed task is left out…'): the user's correction —
+// «Completed Tasks should be ONLY mentioned in the Completed During the Week SLIDE and nothing
+// else (even Task Tracker whether Daily or Weekly)» — made the daily rule every cadence's.
+test('both cadences: every Completed task is left out entirely; a stage / track of only Completed tasks is gone; all completed → no slide', () => {
   const tasks = MIX();
   const weekly = buildTrackerSlides(tracker(tasks), { reportDate: RD });
   const daily = buildTrackerSlides(tracker(tasks), { reportDate: RD, cadence: 'daily' });
-  assert.ok(rowsOf(weekly).some((r) => r[6] && r[6].text === 'مكتمل'));
-  assert.ok(!rowsOf(daily).some((r) => r[6] && r[6].text === 'مكتمل'), 'no completed row');
-  const notDone = tasks.filter((t) => effectiveStatus(t, RD).key !== 'completed').length;
-  assert.equal(rowsOf(daily).filter((r) => r[7]).length, notDone, 'every other task is there');
-  assert.deepEqual(taskTexts(daily), taskTexts(weekly).filter((t) => !rowsOf(weekly).some((r) => r[2] && bare(r[2].text) === t && r[6].text === 'مكتمل')));
-  assert.equal(titleOf(daily[0]), 'متابعة المهام');
-  assert.deepEqual(buildTrackerSlides(tracker([task({ status: 'Completed' })]), { reportDate: RD, cadence: 'daily' }), []);
-  // Unknown / absent cadence = weekly.
+  for (const [name, slides] of [['weekly', weekly], ['daily', daily]]) {
+    assert.ok(!rowsOf(slides).some((r) => r[6] && r[6].text === 'مكتمل'), `${name}: no completed row`);
+    const notDone = tasks.filter((t) => effectiveStatus(t, RD).key !== 'completed');
+    assert.equal(rowsOf(slides).filter((r) => r[7]).length, notDone.length, `${name}: every other task is there`);
+    assert.deepEqual(taskTexts(slides).slice().sort(), notDone.map((t) => t.task).sort());
+    assert.equal(titleOf(slides[0]), 'متابعة المهام');
+  }
+  // The cadence no longer changes these slides at all.
+  assert.deepEqual(daily, weekly);
   assert.deepEqual(buildTrackerSlides(tracker(tasks), { reportDate: RD, cadence: 'nope' }), weekly);
+  for (const cadence of ['weekly', 'daily', undefined]) {
+    assert.deepEqual(buildTrackerSlides(tracker([task({ status: 'Completed' })]), { reportDate: RD, cadence }), [], `${cadence}: all completed → no slide`);
+  }
+  // A stage (and a track) whose every task is Completed disappears; the rest keep their blocks.
+  const mixed = [
+    task({ track: 'Done track', milestone: 'Done stage', task: 'gone-1', status: 'Completed' }),
+    task({ track: 'Done track', milestone: 'Done stage', task: 'gone-2', status: 'Done' }),
+    task({ track: 'Live track', milestone: 'Done stage B', task: 'gone-3', status: 'Completed' }),
+    task({ track: 'Live track', milestone: 'Live stage', task: 'kept', status: 'In Progress' }),
+  ];
+  const rows = rowsOf(buildTrackerSlides(tracker(mixed), { reportDate: RD }));
+  assert.deepEqual(rows.map((r) => r[2].text), ['kept']);
+  assert.deepEqual([rows[0][0].text, rows[0][0].rowSpan, rows[0][1].text, rows[0][1].rowSpan], ['Live track', 1, 'Live stage', 1]);
+  assert.ok(!rows.flat().some((c) => c && /Done (track|stage)/.test(c.text)), 'no empty group label');
+  // An overdue Completed task is still Completed — not «متأخر» — so it is left out too.
+  assert.deepEqual(buildTrackerSlides(tracker([task({ status: 'Completed', due: '2026-01-01' })]), { reportDate: RD }), []);
 });
 
 test('cadence helpers: weekly default, daily only by name; trackerCompleted is weekly-only; the seed matches', () => {
@@ -223,7 +256,9 @@ test('rule 6: titles «متابعة المهام» and «متابعة المها
   assert.deepEqual(slides.map(titleOf), ['متابعة المهام', ...slides.slice(1).map(() => 'متابعة المهام —تتمة')]);
 });
 
-test('rules 4 + 6: owner / entity — Arabic outside en, « / » joined, centred, RTL (embedded); en = the English', () => {
+// UPDATED 2026-10-18: 'en' used to print the English names; the user's correction («Translation
+// that I provided should be applied in the English version») makes the names Arabic in 'en' too.
+test('rules 4 + 6: owner / entity — Arabic in every language (en included), « / » joined, centred, RTL (embedded)', () => {
   assert.equal(joinNames('Owner A/Owner B /  Owner C'), 'Owner A / Owner B / Owner C');
   assert.equal(joinNames(' Single '), 'Single');
   assert.equal(joinNames(''), '');
@@ -233,7 +268,7 @@ test('rules 4 + 6: owner / entity — Arabic outside en, « / » joined, centred
   });
   const plain = task({ owner: 'Owner C', organization: 'ORG Z', ownerAr: '', organizationAr: '' });
   const partial = task({ owner: 'Owner D / Someone New', ownerAr: 'مسؤول د / Someone New' });
-  for (const lang of ['ar', 'both']) {
+  for (const lang of ['ar', 'both', 'en']) {
     const rows = rowsOf(buildTrackerSlides(tracker([t, plain, partial]), { reportDate: RD, lang }));
     const r = rows.find((x) => x[4] && bare(x[4].text) === 'مسؤول أ / مسؤول ب');
     assert.ok(r, `${lang}: the owner's Arabic`);
@@ -250,10 +285,19 @@ test('rules 4 + 6: owner / entity — Arabic outside en, « / » joined, centred
   // 'both': owners / entities print ONE line (Arabic) — the English line is for task / groups.
   const both = rowsOf(buildTrackerSlides(tracker([t]), { reportDate: RD, lang: 'both' }));
   assert.ok(!both.flat().some((c) => c && /Owner A|ORG X/.test(c.text)));
-  // 'en': the original English everywhere names are, joined; status / priority still Arabic.
-  const en = rowsOf(buildTrackerSlides(tracker([t]), { reportDate: RD, lang: 'en' }))[0];
-  assert.deepEqual([en[4].text, en[4].align, en[4].rtl, en[3].text], ['Owner A / Owner B', 'center', false, 'ORG X / ORG Y']);
+  // 'en': the names / entities exactly as 'ar' prints them; ONLY the task cell is the English.
+  const tr = { ...t, task: 'Synthetic English deliverable (v2) — sign-off', taskAr: 'مهمة تجريبية', trackAr: 'مسار تجريبي', milestoneAr: 'مرحلة تجريبية' };
+  const en = rowsOf(buildTrackerSlides(tracker([tr]), { reportDate: RD, lang: 'en' }))[0];
+  const ar = rowsOf(buildTrackerSlides(tracker([tr]), { reportDate: RD, lang: 'ar' }))[0];
+  assert.deepEqual([en[4].text, en[4].align, en[4].rtl], [`${RLE}مسؤول أ / مسؤول ب${PDF}`, 'center', true]);
+  assert.equal(bare(en[3].text), 'جهة س / جهة ص');
   assert.deepEqual([en[5].text, en[6].text], ['حرجة', 'لم يبدأ']);
+  assert.deepEqual([en[0].text, en[1].text], ['مسار تجريبي', 'مرحلة تجريبية'], "'en': track / stage Arabic");
+  assert.deepEqual([en[2].text, en[2].align, en[2].rtl], [tr.task, 'left', false], "'en': the task's original English, byte for byte");
+  assert.deepEqual(en.filter((_, c) => c !== 2), ar.filter((_, c) => c !== 2), "'en' = 'ar' outside the task column");
+  // 'both' keeps its own rule: the Arabic name only, no English line under it.
+  const bo = rowsOf(buildTrackerSlides(tracker([tr]), { reportDate: RD, lang: 'both' }));
+  assert.ok(!bo.flat().some((c) => c && /Owner A|ORG X/.test(c.text)));
 });
 
 // ---- the weekly completed-this-week slide ---------------------------------------------------
@@ -311,6 +355,21 @@ test('completed slide: the tasks that BECAME Completed this week, previous statu
   assert.equal(bare(rows[2][4].text), 'مسؤول أ / مسؤول ب', 'same owner rule as the task slides');
   assert.ok(!rows.some((r) => ['still-open', 'always-done', 'done-last-week'].includes(r[2].text)),
     'not completed / first seen completed / completed before the last seven days → not here');
+});
+
+// 2026-10-18 user correction: the language rule of the task slides applies here too — in 'en'
+// only the task text is English; track / stage / owner / entity are the Arabic translations.
+test("completed slide: 'en' prints the task's English and every other column like 'ar'", () => {
+  const { now, log } = weekFixture();
+  const withAr = tracker(now.tasks.map((t) => ({ ...t, taskAr: `ترجمة ${t.task}`, trackAr: 'مسار مترجم', milestoneAr: 'مرحلة مترجمة', organizationAr: 'لين' })));
+  const en = rowsOf(buildTrackerCompletedSlides(withAr, log, { reportDate: RD, lang: 'en' }));
+  const ar = rowsOf(buildTrackerCompletedSlides(withAr, log, { reportDate: RD, lang: 'ar' }));
+  assert.deepEqual(en.map((r) => r[2].text), ['was-stopped', 'was-late', 'was-ip'], "'en': the English task text");
+  assert.ok(ar.every((r) => bare(r[2].text).startsWith('ترجمة ')), "'ar': the Arabic task text");
+  assert.deepEqual(en.map((r) => r.filter((_, c) => c !== 2)), ar.map((r) => r.filter((_, c) => c !== 2)), "'en' = 'ar' outside the task column");
+  assert.equal(en[0][0].text, 'مسار مترجم');
+  assert.equal(en[0][3].text, 'لين');
+  assert.equal(bare(en[2][4].text), 'مسؤول أ / مسؤول ب', "'en': the owner's Arabic");
 });
 
 test('completed slide: none this week → ONE slide saying so; no log / no tracker / no date → no slide', () => {
@@ -395,6 +454,31 @@ test('decks: weekly → the completed slide right after the task slides; its tog
   // Without a status log (a model that never recorded one) the decks are what they were.
   const plain = buildSpec(structuredClone(MOCK_REPORT_MODEL)).map((s) => s.id);
   assert.ok(!plain.includes('trackerCompleted'));
+});
+
+// 2026-10-18 user correction: «Completed Tasks should be ONLY mentioned in the Completed During
+// the Week SLIDE and nothing else» — across the WHOLE weekly deck, the only slide with a
+// Completed row is «المهام المكتملة خلال الأسبوع», and it holds only this week's completions.
+test('decks (weekly): Completed tasks appear ONLY on the completed-this-week slide; all completed → only that slide', () => {
+  const { now, log } = weekFixture();
+  for (const [name, make] of Object.entries(DECKS)) {
+    for (const variant of ['internal', 'nupco']) {
+      const spec = buildSpec(withLog({ ...make(), projectTracker: now }, log), { variant });
+      const taskSlides = spec.filter((s) => /^tracker(-cont-\d+)?$/.test(s.id));
+      assert.ok(taskSlides.length, `${name} ${variant}: task slides present`);
+      assert.ok(!rowsOf(taskSlides).some((r) => r[6] && r[6].text === 'مكتمل'), `${name} ${variant}: no completed row on the task slides`);
+      assert.ok(!chipTexts(taskSlides[0]).some((c) => c.startsWith('مكتمل')), `${name} ${variant}: no completed pill`);
+      assert.deepEqual(taskTexts(taskSlides), ['still-open'], `${name} ${variant}: the open tasks only`);
+      const done = spec.filter((s) => s.id.startsWith('trackerCompleted'));
+      assert.deepEqual(taskTexts(done).slice().sort(), ['was-ip', 'was-late', 'was-stopped'],
+        `${name} ${variant}: only this week's completions (not 'always-done', not 'done-last-week')`);
+    }
+  }
+  // Every task Completed → no task slide, the completed-this-week slide stays.
+  const allDone = tracker(now.tasks.map((t) => ({ ...t, status: 'Completed' })));
+  const ids = buildSpec(withLog({ ...structuredClone(MOCK_REPORT_MODEL), projectTracker: allDone }, log)).map((s) => s.id);
+  assert.ok(!ids.some((id) => /^tracker(-cont-\d+)?$/.test(id)), 'no task slide');
+  assert.ok(ids.includes('trackerCompleted'));
 });
 
 test('decks: daily → «تقرير مسبار اليومي» on every cover, no completed task, no completed-this-week slide', () => {

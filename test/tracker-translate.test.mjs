@@ -11,7 +11,8 @@
 //   • the editor helpers (setUserTranslation / setOriginal / addMachineTranslations), the
 //     glossary post-pass (conservative), the bounds and the import merge;
 //   • normalizeProjectTracker keeps the bookkeeping (and only meaningful values);
-//   • the slides honour showOriginal; 'en' is byte-identical with or without any of it.
+//   • the slides honour showOriginal; 'en' task cells are byte-identical with or without any
+//     of it (2026-10-18: 'en' prints the group / name translations, like 'ar').
 // SYNTHETIC text only (public repo) — never the user's workbook rows or their translations.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -360,10 +361,21 @@ test('slides: showOriginal prints that task in English in \'ar\' and \'both\'; g
   );
 });
 
-test('slides: \'en\' is byte-identical with or without translations, sources and showOriginal', () => {
+// UPDATED 2026-10-18 (user correction «Translation that I provided should be applied in the
+// English version»): 'en' was byte-identical to the untranslated slides; now only its TASK
+// cells are — the original English whatever the task translations, sources or showOriginal
+// say — while the track / stage labels print their Arabic exactly like 'ar'.
+test('slides: \'en\' task cells are byte-identical with or without task translations, sources and showOriginal', () => {
   const raw = tracker([task({ task: 'Synthetic alpha' }), task({ task: 'Synthetic beta' })]);
   const applied = applyTrackerTranslations(raw, { user: setOriginal(emptyTranslationMemory(), 'Synthetic alpha', true), builtin: BUILTIN });
+  const taskCells = (slides) => slides.flatMap((s) => s.elements.find((e) => e.t === 'table').rows.slice(1).map((r) => r[5]));   // visual L→R: due, status, priority, owner, entity, TASK
   const a = buildTrackerSlides(raw, { reportDate: '2026-10-13', lang: 'en' });
   const b = buildTrackerSlides(applied, { reportDate: '2026-10-13', lang: 'en' });
-  assert.equal(JSON.stringify(b), JSON.stringify(a));
+  assert.equal(JSON.stringify(taskCells(b)), JSON.stringify(taskCells(a)), "'en' task cells: unchanged by any task translation");
+  assert.deepEqual(taskCells(b).map((c) => c.text), ['Synthetic alpha', 'Synthetic beta']);
+  // The task translations (and showOriginal) change nothing in 'en'; the group labels are Arabic.
+  const noTaskAr = { ...applied, tasks: applied.tasks.map((t) => ({ ...t, taskAr: '', taskArSource: '', showOriginal: false })) };
+  assert.equal(JSON.stringify(buildTrackerSlides(noTaskAr, { reportDate: '2026-10-13', lang: 'en' })), JSON.stringify(b));
+  assert.ok(cellTexts(b).includes('مسار تجريبي'), "'en': the track label's Arabic");
+  assert.ok(!cellTexts(b).includes('ألفا معتمدة'), "'en': never the task's Arabic");
 });

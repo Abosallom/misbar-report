@@ -1,8 +1,8 @@
 // engine/tat.js — standard-TAT resolution + the Slide-5 by-test chart catalog.
-import { normTest } from '../contracts.js?v=v2026-10-18.1';
+import { normTest } from '../contracts.js?v=v2026-10-18.2';
 // hasTestMenu: the per-hospital Test Menu switch (model/hospital.js HOSPITALS). Pure, no
 // imports of its own, so the engine stays DOM- and I/O-free.
-import { hasTestMenu } from '../model/hospital.js?v=v2026-10-18.1';
+import { hasTestMenu } from '../model/hospital.js?v=v2026-10-18.2';
 
 /**
  * Build a fast normalized index from a { testName: businessDays } lookup object.

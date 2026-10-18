@@ -2,7 +2,7 @@
 // Pure JSDoc typedefs; no runtime code except tiny helpers/constants.
 
 // The report-cadence enum (below) is owned by the slide-order leaf (no imports of its own).
-import { REPORT_CADENCES, DEFAULT_REPORT_CADENCE, reportCadence } from './model/slide-order.js?v=v2026-10-18.1';
+import { REPORT_CADENCES, DEFAULT_REPORT_CADENCE, reportCadence } from './model/slide-order.js?v=v2026-10-18.2';
 
 /**
  * Normalized order line (grain = one test on one order). Produced by ingest/csv.js
@@ -384,9 +384,10 @@ import { REPORT_CADENCES, DEFAULT_REPORT_CADENCE, reportCadence } from './model/
  *     REPLACES it, absence included: a backup whose reportOptions has no slideOrder is a
  *     default-order backup and resets the device to the default.
  *     cadence (2026-10-18; CADENCES below, default 'weekly') — «دورية التقرير»: 'daily' =
- *     the cover says «اليومي», the task slides show only tasks that are NOT completed, and
- *     there is no «المهام المكتملة خلال الأسبوع» slide (slides key 'trackerCompleted',
- *     default ON, weekly decks only). Validated like deltaMode; backfilled when absent.
+ *     the cover says «اليومي» and there is no «المهام المكتملة خلال الأسبوع» slide (slides
+ *     key 'trackerCompleted', default ON, weekly decks only). The task slides show only the
+ *     tasks that are NOT completed in BOTH cadences (2026-10-18 user correction).
+ *     Validated like deltaMode; backfilled when absent.
  * @property {{enabled:boolean, autoPull:boolean, autoGenerate:boolean, autoDownload:boolean,
  *             autoLabFiles:boolean, autoEmailDrafts:boolean, autoAcceptTat:boolean,
  *             dailyTime:string, labRecipients:Object<string,string>}} automation
@@ -453,9 +454,9 @@ export const normTest = (s) => (s == null ? '' : String(s).replace(/\s+/g, ' ').
 
 /* REPORT CADENCE (2026-10-18 user request): the SAME report as a «أسبوعي» (weekly — the
  * default, today's deck) or a «يومي» (daily) one — settings.reportOptions.cadence. Daily
- * changes the cover title, drops Completed tasks from the task slides and has no
- * «المهام المكتملة خلال الأسبوع» slide. INDEPENDENT of reportOptions.deltaMode (the chips'
- * activity window): the two are never coupled. The enum's OWNER is model/slide-order.js (the
+ * changes the cover title and has no «المهام المكتملة خلال الأسبوع» slide (no cadence
+ * prints a Completed task on the task slides — 2026-10-18 user correction). INDEPENDENT of
+ * reportOptions.deltaMode (the chips' activity window): the two are never coupled. The enum's OWNER is model/slide-order.js (the
  * leaf the deck builders gate the weekly-only unit with); it is re-exported here so the
  * store, the screens and the automation read the very same list — two copies could drift. */
 export const CADENCES = REPORT_CADENCES;

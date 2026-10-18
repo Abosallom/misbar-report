@@ -1,7 +1,7 @@
 // model/tracker-status.js — the project tracker's STATUS RULES (Aziz, 2026-10-18).
 //
 // One pure module owns every decision the user spelled out about a tracker task's
-// status, so the task slides, the summary pills, the daily filter and the weekly
+// status, so the task slides, the summary pills, the open-tasks filter and the weekly
 // «المهام المكتملة خلال الأسبوع» slide can never disagree with each other:
 //
 //   1. A task that is not Completed and whose due date is strictly before the REPORT
@@ -199,8 +199,9 @@ export function sortStageTasks(tasks, reportDate) {
 // ---- summary pills (rule 3) ------------------------------------------------------------
 
 /**
- * Counts over the tasks a deck SHOWS (pass excludeCompleted for the daily deck, which
- * shows no Completed task at all), computed from effectiveStatus so the pills always
+ * Counts over the tasks a deck SHOWS (pass excludeCompleted for the «متابعة المهام» slides,
+ * which show no Completed task at all in either cadence — 2026-10-18 user correction),
+ * computed from effectiveStatus so the pills always
  * match the table cells. `other` (unmappable statuses) is reported too so the buckets
  * always add up to `total`.
  * @returns {{ total:number, completed:number, inProgress:number, late:number, stopped:number,
@@ -218,10 +219,18 @@ export function trackerSummary(tasks, reportDate, { excludeCompleted = false } =
   return out;
 }
 
-/** The daily deck's task list: every task whose effective status is not Completed. */
-export function dailyTasks(tasks, reportDate) {
+/**
+ * The «متابعة المهام» slides' task list, in BOTH cadences: every task whose effective status
+ * is not Completed. 2026-10-18 user correction: «Completed Tasks should be ONLY mentioned in
+ * the Completed During the Week SLIDE and nothing else (even Task Tracker whether Daily or
+ * Weekly)» — so this was the daily deck's rule and is now every deck's.
+ */
+export function openTasks(tasks, reportDate) {
   return (Array.isArray(tasks) ? tasks : []).filter((t) => effectiveStatus(t, reportDate).key !== 'completed');
 }
+/** The former name (the rule began as the daily deck's) — kept so callers and tests that
+ *  still say dailyTasks read the very same list. */
+export const dailyTasks = openTasks;
 
 // ---- status history (settings.trackerStatusLog) ----------------------------------------
 //

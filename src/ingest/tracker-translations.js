@@ -12,7 +12,7 @@
 // A failure here is never fatal: the caller gets null and the tracker keeps whatever the
 // other layers give it (the user's corrections, the on-device machine cache, or the
 // English). A deck in English is a far better outcome than no deck.
-import { sanitizeEntries } from '../model/tracker-translate.js?v=v2026-10-18.1';
+import { sanitizeEntries } from '../model/tracker-translate.js?v=v2026-10-18.2';
 
 const CIPHER = 'AES-GCM';
 const IV_BYTES = 12;

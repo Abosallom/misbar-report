@@ -738,8 +738,8 @@ test('the automation publishes with the SAVED slide order — never the review\'
  *
  * scripts/misbar-daily.sh opens the Thursday job with &mode=weekly; main.js hands it to
  * runAutomation as `cadence`. A «يومي» the operator last saved on the review screen must
- * not turn the weekly report daily (cover «اليومي», no Completed tasks, no
- * «المهام المكتملة خلال الأسبوع» slide) — and the override must not leak into settings.
+ * not turn the weekly report daily (cover «اليومي», no
+ * «المهام المكتملة خلال الأسبوع» slide — the only slide with Completed tasks) — and the override must not leak into settings.
  * ------------------------------------------------------------------ */
 
 test('cadence: a saved «يومي» + the weekly trigger (cadence:\'weekly\') publishes a WEEKLY deck; settings untouched', async () => {

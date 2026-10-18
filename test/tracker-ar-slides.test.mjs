@@ -1,7 +1,10 @@
 // test/tracker-ar-slides.test.mjs — `node --test test/tracker-ar-slides.test.mjs`
 //
 // THE TRACKER SLIDES' LANGUAGE (reportOptions.trackerLang, src/slidespec/build-tracker.js):
-//   • 'en' ignores the translations entirely (today's slides, byte for byte), and a tracker
+//   • 'en' keeps the TASK cell in its original English (taskAr is never read, so it is byte
+//     for byte the file's text) and prints everything else exactly as 'ar' does — the
+//     track / stage labels and owner / entity names in Arabic (2026-10-18 user correction:
+//     «Translation that I provided should be applied in the English version»); a tracker
 //     without translations prints the same in every mode (default 'ar' included);
 //   • 'ar': task / track / milestone print the Arabic, falling back to the English PER CELL;
 //     without ownerAr / organizationAr (none here) the owner and entity cells, and always
@@ -124,23 +127,41 @@ test('trackerLang: ar | en | both; absent or unknown → ar (the default)', () =
   assert.equal(trackerSlideLang('both'), 'both');
 });
 
-test("'en' ignores every translation; an untranslated tracker prints the same in every mode", () => {
+// UPDATED 2026-10-18 (user correction «Translation that I provided should be applied in the
+// English version»): 'en' used to ignore every translation; now it ignores only the TASK's
+// (taskAr) — its task cells stay the file's English byte for byte — and prints the track /
+// stage labels (and owner / entity names) in Arabic exactly like 'ar'.
+test("'en' ignores only the task translation; an untranslated tracker prints the same in every mode", () => {
   const plain = Array.from({ length: 23 }, (_, i) => task({ track: `Track ${Math.floor(i / 6)}`, milestone: `Stage ${Math.floor(i / 3)}`, task: i % 5 ? `Task ${i}` : 'Prepare and sign off the synthetic evidence pack with the partner and the operations team' }));
-  const translated = plain.map((t, i) => ({ ...t, taskAr: arText(i, 5 + (i % 9)), trackAr: `المسار ${t.track.length}`, milestoneAr: 'مرحلة' }));
+  const translated = plain.map((t, i) => ({ ...t, taskAr: arText(i, 5 + (i % 9)), trackAr: `المسار ${t.track.length}`, milestoneAr: 'مرحلة', ownerAr: 'المالك أ', organizationAr: 'لين' }));
   const en = JSON.stringify(slidesOf(plain, 'en'));
-  assert.equal(JSON.stringify(slidesOf(translated, 'en')), en, "'en' never reads taskAr / trackAr / milestoneAr");
   for (const lang of [undefined, 'ar', 'both', 'nope']) assert.equal(JSON.stringify(slidesOf(plain, lang)), en, `untranslated, ${lang}`);
-  // A row whose only content is a translation: nothing to print in 'en', a row elsewhere.
+  // 'en' of the translated tracker = 'ar' of the same tracker without its task translations.
+  const noTaskAr = translated.map((t) => ({ ...t, taskAr: '' }));
+  const enTr = slidesOf(translated, 'en');
+  assert.equal(JSON.stringify(enTr), JSON.stringify(slidesOf(noTaskAr, 'ar')), "'en' = 'ar' with the task cells in English");
+  const cells = enTr.flatMap((s) => grid(tableOf(s)));
+  const taskTexts = cells.map((r) => r[2] && r[2].text).filter(Boolean);
+  assert.deepEqual(taskTexts.slice().sort(), plain.map((t) => t.task).sort(), "'en' task cells: the original English, byte for byte");
+  assert.ok(cells.every((r) => !r[0] || ARABIC.test(r[0].text)), "'en' track labels: Arabic");
+  assert.ok(cells.every((r) => !r[1] || r[1].text === 'مرحلة'), "'en' stage labels: Arabic");
+  assert.ok(cells.every((r) => r[3].text === 'لين' && r[4].text === 'المالك أ'), "'en' entity / owner: Arabic");
+  // A row whose only content is a task translation: nothing to print in 'en', a row elsewhere;
+  // one whose only content is a group / name translation prints in every mode.
   const onlyAr = task({ track: '', milestone: '', task: '', organization: '', owner: '', priority: '', status: '', due: '', taskAr: 'مهمة' });
   assert.deepEqual(slidesOf([onlyAr], 'en'), []);
   assert.equal(slidesOf([onlyAr], 'ar').length, 1);
+  const onlyOwnerAr = { ...onlyAr, taskAr: '', ownerAr: 'المالك' };
+  assert.equal(slidesOf([onlyOwnerAr], 'en').length, 1);
 });
 
 // ---- 'ar' ----------------------------------------------------------------------------------
 
 test("'ar': the Arabic in task / track / milestone, English per cell where none; the rest unchanged", () => {
   const tasks = [
-    task({ track: 'Track A', trackAr: 'المسار أ', milestone: 'Stage 1', milestoneAr: 'المرحلة الأولى', task: 'English one', taskAr: 'مهمة تجريبية أولى', owner: 'Owner A', status: 'Completed', due: '2026-09-01' }),
+    // Stopped, not Completed (UPDATED 2026-10-18): a Completed task no longer prints on the
+    // task slides in any cadence.
+    task({ track: 'Track A', trackAr: 'المسار أ', milestone: 'Stage 1', milestoneAr: 'المرحلة الأولى', task: 'English one', taskAr: 'مهمة تجريبية أولى', owner: 'Owner A', status: 'Stopped', due: '2026-09-01' }),
     task({ track: 'Track A', trackAr: 'المسار أ', milestone: 'Stage 1', milestoneAr: 'المرحلة الأولى', task: 'English two', taskAr: '', status: 'Deleyed' }),
     task({ track: 'Track B', trackAr: '', milestone: 'Stage 2', milestoneAr: '', task: 'English three', taskAr: 'مهمة ثالثة' }),
   ];
@@ -148,13 +169,18 @@ test("'ar': the Arabic in task / track / milestone, English per cell where none;
   const rows = grid(tableOf(s));
   assert.equal(rows.length, 3, 'one table row per task in ar');
   assert.deepEqual([rows[0][0].text, rows[0][0].rowSpan, rows[0][1].text], ['المسار أ', 2, 'المرحلة الأولى']);
-  // Stage order (2026-10-18 rule 2): the Late («Deleyed») task before the Completed one.
+  // Stage order (2026-10-18 rule 2): the Late («Deleyed») task before the Stopped one.
   assert.deepEqual([rows[1][2].text, rows[1][2].align, rows[1][2].rtl], ['مهمة تجريبية أولى', 'right', true]);
   assert.deepEqual([rows[0][2].text, rows[0][2].align, rows[0][2].rtl], ['English two', 'left', false], 'per-cell fallback');
   assert.deepEqual([rows[2][0].text, rows[2][1].text, rows[2][2].text], ['Track B', 'Stage 2', 'مهمة ثالثة']);
-  // Owner, org, priority, status, due: the very cells 'en' prints.
+  // Track, stage, owner, org, priority, status, due: the very cells 'en' prints (2026-10-18:
+  // 'en' differs from 'ar' in the task column only).
   const en = grid(tableOf(slidesOf(tasks, 'en')[0]));
-  rows.forEach((row, r) => assert.deepEqual(row.slice(3), en[r].slice(3), `row ${r} columns 3..7`));
+  rows.forEach((row, r) => {
+    assert.deepEqual(row.slice(3), en[r].slice(3), `row ${r} columns 3..7`);
+    assert.deepEqual(row.slice(0, 2), en[r].slice(0, 2), `row ${r} group columns`);
+  });
+  assert.deepEqual(en.map((r) => r[2].text), ['English two', 'English one', 'English three'], "'en': the English task text");
   // Rows merge only when they print the same label: same English track, different Arabic.
   const split = grid(tableOf(slidesOf([task({ trackAr: 'س' }), task({ trackAr: 'ص' })], 'ar')[0]));
   assert.deepEqual(split.map((r) => r[0] && r[0].text), ['س', 'ص']);
@@ -302,9 +328,11 @@ test('a translation with Latin / digits / brackets is wrapped in RLE … PDF; pu
   assert.equal(shapedTextWidth(`${RLE}مهمة${PDF}`), shapedTextWidth('مهمة'));
   assert.equal(tableOf(s).rowH[1], 1.09, 'a 4-line row');
   assert.equal(fitCell(bare(cut), TR.colW[2], { shaped: true, maxLines: 99 }).lines, 4, 'cut to MAX_BODY_LINES');
-  // 'en' prints the English only — no control character anywhere in its spec.
-  const en = JSON.stringify(slidesOf(tasks, 'en'));
-  assert.ok(!/[\u202A-\u202E]/.test(en));
+  // 'en' prints the task text in English — no control character in any task cell — while
+  // its group labels are the Arabic ones, embedded like 'ar' (2026-10-18).
+  const enRows = grid(tableOf(slidesOf(tasks, 'en')[0]));
+  assert.ok(enRows.every((r) => !/[\u202A-\u202E]/.test(r[2].text)), "'en' task cells carry no control");
+  assert.equal(enRows[0][0].text, `${RLE}مسار (QA)${PDF}`, "'en': track label wrapped like 'ar'");
 });
 
 // ---- pagination polish (translated decks only) --------------------------------------------
@@ -362,12 +390,15 @@ const translatedFixture = () => {
   return m;
 };
 
-test('decks read reportOptions.trackerLang (default ar); en = the English deck', () => {
+// UPDATED 2026-10-18: 'en' = the deck with the TASK translations dropped (its track / stage
+// labels stay Arabic — the user's correction), no longer the wholly untranslated deck.
+test('decks read reportOptions.trackerLang (default ar); en = the deck without task translations', () => {
   const m = translatedFixture();
   const taskTexts = (spec) => spec.filter((s) => s.id.startsWith('tracker')).flatMap((s) => grid(tableOf(s)).map((r) => r[2] && r[2].text)).filter(Boolean);
-  const plain = { ...m, projectTracker: { ...m.projectTracker, tasks: m.projectTracker.tasks.map(({ taskAr, trackAr, milestoneAr, ...rest }) => rest) } };
+  const noTaskAr = { ...m, projectTracker: { ...m.projectTracker, tasks: m.projectTracker.tasks.map(({ taskAr, ...rest }) => rest) } };
   const enSpec = buildSpec({ ...m, reportOptions: { ...(m.reportOptions || {}), trackerLang: 'en' } });
-  assert.deepEqual(enSpec, buildSpec(plain), "single-hospital 'en' = the untranslated deck");
+  assert.deepEqual(enSpec, buildSpec(noTaskAr), "single-hospital 'en' = the deck without task translations");
+  assert.ok(taskTexts(enSpec).every((t) => !ARABIC.test(t)), "'en': English tasks");
   assert.ok(taskTexts(buildSpec(m)).every((t) => ARABIC.test(t)), 'default: Arabic tasks');
   const both = buildSpec({ ...m, reportOptions: { ...(m.reportOptions || {}), trackerLang: 'both' } });
   const bt = taskTexts(both);

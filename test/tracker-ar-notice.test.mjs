@@ -24,6 +24,23 @@ test('nothing to say: English slides, no tracker, no tasks', () => {
   assert.equal(trackerTranslationStatus(null, 'ar'), null);
   assert.equal(trackerTranslationStatus({ tasks: [] }, 'ar'), null);
 });
+// 2026-10-18 user correction: in 'en' only the TASK text stays English — track and stage
+// names still print their Arabic. So 'en' is no longer silent: untranslated track / stage
+// names (never tasks) are reported, and the on-device pass covers them (screen-review.js).
+test("'en': only untranslated track / stage names are reported (the task text stays English)", () => {
+  const t = { tasks: [
+    { id: 'a', task: 'Task A', taskAr: '', track: 'Infra', trackAr: '', milestone: 'Go-live', milestoneAr: 'الإطلاق' },
+    { id: 'b', task: 'Task B', taskAr: '', track: 'Infra', trackAr: '', milestone: 'UAT', milestoneAr: '' },
+  ] };
+  assert.deepEqual(trackerTranslationStatus(t, 'en'), { scope: 'groups', remaining: 2 }); // Infra (once) + UAT
+  t.tasks.forEach((x) => { x.trackAr = 'البنية'; });
+  t.tasks[1].milestoneAr = 'الاختبار';
+  assert.equal(trackerTranslationStatus(t, 'en'), null); // every name has Arabic; tasks never counted
+  assert.equal(STR.tracker.untranslatedGroupsHint(2),
+    '2 من أسماء المسارات والمراحل بدون ترجمة — تظهر بالإنجليزية؛ يمكنك كتابة الترجمة في المحرر');
+  assert.equal(STR.tracker.translateGroupsBtn, 'ترجمة المسارات والمراحل');
+  assert.equal(typeof STR.tracker.translatingGroups, 'string');
+});
 test('the «upload an Arabic Excel» guidance is gone — from the code and from every string', () => {
   assert.equal(components.trackerArabicNotice, undefined);
   for (const k of ['noArabicTitle', 'noArabicBody', 'partialArabic']) assert.equal(STR.tracker[k], undefined, k);

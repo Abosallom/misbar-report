@@ -54,14 +54,14 @@
 //
 // HOSPITAL NAMES. The old "no hospital name on any slide" rule applies to the KAMC report
 // only (CONTRACT §1.13): this deck prints the names the reference prints.
-import { COLORS as C } from '../theme.js?v=v2026-10-18.1';
-import { AR_COUNTRY } from '../model/sendout.js?v=v2026-10-18.1';
-import { HOSPITALS } from '../model/hospital.js?v=v2026-10-18.1';
+import { COLORS as C } from '../theme.js?v=v2026-10-18.2';
+import { AR_COUNTRY } from '../model/sendout.js?v=v2026-10-18.2';
+import { HOSPITALS } from '../model/hospital.js?v=v2026-10-18.2';
 // The project-tracker slides — a leaf module (imports nothing from either spec file), so it
 // is safe to import at top level despite the cycle described below.
-import { buildTrackerSlides, buildTrackerCompletedSlides } from './build-tracker.js?v=v2026-10-18.1';
+import { buildTrackerSlides, buildTrackerCompletedSlides } from './build-tracker.js?v=v2026-10-18.2';
 // Slide ORDER — also a leaf module (no imports at all), equally safe at top level.
-import { orderUnits, slideOrderOf, cadenceOf, unitInCadence } from '../model/slide-order.js?v=v2026-10-18.1';
+import { orderUnits, slideOrderOf, cadenceOf, unitInCadence } from '../model/slide-order.js?v=v2026-10-18.2';
 // DEFAULT_LABELS (the registry) and SGH_TEXT (the reference's SGH sentences, shared with the
 // single-SGH deck so both print one source) come from build-spec.js.
 // CIRCULAR IMPORT, SAFE ONLY AT CALL TIME: build-spec.js imports this file to dispatch
@@ -70,7 +70,7 @@ import { orderUnits, slideOrderOf, cadenceOf, unitInCadence } from '../model/sli
 // inside a function, never at this module's top level (that would be a TDZ ReferenceError)
 // — which is also why the palette below keeps its own literal hexes (the same values as
 // build-spec.js SGH_COLORS) instead of reading them at load time.
-import { DEFAULT_LABELS, SGH_TEXT } from './build-spec.js?v=v2026-10-18.1';
+import { DEFAULT_LABELS, SGH_TEXT } from './build-spec.js?v=v2026-10-18.2';
 
 // ---- palette added by the BOTH reference (not in theme.js) ---------------------------
 const KAMC_C = '#00897B';      // KAMC teal — slices, segments, dots, counts, tags
@@ -956,8 +956,9 @@ export function buildBothSpec(model, { variant = 'internal' } = {}) {
     { key: 'monthly', build: () => [buildMonthly(m)] },
     { key: 'sendout', build: () => (sendoutData ? [buildCountries(m), buildLabs(m)] : []) },
     { key: 'compliance', build: () => [buildCompliance(m)] },
-    // Project tracker: [] without a tracker. Text language = reportOptions.trackerLang and
-    // the cadence (daily: no Completed task), as in build-spec.js.
+    // Project tracker: [] without a tracker (or with no task left that is not Completed —
+    // no cadence prints a Completed task there, 2026-10-18). Text language =
+    // reportOptions.trackerLang, as in build-spec.js.
     { key: 'tracker', build: () => buildTrackerSlides(m.projectTracker, { reportDate: m.reportDate, variant, labels: labelOf(m), lang: m.reportOptions?.trackerLang, cadence: cadenceOf(m) }) },
     // The weekly completed-this-week slide, as in build-spec.js (weekly only, own toggle).
     { key: 'trackerCompleted', build: () => (unitInCadence('trackerCompleted', cadenceOf(m))

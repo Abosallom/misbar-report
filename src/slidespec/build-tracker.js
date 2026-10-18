@@ -16,7 +16,8 @@
 // THE VARIANT CHANGES NOTHING: the tracker is the NUPCO ↔ Lean project plan, so the internal
 // and the NUPCO decks print the same rows (user rule) — `variant` is accepted for call-site
 // parity and ignored, and no slide here is internalOnly.
-// No tracker, or a tracker with no task to show → [] (no slide, no gap in the numbering).
+// No tracker, or a tracker with no task to show → [] (no slide, no gap in the numbering) —
+// and, since 2026-10-18, a tracker whose every task is Completed (see COMPLETED TASKS below).
 //
 // IMPORTS NOTHING FROM build-spec.js: build-spec.js ↔ build-spec-both.js already form an ESM
 // cycle, and both import this file, so it must be a leaf. chrome() is therefore a local copy
@@ -41,8 +42,10 @@
 // English original kept). The task, track and milestone cells print, per `lang`:
 //   · 'ar' (the default; anything unknown reads as 'ar') — the row's Arabic translation
 //     (taskAr / trackAr / milestoneAr), falling back to the English PER CELL where it is '';
-//   · 'en' — the English only: today's slides, byte for byte (nothing below reads an *Ar
-//     field or the Arabic metrics in this mode);
+//   · 'en' — the TASK cell in its original English only, byte for byte (taskAr is never read
+//     in this mode); the track / milestone (المسار / المرحلة) labels print their Arabic like
+//     'ar' — 2026-10-18 user correction: «Translation that I provided should be applied in
+//     the English version» — so 'en' is "the task text in English", not "an English slide";
 //   · 'both' — the Arabic, and under it the English original smaller, grey and LTR. Table
 //     cells take ONE style each in both renderers (a cell has no styled runs), so the two
 //     lines are two cells: a translated task is TWO table rows — the Arabic task cell on the
@@ -56,11 +59,13 @@
 // without a translation; its group labels follow the mode as usual.
 // THE LANGUAGE RULE (2026-10-18 rule 4): a value follows its COLUMN's language, not its
 // own. Status and priority are Arabic columns — always Arabic, in every mode (a status
-// word prints raw only when it is truly unmappable). Owner and entity follow the task
-// column: their Arabic (ownerAr / organizationAr) outside 'en' — Arabic only, also in
-// 'both' (the English line under the Arabic is for task / group cells only) — and the
-// original English in 'en'. Dates never change. An untranslated tracker therefore
-// renders identically in all three modes.
+// word prints raw only when it is truly unmappable). Owner and entity (المسؤول / الجهة)
+// print their Arabic (ownerAr / organizationAr) in EVERY mode — 'en' included (the user's
+// 2026-10-18 correction: the name translations he gave apply to the English version too)
+// and Arabic only in 'both' (the English line under the Arabic is for task / group cells
+// only); a name without a translation prints as written. Dates never change. So the ONLY
+// cell 'en' prints differently from 'ar' is the task, and an untranslated tracker renders
+// identically in all three modes.
 // Arabic TRANSLATIONS are measured with real Cairo metrics (contextual forms, lam-alef, the
 // font's one positive Arabic kern — shapedTextWidth below); every other cell keeps the
 // legacy estimate, so the English / fallback layout never moves.
@@ -71,19 +76,24 @@
 // order (Late → Stopped → In Progress → Not Started → Completed, priority then date); the
 // stages and tracks keep the Portfolio (first-appearance) order. The summary pills are
 // trackerSummary() over the rows SHOWN, so they always add up to the table.
-// CADENCE (reportOptions.cadence): 'daily' prints only the tasks that are not Completed — no
-// Completed row and no «مكتمل» pill at all; 'weekly' (default) prints every task, and the
-// weekly deck adds buildTrackerCompletedSlides (below) as a separate, toggleable unit.
+// COMPLETED TASKS (2026-10-18 user correction, binding): «Completed Tasks should be ONLY
+// mentioned in the Completed During the Week SLIDE and nothing else (even Task Tracker
+// whether Daily or Weekly)». So the «متابعة المهام» slides print only the tasks that are
+// NOT Completed, in BOTH cadences — no Completed row and no «مكتمل» pill; a stage / track
+// whose tasks are all Completed is gone; nothing left → no slide. The weekly deck adds
+// buildTrackerCompletedSlides (below) as a separate, toggleable unit — the one place a
+// Completed task prints, and only one that became Completed during the report week.
+// `cadence` therefore no longer changes these slides (it still gates the weekly unit in the
+// deck builders); it is accepted for call-site parity.
 // NAMES (rule 5/6): the owner (المسؤول) and entity (الجهة) cells print ownerAr /
-// organizationAr outside 'en' (model/tracker-translate.js fills them from the translation
+// organizationAr in every mode (model/tracker-translate.js fills them from the translation
 // memory), several names joined « / », centred, RTL.
-import { COLORS as C } from '../theme.js?v=v2026-10-18.1';
+import { COLORS as C } from '../theme.js?v=v2026-10-18.2';
 // Model leaves (no slidespec imports), so this file stays a leaf of the spec ESM cycle.
 import {
-  effectiveStatus, sortStageTasks, trackerSummary, dailyTasks, completedDuring, priorityKey, STATUS_AR,
-} from '../model/tracker-status.js?v=v2026-10-18.1';
-import { isoToDays } from '../model/delta-baseline.js?v=v2026-10-18.1';
-import { reportCadence } from '../model/slide-order.js?v=v2026-10-18.1';
+  effectiveStatus, sortStageTasks, trackerSummary, openTasks, completedDuring, priorityKey, STATUS_AR,
+} from '../model/tracker-status.js?v=v2026-10-18.2';
+import { isoToDays } from '../model/delta-baseline.js?v=v2026-10-18.2';
 
 // ---- labels (registry keys; build-spec.js DEFAULT_LABELS spreads this object so the
 // labels editor reaches them and an override reaches all three decks) ------------------
@@ -456,23 +466,26 @@ const dirOf = (s) => (ARABIC.test(s) ? { align: 'right', rtl: true } : { align: 
 // no-op where rtl is honoured. Applied AFTER fitCell (line counts are measured on the bare
 // text; shapedUnits ignores the controls anyway) and only to text with Arabic in it that
 // holds something besides Arabic letters and spaces: pure Arabic reads the same in either
-// direction, and the English / fallback cells — and so all of 'en' — never get it.
+// direction, and the English / fallback cells — and so every task cell of 'en' — never get it.
 const NEEDS_EMBED = /[^\s\p{Script=Arabic}]/u;
 const embedRtl = (s) => (ARABIC.test(s) && NEEDS_EMBED.test(s) ? `\u202B${s}\u202C` : s);
 
 // ---- rows ---------------------------------------------------------------------------------
 // The eight on-slide fields. A row whose on-slide fields are ALL empty (a row just added on
 // the website and not filled in yet) prints nothing and is skipped; every other row prints.
-// Outside 'en' a translation alone is something to print too.
+// A translation it would print is something to print too: in 'en' every one but the task's
+// (the task cell is the one 'en' keeps in English).
 const SLIDE_FIELDS = ['track', 'milestone', 'task', 'organization', 'owner', 'priority', 'status', 'due'];
-const SLIDE_FIELDS_AR = [...SLIDE_FIELDS, 'trackAr', 'milestoneAr', 'taskAr', 'organizationAr', 'ownerAr'];
-const isBlankRow = (t, lang) => (lang === 'en' ? SLIDE_FIELDS : SLIDE_FIELDS_AR).every((k) => !clean(t?.[k]));
+const SLIDE_FIELDS_EN = [...SLIDE_FIELDS, 'trackAr', 'milestoneAr', 'organizationAr', 'ownerAr'];
+const SLIDE_FIELDS_AR = [...SLIDE_FIELDS_EN, 'taskAr'];
+const isBlankRow = (t, lang) => (lang === 'en' ? SLIDE_FIELDS_EN : SLIDE_FIELDS_AR).every((k) => !clean(t?.[k]));
 
-// Merge keys: the English identity, plus (outside 'en') the translation — a block merges
-// only rows that print the same label, so each row's label is exactly its own data. The
-// stage grouping of orderStageTasks uses the very same keys, so a stage sorted as one is
-// one merged block.
-const groupKey = (en, ar, lang) => (lang === 'en' ? clean(en) : `${clean(en)}\u0001${clean(ar)}`);
+// Merge keys: the English identity plus the translation — a block merges only rows that
+// print the same label, so each row's label is exactly its own data. Every mode prints the
+// group labels' Arabic (2026-10-18), so the key no longer depends on the mode. The stage
+// grouping of orderStageTasks uses the very same keys, so a stage sorted as one is one
+// merged block.
+const groupKey = (en, ar) => `${clean(en)}\u0001${clean(ar)}`;
 
 /**
  * Rule 2 (user, 2026-10-18): the tasks in display order. Tracks in Portfolio (first-
@@ -481,21 +494,22 @@ const groupKey = (en, ar, lang) => (lang === 'en' ? clean(en) : `${clean(en)}\u0
  * stage in sortStageTasks() order (Late, Stopped, In Progress, Not Started, Completed; see
  * model/tracker-status.js for the keys inside each group).
  */
-function orderStageTasks(tasks, reportDate, lang, portfolio = tasks) {
-  // The group order comes from the WHOLE tracker (`portfolio`), so the daily deck and the
-  // completed-this-week slide — which print a subset — keep the Portfolio order of the
-  // stages too, instead of one that depends on which task happened to be left out.
+function orderStageTasks(tasks, reportDate, portfolio = tasks) {
+  // The group order comes from the WHOLE tracker (`portfolio`), so the task slides (which
+  // leave the Completed tasks out) and the completed-this-week slide — both a subset — keep
+  // the Portfolio order of the stages, instead of one that depends on which task happened
+  // to be left out.
   const tracks = new Map();
   for (const t of portfolio) {
-    const tk = groupKey(t.track, t.trackAr, lang);
+    const tk = groupKey(t.track, t.trackAr);
     if (!tracks.has(tk)) tracks.set(tk, new Map());
     const stages = tracks.get(tk);
-    const mk = groupKey(t.milestone, t.milestoneAr, lang);
+    const mk = groupKey(t.milestone, t.milestoneAr);
     if (!stages.has(mk)) stages.set(mk, []);
   }
   for (const t of tasks) {
-    const tk = groupKey(t.track, t.trackAr, lang);
-    const mk = groupKey(t.milestone, t.milestoneAr, lang);
+    const tk = groupKey(t.track, t.trackAr);
+    const mk = groupKey(t.milestone, t.milestoneAr);
     if (!tracks.has(tk)) tracks.set(tk, new Map());
     const stages = tracks.get(tk);
     if (!stages.has(mk)) stages.set(mk, []);
@@ -505,12 +519,13 @@ function orderStageTasks(tasks, reportDate, lang, portfolio = tasks) {
 }
 
 /**
- * A group (track / milestone) label in `lang`: `main` is the line printed (bold), `sub` the
- * English original under it in 'both' (null when there is no translation, or it says the
- * same). Without a translation — or in 'en' — exactly the English label of before.
+ * A group (track / milestone) label in `lang`: `main` is the line printed (bold) — the
+ * Arabic in every mode, 'en' included (2026-10-18 user correction) — `sub` the English
+ * original under it in 'both' only (null when there is no translation, or it says the
+ * same). Without a translation exactly the English label of before.
  */
 function groupLabel(en, ar, colW, lang) {
-  const a = lang === 'en' ? '' : clean(ar);
+  const a = clean(ar);
   if (!a) return { main: fitCell(en || DASH, colW, { bold: true, maxLines: MAX_LABEL_LINES }), sub: null, ar: false };
   const e = clean(en);
   const main = fitCell(a, colW, { bold: true, maxLines: MAX_LABEL_LINES, shaped: true });
@@ -526,16 +541,17 @@ export function joinNames(v) {
   return clean(v).split('/').map((x) => x.trim()).filter(Boolean).join(' / ');
 }
 /**
- * An owner (المسؤول) / entity (الجهة) cell. Outside 'en' the Arabic (ownerAr /
- * organizationAr — names are never machine-translated; an unmapped part stays Latin inside
- * it), else / without one the English. CENTRED (rule 6), and RTL whenever it holds Arabic so
+ * An owner (المسؤول) / entity (الجهة) cell. The Arabic (ownerAr / organizationAr — names
+ * are never machine-translated; an unmapped part stays Latin inside it) in EVERY mode, 'en'
+ * included (2026-10-18 user correction); without one the English as written. CENTRED (rule
+ * 6), and RTL whenever it holds Arabic so
  * « / » sits between the names in reading order — embedRtl() as well, because QuickLook
  * ignores a table cell's rtl and «ألفا / بيتا» would otherwise come out mirrored there.
  * Translations are measured with the shaped Cairo estimate like every translation here; a
  * name typed in Arabic in the English field keeps the legacy (over-)estimate.
  */
-function nameCell(en, ar, colW, lang, ink) {
-  const a = lang === 'en' ? '' : joinNames(ar);
+function nameCell(en, ar, colW, ink) {
+  const a = joinNames(ar);
   const e = joinNames(en);
   if (!a && !e) return { lines: 1, cell: { text: DASH, color: NA } };
   const f = a ? fitCell(a, colW, { shaped: true }) : fitCell(e, colW);
@@ -571,8 +587,8 @@ function prepareRow(t, reportDate, lang, W, prev) {
   // 'both': the English original on a second table row under the Arabic (see the header).
   const taskSub = lang === 'both' && taskAr && taskEn && taskEn !== taskAr
     ? fitCell(taskEn, W.task, { pt: TR.enSize }) : null;
-  const org = nameCell(t.organization, t.organizationAr, W.org, lang, C.slate600);
-  const owner = nameCell(t.owner, t.ownerAr, W.owner, lang);
+  const org = nameCell(t.organization, t.organizationAr, W.org, C.slate600);
+  const owner = nameCell(t.owner, t.ownerAr, W.owner);
 
   // Rule 1: the EFFECTIVE status (overdue → Late unless Stopped), always Arabic (rule 4).
   const es = effectiveStatus(t, reportDate);
@@ -609,8 +625,8 @@ function prepareRow(t, reportDate, lang, W, prev) {
   };
   const spanLines = Math.max(org.lines, owner.lines, status.lines, priority.lines, dueCell.lines, prevCell ? prevCell.lines : 1);
   return {
-    trackKey: groupKey(t.track, t.trackAr, lang),
-    msKey: groupKey(t.milestone, t.milestoneAr, lang),
+    trackKey: groupKey(t.track, t.trackAr),
+    msKey: groupKey(t.milestone, t.milestoneAr),
     trackLabel: track.main,
     trackSub: track.sub,
     msLabel: milestone.main,
@@ -620,7 +636,8 @@ function prepareRow(t, reportDate, lang, W, prev) {
     taskSub,
     spanLines,
     cells,
-    // Prints at least one translation (never in 'en') — turns on paginate()'s polish.
+    // Prints at least one translation (in 'en' only a group label / name can) — turns on
+    // paginate()'s polish.
     translated: !!(taskAr || track.ar || milestone.ar || org.translated || owner.translated),
   };
 }
@@ -718,9 +735,10 @@ function layoutPage(pr) {
  * A page's band is floor − table top − header − (the «يتبع…» marker when a page follows).
  * Real file (34 rows): 3 slides 12 / 7 / 15, no track split. A task's two 'both' rows
  * always stay on one page (the unit paginated is the task).
- * TRANSLATED decks (a translation prints; never 'en', never an untranslated tracker, which
- * keep exactly the greedy pages above) are paginated by balancePages() instead: bilingual
- * rows are tall, and the greedy fill left e.g. a 'both' deck of 34 tasks with ONE task on
+ * TRANSLATED decks (a translation prints — in 'en' only the task cell stays English, so a
+ * translated track / stage label or owner / entity name turns this on there too; an
+ * untranslated tracker keeps exactly the greedy pages above) are paginated by
+ * balancePages() instead: bilingual rows are tall, and the greedy fill left e.g. a 'both' deck of 34 tasks with ONE task on
  * its last slide, and a block's first task alone at a page bottom in a row stretched to
  * its two-language label.
  */
@@ -960,11 +978,13 @@ function fitChip(label, count, w) {
 
 /**
  * First-slide summary strip (rule 3): «إجمالي المهام N», then one pill per status in a FIXED
- * set — مكتمل (weekly only: the daily deck shows no completed task, so not even a zero),
- * قيد التنفيذ, متأخر, متوقف, لم يبدأ (the old «غير محدد» box) — each shown even at 0 so the
- * boxes do not come and go from one report to the next, «أخرى» only when an unmappable
- * status is on the slide, then «متجاوزة الموعد N» after a wider gap (its red is the legend of
- * the red dates; it counts overdue Late AND overdue Stopped tasks). The counts are
+ * set — قيد التنفيذ, متأخر, متوقف, لم يبدأ (the old «غير محدد» box); NO «مكتمل» pill, in
+ * either cadence: these slides never show a Completed task (2026-10-18 user correction —
+ * Completed tasks live only on «المهام المكتملة خلال الأسبوع»), so not even a zero. Each
+ * is shown even at 0 so the boxes do not come and go from one report to the next; «أخرى»
+ * only when an unmappable status is on the slide, then «متجاوزة الموعد N» after a wider gap
+ * (its red is the legend of the red dates; it counts overdue Late AND overdue Stopped
+ * tasks). «إجمالي المهام» is the tasks the tables print, not the file's. The counts are
  * trackerSummary() over exactly the tasks the tables print — they always match the cells.
  * Right-anchored at the table's right edge, running leftwards.
  * Chips are 1.25in and narrow evenly only when more than nine are needed; the total / overdue
@@ -972,10 +992,10 @@ function fitChip(label, count, w) {
  * strip's spare room and, when there is none, its label is cut with «…» — the text always
  * stays on one line inside its pill (never into the title or the table).
  */
-function strip(summary, L, daily) {
+const STRIP_KEYS = Object.freeze(['inProgress', 'late', 'stopped', 'notStarted']);
+function strip(summary, L) {
   const chips = [{ label: L('trkTotal'), n: summary.total, fill: C.navy, color: C.white, gap: 0 }];
-  const keys = daily ? ['inProgress', 'late', 'stopped', 'notStarted'] : ['completed', 'inProgress', 'late', 'stopped', 'notStarted'];
-  for (const k of keys) {
+  for (const k of STRIP_KEYS) {
     chips.push({ label: STATUS_AR[k], n: summary[k] || 0, ...STATUS_STYLE[k], gap: TR.chipGap });
   }
   if (summary.other) chips.push({ label: OTHER_CHIP_WORD, n: summary.other, ...NEUTRAL_CHIP, gap: TR.chipGap });
@@ -1038,23 +1058,25 @@ const printable = (tracker, lg) => (Array.isArray(tracker?.tasks)
  *        reportDate 'YYYY-MM-DD' — the overdue reference; labels — labelOf(m) or an
  *        overrides map; variant — ignored (the tracker is the same in both decks);
  *        lang — reportOptions.trackerLang: 'ar' (default) | 'en' | 'both' (see the header);
- *        cadence — reportOptions.cadence: 'weekly' (default) | 'daily' (no Completed task)
+ *        cadence — reportOptions.cadence: ignored here since 2026-10-18 (no cadence prints a
+ *        Completed task on these slides; see COMPLETED TASKS in the header)
  * @returns {Array} slides ('tracker', 'tracker-cont-1', …) without page numbers; [] when
- *          there is nothing to show
+ *          there is nothing to show (no tracker, or no task that is not Completed)
  */
 // eslint-disable-next-line no-unused-vars
 export function buildTrackerSlides(tracker, { reportDate, variant, labels, lang, cadence } = {}) {
   const lg = trackerSlideLang(lang);
-  const daily = reportCadence(cadence) === 'daily';
   const all = printable(tracker, lg);
-  // Daily: every Completed task is left out entirely (rows AND pills) — user request.
-  const tasks = daily ? dailyTasks(all, reportDate) : all;
+  // Every Completed task is left out entirely — rows AND pills — in BOTH cadences (2026-10-18
+  // user correction: a Completed task prints only on «المهام المكتملة خلال الأسبوع»). `all`
+  // still fixes the Portfolio order of the stages that remain.
+  const tasks = openTasks(all, reportDate);
   if (!tasks.length) return [];
   const L = labelLookup(labels);
-  const rows = orderStageTasks(tasks, reportDate, lg, all).map((t) => prepareRow(t, reportDate, lg, TASK_COLS.w));
-  const summary = trackerSummary(tasks, reportDate, { excludeCompleted: daily });
+  const rows = orderStageTasks(tasks, reportDate, all).map((t) => prepareRow(t, reportDate, lg, TASK_COLS.w));
+  const summary = trackerSummary(tasks, reportDate, { excludeCompleted: true });
   return tableSlides(rows, TASK_COLS, L, {
-    id: 'tracker', title: L('titleTracker'), titleCont: L('titleTrackerCont'), firstEls: strip(summary, L, daily),
+    id: 'tracker', title: L('titleTracker'), titleCont: L('titleTrackerCont'), firstEls: strip(summary, L),
   });
 }
 
@@ -1130,7 +1152,7 @@ export function buildTrackerCompletedSlides(tracker, log, { reportDate, labels, 
     }];
   }
   const prevOf = new Map(done.map((d) => [d.task, d.previousStatus]));
-  const rows = orderStageTasks(done.map((d) => d.task), reportDate, lg, all)
+  const rows = orderStageTasks(done.map((d) => d.task), reportDate, all)
     .map((t) => prepareRow(t, reportDate, lg, DONE_COLS.w, prevOf.get(t)));
   return tableSlides(rows, DONE_COLS, L, {
     id: 'trackerCompleted', title, titleCont: L('titleTrackerCompletedCont'), firstEls: [subtitle],

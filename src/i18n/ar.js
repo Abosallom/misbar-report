@@ -5,11 +5,11 @@
 // build-spec reads from the very same predicate. A local re-derivation here is exactly
 // how a filename would one day say «مخصص» while the cover says nothing (or the reverse).
 // scope.js is pure (no DOM, no vendor, no ar.js back-edge), so this adds no cycle.
-import { isScoped, normalizeScope } from '../model/scope.js?v=v2026-10-18.1';
+import { isScoped, normalizeScope } from '../model/scope.js?v=v2026-10-18.2';
 // The hospital registry's short codes (KAMC / SGH) are what the file-name tag, the report
 // type pills and the share text print — read from the ONE registry, never re-typed here.
 // hospital.js is pure (no imports at all), so this adds no cycle either.
-import { HOSPITALS } from '../model/hospital.js?v=v2026-10-18.1';
+import { HOSPITALS } from '../model/hospital.js?v=v2026-10-18.2';
 
 /** Join ids for a sentence: Arabic comma, tolerant of a bare string or a missing list. */
 const joinIds = (ids) => [].concat(ids == null ? [] : ids).map(String).join('، ');
@@ -319,9 +319,13 @@ export const STR = {
       title: 'دورية التقرير',
       weekly: 'أسبوعي',
       daily: 'يومي',
+      // 2026-10-18 user correction: «متابعة المهام» shows ONLY the tasks that are not
+      // completed in BOTH cadences; a completed task appears only on the weekly
+      // «المهام المكتملة خلال الأسبوع» slide, and only one completed during the week. The
+      // hints must not say the weekly deck shows «كل المهام» (it did before).
       hint: {
-        weekly: 'التقرير الأسبوعي: كل المهام، وشريحة «المهام المكتملة خلال الأسبوع».',
-        daily: 'التقرير اليومي: نفس التقرير، لكن شرائح المهام تعرض المهام غير المكتملة فقط.',
+        weekly: 'التقرير الأسبوعي: «متابعة المهام» بالمهام غير المكتملة فقط، والمهام التي اكتملت خلال الأسبوع في شريحة «المهام المكتملة خلال الأسبوع».',
+        daily: 'التقرير اليومي: نفس التقرير، «متابعة المهام» بالمهام غير المكتملة فقط، ولا تظهر فيه أي مهمة مكتملة.',
       },
       // On the «المهام المكتملة خلال الأسبوع» chip while the report is daily (the slide is
       // never in a daily deck).
@@ -481,11 +485,14 @@ export const STR = {
     // Arabic translation (2026-10-13, Arabic CONTRACT §3–4): the slide's task language —
     // reportOptions.trackerLang. The English original is always kept (never overwritten):
     // an empty Arabic field shows the English text on the slide.
+    // 2026-10-18 user correction: the option is the language of the TASK TEXT only — in
+    // 'en' the stage, track, owner and entity still print their Arabic translations (the
+    // en hint says so; it used to promise the file's English everywhere).
     langTitle: 'لغة نص المهام في الشريحة',
     lang: { ar: 'عربي', en: 'إنجليزي', both: 'عربي + إنجليزي' },
     langHint: {
       ar: 'تظهر الترجمة العربية؛ والمهمة غير المترجمة تظهر بنصها الإنجليزي.',
-      en: 'يظهر النص الإنجليزي الأصلي كما في الملف.',
+      en: 'يظهر نص المهمة الإنجليزي الأصلي كما في الملف؛ أما المسار والمرحلة والجهة والمسؤول فتظهر بترجمتها العربية.',
       both: 'تظهر الترجمة العربية وتحتها النص الإنجليزي الأصلي بخط أصغر.',
     },
     translated: (n, m) => `${n} من ${m} مهمة مترجمة`,
@@ -497,6 +504,11 @@ export const STR = {
     autoTranslated: (n, m) => `${n} من ${m} مهمة مترجمة تلقائيًا`,
     untranslatedHint: (n) => `${n} مهمة بدون ترجمة — تظهر بالإنجليزية؛ يمكنك كتابة الترجمة في المحرر`,
     translateBtn: 'ترجمة المهام غير المترجمة',
+    // «إنجليزي» (2026-10-18): the task text stays English, but the track / stage names print
+    // their Arabic — the card's line + button cover only those names (never the tasks).
+    untranslatedGroupsHint: (n) => `${n} من أسماء المسارات والمراحل بدون ترجمة — تظهر بالإنجليزية؛ يمكنك كتابة الترجمة في المحرر`,
+    translateGroupsBtn: 'ترجمة المسارات والمراحل',
+    translatingGroups: 'جارٍ ترجمة أسماء المسارات والمراحل على هذا الجهاز…',
     translateBtnHint: 'تتم الترجمة على هذا الجهاز فقط — لا يُرسَل أي نص إلى أي خادم.',
     translating: 'جارٍ ترجمة المهام على هذا الجهاز…',
     translatingProgress: (done, total) => `جارٍ ترجمة المهام على هذا الجهاز… ${done} من ${total}`,
@@ -525,7 +537,8 @@ export const STR = {
     // English name, so a re-upload keeps it). Names are never machine-translated.
     names: {
       title: 'ترجمة الأسماء',
-      hint: 'الأسماء كما تظهر في عمودي «المسؤول» و«الجهة» بالشريحة. اكتب الاسم بالعربية لتعديله، أو امسحه للعودة إلى الترجمة المعتمدة. الاسم بلا ترجمة يظهر كما هو في الملف.',
+      // «بكل لغاتها»: since 2026-10-18 the names print in Arabic in the English slide too.
+      hint: 'الأسماء كما تظهر في عمودي «المسؤول» و«الجهة» بالشريحة، بكل لغاتها (الإنجليزية أيضًا). اكتب الاسم بالعربية لتعديله، أو امسحه للعودة إلى الترجمة المعتمدة. الاسم بلا ترجمة يظهر كما هو في الملف.',
       owners: 'المسؤولون',
       entities: 'الجهات',
       placeholder: 'الاسم بالعربية',

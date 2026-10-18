@@ -11,15 +11,15 @@
 // file's Arabic categories and statuses — the new file has neither, a stable WBS id and
 // an explicit 'Completed' status, so the tracker slides show the document as it is.
 // drafts.js / task-lifecycle.js stay importable (their own tests, old backups), inert.
-import { analyseSendout, hasMaster } from './sendout.js?v=v2026-10-18.1';
+import { analyseSendout, hasMaster } from './sendout.js?v=v2026-10-18.2';
 // The ProjectTracker's shape is owned by the ingest module (a leaf: no imports, no DOM).
 // isProjectTracker = the tag check: a value without TRACKER_FORMAT is the OLD format (an
 // install or a backup from before 2026-10-13) and is never fed on.
-import { isProjectTracker } from '../ingest/task-tracker.js?v=v2026-10-18.1';
+import { isProjectTracker } from '../ingest/task-tracker.js?v=v2026-10-18.2';
 
 // The tracker status history's recording rule (model/tracker-status.js, pure) — used here
 // only to PROJECT the stored history onto a document that is not saved yet (below).
-import { recordStatusLog } from './tracker-status.js?v=v2026-10-18.1';
+import { recordStatusLog } from './tracker-status.js?v=v2026-10-18.2';
 
 export { isProjectTracker };
 

@@ -190,10 +190,13 @@ test('trackerTaskText: ar = Arabic else English per row; en = English; both = Ar
   assert.deepEqual(trackerTaskText(null, 'ar'), { primary: '', secondary: '' });
 });
 
+// UPDATED 2026-10-18: 'en' headings are the Arabic too (they were the English pair) — the
+// deck's 'en' group labels print the stage / track translations (user correction).
 test('trackerGroupLabel: English without a language (display only — trackerGroupKey groups); Arabic per part with English fallback', () => {
   const [one, , three, four] = tracker().tasks;
   assert.equal(trackerGroupLabel(one), 'Track One › Stage A', 'unchanged default');
-  assert.equal(trackerGroupLabel(one, 'en'), 'Track One › Stage A');
+  assert.equal(trackerGroupLabel(one, 'en'), 'المسار الأول › المرحلة أ', "'en': the deck's Arabic group labels");
+  assert.equal(trackerGroupLabel(three, 'en'), 'المسار الأول › Stage B');
   assert.equal(trackerGroupLabel(one, 'ar'), 'المسار الأول › المرحلة أ');
   assert.equal(trackerGroupLabel(one, 'both'), 'المسار الأول › المرحلة أ');
   assert.equal(trackerGroupLabel(three, 'ar'), 'المسار الأول › Stage B', 'milestone has no Arabic → English');
@@ -201,18 +204,20 @@ test('trackerGroupLabel: English without a language (display only — trackerGro
   assert.equal(trackerGroupLabel({}, 'ar'), `${STR.tracker.noTrack} › ${STR.tracker.noMilestone}`);
 });
 
-test('trackerGroupKey: the slide\'s merge rule — English pair in \'en\', English + Arabic pair otherwise', () => {
+// UPDATED 2026-10-18: one rule for every language — 'en' used to ignore the Arabic pair; its
+// group labels now print the Arabic, so a renamed Arabic name splits the block there too.
+test('trackerGroupKey: the slide\'s merge rule — English + Arabic pair in every language', () => {
   const [one, two, three, four] = tracker().tasks;
-  // 'en': the Arabic is ignored, one/two/three's track and one/two's milestone match.
   assert.equal(trackerGroupKey(one, 'en'), trackerGroupKey(two, 'en'));
   assert.notEqual(trackerGroupKey(two, 'en'), trackerGroupKey(three, 'en'), 'milestone differs');
+  for (const l of ['ar', 'both']) assert.equal(trackerGroupKey(one, 'en'), trackerGroupKey(one, l), `'en' = ${l}`);
   // 'ar' / 'both': same English AND same Arabic → one group.
   for (const l of ['ar', 'both']) assert.equal(trackerGroupKey(one, l), trackerGroupKey(two, l), l);
   // The Arabic name renamed on ONE task splits the group, exactly as the slide's blocks split
   // (build-tracker trackKey / msKey) — not one heading named from the first task.
   const renamed = { ...two, trackAr: 'اسم آخر' };
   assert.notEqual(trackerGroupKey(one, 'ar'), trackerGroupKey(renamed, 'ar'));
-  assert.equal(trackerGroupKey(one, 'en'), trackerGroupKey(renamed, 'en'), '\'en\' still one group');
+  assert.notEqual(trackerGroupKey(one, 'en'), trackerGroupKey(renamed, 'en'), '\'en\' splits too');
   const halfMs = { ...two, milestoneAr: '' };
   assert.notEqual(trackerGroupKey(one, 'both'), trackerGroupKey(halfMs, 'both'));
   // Whitespace runs collapse as on the slide; a missing language reads as the default ('ar').
