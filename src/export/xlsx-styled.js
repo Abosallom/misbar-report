@@ -17,11 +17,11 @@
 //   0 default (General, Calibri)
 //   1 body font (Aptos Narrow 11), General, wrap+vcenter        — header A..O
 //   2 bold white Aptos, navy fill FF1F4E78, center+vcenter+wrap — header P..U
-//   3 body font, numFmt 165 (m/d/yyyy)                          — date data
+//   3 body font, numFmt 165 (dd-mmm-yyyy)                       — date data
 //   4 body font, General                                        — general data
 //   5 body font, numFmt 166 (0)                                 — integer data
 //   6 body font, General, wrap+vtop                             — Test name data
-//   7 body font, numFmt 167 (m/d/yyyy h:mm)                     — datetime data
+//   7 body font, numFmt 167 (dd-mmm-yyyy h:mm)                  — datetime data
 //   8 bold white Aptos, navy fill, center — General             — navy data (P,Q,T,U)
 //   9 bold white Aptos, navy fill, center — numFmt 165          — navy date (R)
 //  10 bold white Aptos, navy fill, center — numFmt 166          — navy int  (S)
@@ -212,9 +212,11 @@ function stylesXml() {
   return `${XML_DECL}<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">`
     + '<numFmts count="4">'
     + '<numFmt numFmtId="164" formatCode="General"/>'
-    + '<numFmt numFmtId="165" formatCode="m/d/yyyy"/>'
+    // Dates as 18-Nov-2026 (owner, 2026-11-18: "18-Nov-2026 with all site", for the lab files too: a form no lab reads the
+    // wrong way round; the reference had m/d/yyyy). [$-409] keeps the month in English whatever the lab's Excel language.
+    + '<numFmt numFmtId="165" formatCode="[$-409]dd\\-mmm\\-yyyy"/>'
     + '<numFmt numFmtId="166" formatCode="0"/>'
-    + '<numFmt numFmtId="167" formatCode="m/d/yyyy\\ h:mm"/>'
+    + '<numFmt numFmtId="167" formatCode="[$-409]dd\\-mmm\\-yyyy\\ h:mm"/>'
     + '</numFmts>'
     + '<fonts count="6">'
     + '<font><sz val="11"/><color theme="1"/><name val="Calibri"/><family val="2"/></font>'

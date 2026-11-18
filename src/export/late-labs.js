@@ -84,10 +84,11 @@ export const LATE_LAB_HEADERS = Object.freeze([
 // wrote them); when re-read by SheetJS they yield the wch char-widths the prior
 // export used (17.5 → 16.67, etc.), so the columns render identically to the
 // reference. DOB (index 9) has no reference width: 12.5 is this sheet's own width
-// for a short-header column ('Lonic code'), and fits the m/d/yyyy date it holds.
+// for a short-header column ('Lonic code'), and fits the 18-Nov-2026 date it holds. Due Date (index 17, R) is 13, wider
+// than the reference's 10.51, since its bold 18-Nov-2026 (dates as dd-mmm-yyyy since 2026-11-18) would show as ####.
 const COL_WIDTH = Object.freeze([
   17.5, 22.5, 24.51, 26.5, 14.51, 19.51, 12.5, 55, 13.5, 12.5, 30.51,
-  13.5, 20.51, 20.51, 25.51, 27.5, 30.51, 10.51, 14.51, 9, 22.5,
+  13.5, 20.51, 20.51, 25.51, 27.5, 30.51, 13, 14.51, 9, 22.5,
 ]);
 
 const DUE_SOON_FLAG = '⚠ DUE ≤24H';

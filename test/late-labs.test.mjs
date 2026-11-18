@@ -231,8 +231,10 @@ test('reference styling — styles.xml + sheet1.xml reproduce the navy computed 
   for (const id of ['165', '166', '167']) {
     assert.ok(styles.includes(`numFmtId="${id}"`), `numFmt ${id} present`);
   }
-  assert.ok(styles.includes('formatCode="m/d/yyyy"'), 'numFmt 165 = m/d/yyyy');
-  assert.ok(styles.includes('m/d/yyyy\\ h:mm'), 'numFmt 167 = datetime');
+  // Dates as 18-Nov-2026 since 2026-11-18 (owner: "18-Nov-2026 with all site"); English months whatever Excel's language.
+  assert.ok(styles.includes('formatCode="[$-409]dd\\-mmm\\-yyyy"'), 'numFmt 165 = dd-mmm-yyyy');
+  assert.ok(styles.includes('[$-409]dd\\-mmm\\-yyyy\\ h:mm'), 'numFmt 167 = datetime');
+  assert.ok(!styles.includes('m/d/yyyy'), 'no month-first date left');
 
   // Every cell below is located BY HEADER NAME. DOB was inserted at J in 2026-09 and
   // moved every letter after it; the old letter-based checks did not all FAIL on
@@ -466,7 +468,7 @@ test('PII value guard — no patient/staff value from the raw CSV appears in any
   // every other patient/staff column, is still a leak.
   // Without this exclusion the guard would not have FAILED — it would have kept
   // passing by accident: it compares the raw text '1985-03-12 00:00:00' against the
-  // re-read cell, which is a date serial / 'm/d/yyyy', and the two never match. A
+  // re-read cell, which is a date serial / a formatted date, and the two never match. A
   // guard that passes for the wrong reason is worse than none, so it is explicit.
   const EXPORTED_ON_PURPOSE = new Set(['DOB']);
   const piiCols = headers.filter((h) => !EXPORTED_ON_PURPOSE.has(h.trim())
